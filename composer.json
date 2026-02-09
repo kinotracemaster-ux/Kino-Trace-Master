@@ -1,0 +1,15 @@
+{
+    "name": "kino/trace",
+    "description": "Kino Trace Application",
+    "type": "project",
+    "require": {
+        "php": "7.4",
+        "setasign/fpdi-tcpdf": "^2.3"
+    },
+    "authors": [
+        {
+            "name": "Kino",
+            "email": "info@kino.com"
+        }
+    ]
+}

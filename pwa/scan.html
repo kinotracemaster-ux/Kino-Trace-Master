@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Escanear Código</title>
+<link rel="manifest" href="manifest.json">
+<script>
+// Registrar el service worker para funcionamiento offline
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js');
+  });
+}
+</script>
+<style>
+.container { max-width: 400px; margin: 2rem auto; padding: 1rem; text-align: center; }
+input { width: 100%; padding: 1rem; margin-bottom: 1rem; border: 1px solid #e5e7eb; border-radius: 8px; }
+button { padding: 0.5rem 1rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; }
+button:hover { background: #1d4ed8; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Escanear Código</h1>
+    <p>Utilice el lector de QR/código de barras de su dispositivo para capturar códigos. Para este ejemplo, ingrese el código manualmente.</p>
+    <input type="text" id="scanInput" placeholder="Ingrese código...">
+    <button onclick="submitCode()">Enviar</button>
+    <p id="message"></p>
+    <p><a href="../modules/trazabilidad/dashboard.php">← Volver</a></p>
+</div>
+<script>
+function submitCode() {
+    const code = document.getElementById('scanInput').value.trim();
+    const messageEl = document.getElementById('message');
+    if (code) {
+        messageEl.textContent = 'Código capturado: ' + code;
+    } else {
+        messageEl.textContent = 'Debe introducir un código.';
+    }
+}
+</script>
+</body>
+</html>

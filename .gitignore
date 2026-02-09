@@ -1,0 +1,29 @@
+# Dependencias
+/vendor/
+
+# Variables de entorno locales
+.env
+
+# Base de datos SQLite (se crea en producción)
+*.db
+central.db
+
+# Datos de clientes (se crean en producción)
+/clients/
+
+# Archivos subidos
+/uploads/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
