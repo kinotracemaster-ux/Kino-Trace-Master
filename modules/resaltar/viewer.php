@@ -229,14 +229,14 @@ $docIdForOcr = $documentId; // For OCR fallback
         /* Verde gris (Hits Manuales) - Visible en impresión B/N */
         .highlight-hit {
             background-color: rgba(85, 140, 45, 0.70) !important;
-            border: 2px solid #365e10;
+            border: none;
             padding: 2px 0;
         }
 
         /* Verde gris suave (Contexto Automático) */
         .highlight-context {
             background-color: rgba(85, 140, 45, 0.70) !important;
-            border: 2px solid #365e10;
+            border: none;
             padding: 2px 0;
         }
 
@@ -746,12 +746,12 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                     // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
                     if (ocrResult.success && ocrResult.match_count > 0) {
-                        
+
                         // Añadir términos encontrados al set de encontrados
                         if (ocrResult.matches && ocrResult.matches.length > 0) {
                             ocrResult.matches.forEach(m => {
                                 // Normalizar para el set (aunque el servidor ya lo hizo)
-                                foundTermsSet.add(m.term); 
+                                foundTermsSet.add(m.term);
                             });
                         }
 
