@@ -28,26 +28,37 @@ if (!file_exists(CLIENTS_DIR)) {
     mkdir(CLIENTS_DIR, 0777, true);
 }
 
-// AUTO-INICIALIZACIÓN: Copiar bases de datos desde database_initial/ si no existen
-// Esto permite que Railway funcione sin ejecutar scripts manuales
-if (!file_exists(CENTRAL_DB)) {
-    $initialCentralDb = BASE_DIR . '/database_initial/central.db';
-    if (file_exists($initialCentralDb)) {
-        copy($initialCentralDb, CENTRAL_DB);
-        chmod(CENTRAL_DB, 0666);
+// AUTO-INICIALIZACIÓN: Copiar estructura completa desde database_initial/
+// Esto permite que Railway funcione deployando no solo central.db sino también
+// las carpetas de clientes (ej: kino/kino.db)
+
+/**
+ * Copia recursiva de archivos y directorios
+ */
+function recursive_copy($src, $dst)
+{
+    $dir = opendir($src);
+    @mkdir($dst, 0777, true);
+    while (false !== ($file = readdir($dir))) {
+        if (($file != '.') && ($file != '..')) {
+            if (is_dir($src . '/' . $file)) {
+                recursive_copy($src . '/' . $file, $dst . '/' . $file);
+            } else {
+                // Solo copiar si no existe o si el destino tiene tamaño 0
+                if (!file_exists($dst . '/' . $file) || filesize($dst . '/' . $file) == 0) {
+                    copy($src . '/' . $file, $dst . '/' . $file);
+                    chmod($dst . '/' . $file, 0666);
+                }
+            }
+        }
     }
+    closedir($dir);
 }
 
-// También copiar logs.db si está en database_initial/
-$logsDir = CLIENTS_DIR . '/logs';
-$targetLogsDb = $logsDir . '/logs.db';
-$initialLogsDb = BASE_DIR . '/database_initial/logs.db';
-if (!file_exists($targetLogsDb) && file_exists($initialLogsDb)) {
-    if (!is_dir($logsDir)) {
-        mkdir($logsDir, 0777, true);
-    }
-    copy($initialLogsDb, $targetLogsDb);
-    chmod($targetLogsDb, 0666);
+// Ejecutar copia recursiva si existe el directorio origen
+$initialDir = BASE_DIR . '/database_initial';
+if (is_dir($initialDir)) {
+    recursive_copy($initialDir, CLIENTS_DIR);
 }
 
 // Conectar a la base de datos central (SQLite)

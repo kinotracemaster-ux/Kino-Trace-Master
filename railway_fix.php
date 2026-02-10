@@ -116,60 +116,75 @@ set_time_limit(300);
         echo "Usuario: " . (function_exists('posix_getpwuid') ? posix_getpwuid(posix_geteuid())['name'] : 'N/A') . "\n";
         echo "</pre>";
 
+        // Función recursiva para copiar directorios
+        function recursive_copy($src, $dst)
+        {
+            $dir = opendir($src);
+            if (!is_dir($dst))
+                mkdir($dst, 0777, true);
+
+            $status = true;
+            while (false !== ($file = readdir($dir))) {
+                if (($file != '.') && ($file != '..')) {
+                    if (is_dir($src . '/' . $file)) {
+                        if (!recursive_copy($src . '/' . $file, $dst . '/' . $file))
+                            $status = false;
+                    } else {
+                        if (!copy($src . '/' . $file, $dst . '/' . $file)) {
+                            $status = false;
+                            echo "<span class='error'>❌ Falló copiar: $file</span>\n";
+                        } else {
+                            chmod($dst . '/' . $file, 0666);
+                            echo "<span class='success'>✅ Copiado: $file</span>\n";
+                        }
+                    }
+                }
+            }
+            closedir($dir);
+            return $status;
+        }
+
         if (isset($_POST['action'])) {
 
             if ($_POST['action'] === 'fix') {
                 echo "<h2>🔧 REPARANDO...</h2>";
                 echo "<pre>";
 
-                // 1. Crear directorio
-                if (!is_dir($clientsDir)) {
-                    if (mkdir($clientsDir, 0777, true)) {
-                        echo "<span class='success'>✅ Directorio clients/ creado</span>\n";
-                    } else {
-                        echo "<span class='error'>❌ Error creando clients/</span>\n";
-                    }
+                // 1. Verificar fuente global
+                $sourceDir = $baseDir . '/database_initial';
+                if (!is_dir($sourceDir)) {
+                    echo "<span class='error'>❌ ERROR CRÍTICO: Directorio database_initial/ NO EXISTE</span>\n";
                 } else {
-                    echo "<span class='info'>ℹ️  Directorio clients/ ya existe</span>\n";
-                }
+                    echo "<span class='success'>✅ Directorio fuente encontrado</span>\n";
+                    echo "   Copiando recursivamente...\n\n";
 
-                // 2. Verificar archivo fuente
-                if (!file_exists($sourceDbCentral)) {
-                    echo "<span class='error'>❌ ERROR CRÍTICO: database_initial/central.db NO EXISTE</span>\n";
-                    echo "<span class='warning'>⚠️  El archivo NO se incluyó en el repositorio</span>\n";
-                } else {
-                    echo "<span class='success'>✅ Archivo fuente encontrado (" . number_format(filesize($sourceDbCentral)) . " bytes)</span>\n";
+                    // 2. Copia recursiva
+                    if (recursive_copy($sourceDir, $clientsDir)) {
+                        echo "\n<span class='success'>✨ Estructura copiada exitosamente</span>\n";
 
-                    // 3. Copiar base de datos
-                    if (copy($sourceDbCentral, $targetDbCentral)) {
-                        chmod($targetDbCentral, 0666);
-                        echo "<span class='success'>✅ Base de datos copiada exitosamente</span>\n";
-                        echo "   Tamaño: " . number_format(filesize($targetDbCentral)) . " bytes\n";
-
-                        // 4. Verificar contenido
+                        // 3. Verificar central.db
                         try {
-                            $pdo = new PDO('sqlite:' . $targetDbCentral);
-                            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                            if (file_exists($targetDbCentral)) {
+                                $pdo = new PDO('sqlite:' . $targetDbCentral);
+                                $stmt = $pdo->query('SELECT COUNT(*) as total FROM control_clientes');
+                                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                                echo "   Clientes en central: " . $result['total'] . "\n";
 
-                            $stmt = $pdo->query('SELECT COUNT(*) as total FROM control_clientes');
-                            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                            echo "<span class='success'>✅ Base de datos verificada</span>\n";
-                            echo "   Clientes registrados: " . $result['total'] . "\n";
-
-                            if ($result['total'] > 0) {
-                                echo "\n<span class='success'>🎉 REPARACIÓN EXITOSA</span>\n";
-                            } else {
-                                echo "\n<span class='warning'>⚠️  Base de datos sin clientes</span>\n";
+                                if ($result['total'] > 0) {
+                                    echo "\n<span class='success'>🎉 REPARACIÓN EXITOSA</span>\n";
+                                } else {
+                                    echo "\n<span class='warning'>⚠️  Base central sin clientes</span>\n";
+                                }
                             }
-
                         } catch (PDOException $e) {
-                            echo "<span class='error'>❌ Error verificando BD: {$e->getMessage()}</span>\n";
+                            echo "<span class='error'>❌ Error veificando BD: {$e->getMessage()}</span>\n";
                         }
+
                     } else {
-                        echo "<span class='error'>❌ Error copiando la base de datos</span>\n";
+                        echo "\n<span class='error'>❌ Hubo errores durante la copia</span>\n";
                     }
                 }
+
 
                 echo "</pre>";
                 echo "<p><a href='railway_fix.php' class='btn'>🔄 Volver a Diagnosticar</a></p>";
