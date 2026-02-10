@@ -262,31 +262,35 @@ set_time_limit(300);
                         }
 
                         // Copiar central.db
-                        echo "\n[3/5] Copiando central.db...\n";
-                        if (file_exists($targetDbCentral)) {
-                            echo "  ⏭ central.db ya existe en el volumen (no sobrescribir)\n";
-                        } elseif (file_exists($sourceDbCentral)) {
-                            if (copy($sourceDbCentral, $targetDbCentral)) {
-                                chmod($targetDbCentral, 0666);
-                                echo "  ✅ central.db copiado exitosamente\n";
-                                echo "     Tamaño: " . number_format(filesize($targetDbCentral)) . " bytes\n";
-                            } else {
-                                echo "  ❌ Error copiando central.db\n";
+                        // Función para copia recursiva
+                        function recursive_copy($src, $dst)
+                        {
+                            $dir = opendir($src);
+                            @mkdir($dst, 0777, true);
+                            while (false !== ($file = readdir($dir))) {
+                                if (($file != '.') && ($file != '..')) {
+                                    if (is_dir($src . '/' . $file)) {
+                                        recursive_copy($src . '/' . $file, $dst . '/' . $file);
+                                    } else {
+                                        if (!file_exists($dst . '/' . $file)) {
+                                            copy($src . '/' . $file, $dst . '/' . $file);
+                                            chmod($dst . '/' . $file, 0666);
+                                            echo "  ✅ Copiado: $file\n";
+                                        } else {
+                                            echo "  ⏭ Ya existe: $file (saltado)\n";
+                                        }
+                                    }
+                                }
                             }
+                            closedir($dir);
                         }
 
-                        // Copiar logs.db
-                        echo "\n[4/5] Copiando logs.db...\n";
-                        if (file_exists($targetDbLogs)) {
-                            echo "  ⏭ logs.db ya existe en el volumen (no sobrescribir)\n";
-                        } elseif (file_exists($sourceDbLogs)) {
-                            if (copy($sourceDbLogs, $targetDbLogs)) {
-                                chmod($targetDbLogs, 0666);
-                                echo "  ✅ logs.db copiado exitosamente\n";
-                                echo "     Tamaño: " . number_format(filesize($targetDbLogs)) . " bytes\n";
-                            } else {
-                                echo "  ❌ Error copiando logs.db\n";
-                            }
+                        echo "\n[3/5] Sincronizando datos iniciales...\n";
+                        if (is_dir($baseDir . '/database_initial')) {
+                            recursive_copy($baseDir . '/database_initial', $clientsDir);
+                            echo "  ✅ Sincronización completada.\n";
+                        } else {
+                            echo "  ❌ ERROR: No existe directorio database_initial\n";
                         }
 
                         // Verificar permisos
