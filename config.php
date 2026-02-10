@@ -28,6 +28,28 @@ if (!file_exists(CLIENTS_DIR)) {
     mkdir(CLIENTS_DIR, 0777, true);
 }
 
+// AUTO-INICIALIZACIÓN: Copiar bases de datos desde database_initial/ si no existen
+// Esto permite que Railway funcione sin ejecutar scripts manuales
+if (!file_exists(CENTRAL_DB)) {
+    $initialCentralDb = BASE_DIR . '/database_initial/central.db';
+    if (file_exists($initialCentralDb)) {
+        copy($initialCentralDb, CENTRAL_DB);
+        chmod(CENTRAL_DB, 0666);
+    }
+}
+
+// También copiar logs.db si está en database_initial/
+$logsDir = CLIENTS_DIR . '/logs';
+$targetLogsDb = $logsDir . '/logs.db';
+$initialLogsDb = BASE_DIR . '/database_initial/logs.db';
+if (!file_exists($targetLogsDb) && file_exists($initialLogsDb)) {
+    if (!is_dir($logsDir)) {
+        mkdir($logsDir, 0777, true);
+    }
+    copy($initialLogsDb, $targetLogsDb);
+    chmod($targetLogsDb, 0666);
+}
+
 // Conectar a la base de datos central (SQLite)
 try {
     $centralDsn = 'sqlite:' . CENTRAL_DB;
