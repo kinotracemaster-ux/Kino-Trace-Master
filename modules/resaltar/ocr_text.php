@@ -28,6 +28,8 @@ if (!isset($_SESSION['client_code'])) {
 }
 
 $clientCode = $_SESSION['client_code'];
+// LIBERAR LOCK DE SESIÓN: Permitir peticiones concurrentes (OCR paralelo)
+session_write_close();
 
 try {
     $documentId = isset($_GET['doc']) ? (int) $_GET['doc'] : 0;
