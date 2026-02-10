@@ -767,16 +767,15 @@ $docIdForOcr = $documentId; // For OCR fallback
                         // Ordenar para mostrar bonito
                         pagesWithMatches.sort((a, b) => a - b);
 
-                        // RESALTAR INMEDIATAMENTE esta página (con resultados ya cacheados)
+                        // RESALTAR INMEDIATAMENTE esta página (SIN reconstruir canvas)
                         const wrapper = document.getElementById('page-' + i);
                         if (wrapper && wrapper.dataset.rendered !== 'ocr-complete') {
-                            // Solo re-renderizar si la página ya tiene canvas (fue lazy-loaded)
                             if (wrapper.querySelector('canvas')) {
-                                await renderPage(i, wrapper);
+                                // Página ya renderizada: solo agregar highlights encima (ligero)
+                                await applyHighlightsOnly(wrapper, i);
                                 wrapper.dataset.rendered = 'ocr-complete';
                             }
-                            // Si NO tiene canvas, NO marcar como rendered
-                            // El IntersectionObserver se encargará de renderizarla usando ocrResultsCache
+                            // Si NO tiene canvas, el IntersectionObserver renderizará con highlights via cache
                         }
 
                         // Scroll a primera coincidencia
@@ -843,7 +842,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                 wrapper.style.width = viewport.width + 'px';
                 wrapper.style.height = viewport.height + 'px';
 
-                // 1. Canvas
+                // 1. Canvas — renderizar PDF visualmente
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.height = viewport.height;
@@ -852,75 +851,24 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                 await page.render({ canvasContext: ctx, viewport: viewport }).promise;
 
-                // 2. Capa de Texto
-                const textDiv = document.createElement('div');
-                textDiv.className = 'text-layer';
-                textDiv.style.width = viewport.width + 'px';
-                textDiv.style.height = viewport.height + 'px';
-                wrapper.appendChild(textDiv);
-
-                const textContent = await page.getTextContent();
-                const hasText = textContent.items && textContent.items.length > 0;
-
                 // MARCAR COMO RENDERIZADO (Vital para el CSS de impresión)
                 wrapper.setAttribute('data-rendered', 'true');
                 wrapper.style.minHeight = "auto";
                 wrapper.style.color = "inherit";
 
-                if (false) { // FORZAR OCR: Siempre usar OCR, nunca texto embebido
-                    // ✅ CAMINO 1: PDF tiene texto embebido - usar Mark.js (LÓGICA ORIGINAL)
-                    await pdfjsLib.renderTextLayer({
-                        textContent: textContent,
-                        container: textDiv,
-                        viewport: viewport,
-                        textDivs: []
-                    }).promise;
+                // 2. Aplicar highlights OCR si hay términos
+                const allTerms = [...hits, ...context];
+                if (allTerms.length > 0) {
+                    await applyOcrHighlight(wrapper, null, pageNum, allTerms);
 
-                    // 3. Resaltado (Mark.js)
-                    const instance = new Mark(textDiv);
-                    const opts = {
-                        element: "mark",
-                        accuracy: "partially",
-                        separateWordSearch: false,
-                        done: () => {
-                            // 4. Auto-scroll al primer resaltado encontrado (Mark.js) - Dentro de callback para asegurar DOM
-                            if (!hasScrollToMark) {
-                                const firstMark = textDiv.querySelector('mark');
-                                if (firstMark) {
-                                    hasScrollToMark = true;
-                                    // Delay aumentado para dar tiempo a renderizado y evitar conflicto con scroll de página
-                                    setTimeout(() => {
-                                        firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }, 500);
-                                }
-                            }
-                        }
-                    };
-
-                    // Aplicar estilos diferenciados si es strict mode, o genéricos si no
-                    if (isStrictMode) {
-                        if (hits.length) instance.mark(hits, { ...opts, className: "highlight-hit" });
-                        if (context.length) instance.mark(context, { ...opts, className: "highlight-context" });
-                    } else {
-                        const all = [...hits, ...context];
-                        if (all.length) instance.mark(all, { ...opts, className: "highlight-hit" });
-                    }
-                } else {
-                    // ✅ CAMINO 2: PDF escaneado (sin texto) - usar fallback OCR
-                    const allTerms = [...hits, ...context];
-                    if (allTerms.length > 0) {
-                        console.log(`Página ${pageNum}: Sin texto embebido, usando fallback OCR...`);
-                        await applyOcrHighlight(wrapper, textDiv, pageNum, allTerms);
-
-                        // También verificar scroll después de OCR
-                        if (!hasScrollToMark) {
-                            const firstMark = wrapper.querySelector('.ocr-highlight');
-                            if (firstMark) {
-                                hasScrollToMark = true;
-                                setTimeout(() => {
-                                    firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                }, 500);
-                            }
+                    // Auto-scroll al primer resaltado encontrado
+                    if (!hasScrollToMark) {
+                        const firstMark = wrapper.querySelector('.ocr-highlight');
+                        if (firstMark) {
+                            hasScrollToMark = true;
+                            setTimeout(() => {
+                                firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 500);
                         }
                     }
                 }
@@ -933,7 +881,22 @@ $docIdForOcr = $documentId; // For OCR fallback
             }
         }
 
-        // Fallback OCR: solo se usa para documentos escaneados (sin texto embebido)
+        // FUNCIÓN LIGERA: Aplica highlights sobre canvas existente sin reconstruir la página
+        // Usada por el radar cuando la página ya fue renderizada por el IntersectionObserver
+        async function applyHighlightsOnly(wrapper, pageNum) {
+            // Remover highlights previos si existen
+            const oldOverlay = wrapper.querySelector('.ocr-highlights-overlay');
+            if (oldOverlay) oldOverlay.remove();
+            const oldBadge = wrapper.querySelector('[style*="z-index: 100"]');
+            if (oldBadge) oldBadge.remove();
+
+            const allTerms = [...hits, ...context];
+            if (allTerms.length > 0) {
+                await applyOcrHighlight(wrapper, null, pageNum, allTerms);
+            }
+        }
+
+        // OCR Highlight: dibuja rectángulos de resaltado usando datos OCR (cache o servidor)
         async function applyOcrHighlight(wrapper, textDiv, pageNum, allTerms) {
             try {
                 // OPTIMIZACIÓN: Usar cache si existe para evitar petición duplicada
@@ -1097,62 +1060,30 @@ $docIdForOcr = $documentId; // For OCR fallback
                         background: 'white'
                     }).promise;
 
-                    // Obtener contenido de texto para resaltados
-                    const textContent = await page.getTextContent();
-                    const hasEmbeddedText = textContent.items && textContent.items.length > 0;
                     const allTerms = [...hits, ...context];
 
-                    // Dibujar resaltados sobre el canvas
+                    // Dibujar resaltados OCR sobre el canvas de impresión
                     if (allTerms.length > 0) {
                         ctx.globalAlpha = 0.3; // Más transparente para impresión
                         ctx.fillStyle = '#558c2d'; // Verde amarillento
-                        // No stroke, no border
 
-                        if (false) { // FORZAR OCR: Siempre usar OCR para impresión
-                            // CAMINO 1: PDF con texto embebido - usar coordenadas de PDF.js
-                            for (const item of textContent.items) {
-                                const itemText = item.str.toLowerCase();
-                                for (const term of allTerms) {
-                                    if (term && itemText.includes(term.toLowerCase())) {
-                                        // Calcular posición usando la matriz de transformación
-                                        const tx = item.transform;
-                                        const x = tx[4] * printScale;
-                                        const y = viewport.height - (tx[5] * printScale);
-                                        const width = (item.width || 50) * printScale;
-                                        const height = (item.height || 12) * printScale;
+                        try {
+                            const docId = <?= $docIdForOcr ?>;
+                            const termsStr = encodeURIComponent(allTerms.join(','));
+                            const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${pageNum}&terms=${termsStr}`);
+                            const ocrResult = await ocrResp.json();
 
-                                        ctx.fillRect(x, y - height, width, height);
-                                        break; // Solo un resaltado por item
-                                    }
+                            if (ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
+                                const scaleX = tempCanvas.width / ocrResult.image_width;
+                                const scaleY = tempCanvas.height / ocrResult.image_height;
+
+                                for (const hl of ocrResult.highlights) {
+                                    ctx.fillRect(hl.x * scaleX, hl.y * scaleY, hl.w * scaleX, hl.h * scaleY);
                                 }
+                                console.log(`Print: ${ocrResult.highlights.length} resaltados OCR en página ${pageNum}`);
                             }
-                        } else {
-                            // CAMINO 2: PDF escaneado - obtener coordenadas de OCR
-                            try {
-                                const docId = <?= $docIdForOcr ?>;
-                                const termsStr = encodeURIComponent(allTerms.join(','));
-                                const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${pageNum}&terms=${termsStr}`);
-                                const ocrResult = await ocrResp.json();
-
-                                if (ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
-                                    // Calcular escala entre imagen OCR y canvas de impresión
-                                    const scaleX = tempCanvas.width / ocrResult.image_width;
-                                    const scaleY = tempCanvas.height / ocrResult.image_height;
-
-                                    // Dibujar cada rectángulo de resaltado OCR
-                                    for (const hl of ocrResult.highlights) {
-                                        const x = hl.x * scaleX;
-                                        const y = hl.y * scaleY;
-                                        const w = hl.w * scaleX;
-                                        const h = hl.h * scaleY;
-                                        ctx.fillRect(x, y, w, h);
-                                        // ctx.strokeRect(x, y, w, h); // ELIMINADO BORDE EN IMPRESIÓN
-                                    }
-                                    console.log(`Print: ${ocrResult.highlights.length} resaltados OCR en página ${pageNum}`);
-                                }
-                            } catch (ocrErr) {
-                                console.warn(`Print OCR error página ${pageNum}:`, ocrErr);
-                            }
+                        } catch (ocrErr) {
+                            console.warn(`Print OCR error página ${pageNum}:`, ocrErr);
                         }
                         ctx.globalAlpha = 1.0;
                     }
