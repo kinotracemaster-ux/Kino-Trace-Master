@@ -229,4 +229,43 @@ class SystemController extends BaseController
         }
         $this->jsonExit($diagnostics);
     }
+
+    public function updatePassword($request)
+    {
+        $newPassword = $request['new_password'] ?? '';
+        $confirmPassword = $request['confirm_password'] ?? '';
+
+        if (empty($newPassword) || strlen($newPassword) < 4) {
+            $this->jsonExit(['success' => false, 'error' => 'La contraseña debe tener al menos 4 caracteres']);
+        }
+
+        if ($newPassword !== $confirmPassword) {
+            $this->jsonExit(['success' => false, 'error' => 'Las contraseñas no coinciden']);
+        }
+
+        try {
+            // Need connection to central DB to update password
+            // Since this controller runs with client context, we need to open central manually
+            // or use the 'centralDb' variable if available in scope (it's not here).
+            // We'll reopen central.db connection
+
+            $centralDbPath = BASE_DIR . '/clients/central.db';
+            if (!file_exists($centralDbPath)) {
+                throw new Exception("Base de datos central no encontrada");
+            }
+
+            $centralPdo = new PDO('sqlite:' . $centralDbPath);
+            $centralPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+            $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+
+            $stmt = $centralPdo->prepare("UPDATE control_clientes SET password_hash = ? WHERE codigo = ?");
+            $stmt->execute([$hash, $this->clientCode]);
+
+            $this->jsonExit(['success' => true, 'message' => 'Contraseña actualizada correctamente']);
+
+        } catch (Exception $e) {
+            $this->jsonExit(['success' => false, 'error' => 'Error al actualizar: ' . $e->getMessage()]);
+        }
+    }
 }

@@ -164,6 +164,9 @@ try {
         case 'pdf_diagnostic':
             (new SystemController($db, $clientCode))->diagnostic($_REQUEST);
             break;
+        case 'update_password':
+            (new SystemController($db, $clientCode))->updatePassword($_POST);
+            break;
         case 'clear_cache':
             if (class_exists('CacheManager')) {
                 CacheManager::clear($clientCode);
