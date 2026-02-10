@@ -254,29 +254,52 @@ set_time_limit(300);
                 echo "</pre>";
 
                 // Determinar acción recomendada
+                $needsRepair = false;
+                $reason = "";
+
                 if (!file_exists($targetDbCentral)) {
-                    echo "<h2 class='warning'>⚠️  PROBLEMA DETECTADO</h2>";
-                    echo "<p>La base de datos NO está en el volumen persistente.</p>";
+                    $needsRepair = true;
+                    $reason = "El archivo no existe en el volumen.";
+                } else {
+                    // Verificar si está vacío de clientes
+                    try {
+                        $pdo = new PDO('sqlite:' . $targetDbCentral);
+                        $stmt = $pdo->query('SELECT COUNT(*) as total FROM control_clientes');
+                        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                        if ($result['total'] == 0) {
+                            $needsRepair = true;
+                            $reason = "La base de datos existe pero tiene 0 clientes.";
+                        }
+                    } catch (Exception $e) {
+                        $needsRepair = true;
+                        $reason = "Error leyendo la base de datos: " . $e->getMessage();
+                    }
+                }
+
+                if ($needsRepair) {
+                    echo "<h2 class='warning'>⚠️  ATENCIÓN REQUERIDA</h2>";
+                    echo "<p class='warning'>$reason</p>";
 
                     if (file_exists($sourceDbCentral) && filesize($sourceDbCentral) > 0) {
-                        echo "<p class='success'>✅ Solución disponible: Tengo la base fuente</p>";
+                        echo "<p class='success'>✅ Solución disponible: Restaurar desde copia original</p>";
                         echo "<form method='POST'>";
                         echo "<input type='hidden' name='action' value='fix'>";
                         echo "<button type='submit' class='btn'>🔧 REPARAR AHORA</button>";
                         echo "</form>";
                     } else {
-                        echo "<p class='error'>❌ PROBLEMA: database_initial/central.db no está disponible o está vacío</p>";
-                        echo "<p>NECESITAS:</p>";
-                        echo "<pre>";
-                        echo "1. Verificar que database_initial/central.db esté en tu repositorio\n";
-                        echo "2. Verificar .gitignore para asegurar que permite: !database_initial/*.db\n";
-                        echo "3. Hacer commit y push de este archivo\n";
-                        echo "</pre>";
+                        echo "<p class='error'>❌ No se puede reparar: La base de datos original no está disponible</p>";
                     }
                 } else {
-                    echo "<h2 class='success'>✅ BASE DE DATOS ENCONTRADA</h2>";
-                    echo "<p>La base de datos está en el volumen persistente.</p>";
+                    echo "<h2 class='success'>✅ BASE DE DATOS CORRECTA</h2>";
+                    echo "<p>La base de datos está en el volumen y tiene clientes.</p>";
                     echo "<p><a href='/' class='btn'>🏠 Ir a la Aplicación</a></p>";
+
+                    echo "<hr style='margin: 20px 0; border-color: #333;'>";
+                    echo "<p style='font-size: 0.9em; opacity: 0.8;'>¿Problemas? Puedes forzar una reinstalación:</p>";
+                    echo "<form method='POST' onsubmit='return confirm(\"¿Estás seguro? Se borrarán los datos actuales en el volumen.\");'>";
+                    echo "<input type='hidden' name='action' value='fix'>";
+                    echo "<button type='submit' class='btn btn-danger'>⚠️ FORZAR REINSTALACIÓN BD</button>";
+                    echo "</form>";
                 }
             }
 
