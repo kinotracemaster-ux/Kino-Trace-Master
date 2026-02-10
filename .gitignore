@@ -8,6 +8,9 @@
 *.db
 central.db
 
+# EXCEPCIÓN: Permitir bases de datos iniciales para Railway
+!database_initial/*.db
+
 # Datos de clientes (se crean en producción)
 /clients/
 
