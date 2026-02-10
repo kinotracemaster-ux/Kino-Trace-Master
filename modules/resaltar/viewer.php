@@ -746,12 +746,12 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                     // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
                     if (ocrResult.success && ocrResult.match_count > 0) {
-                        
+
                         // Añadir términos encontrados al set de encontrados
                         if (ocrResult.matches && ocrResult.matches.length > 0) {
                             ocrResult.matches.forEach(m => {
                                 // Normalizar para el set (aunque el servidor ya lo hizo)
-                                foundTermsSet.add(m.term); 
+                                foundTermsSet.add(m.term);
                             });
                         }
 
@@ -788,11 +788,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                 for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
                     batch.push(processPage(j));
                 }
-                
+
                 // Esperar a que todo el lote termine antes de lanzar el siguiente
                 // Esto evita saturar el navegador con demasiadas peticiones a la vez
                 await Promise.all(batch);
-                
+
                 // Pequeña pausa para no bloquear UI
                 await new Promise(r => setTimeout(r, 10));
             }
@@ -995,10 +995,10 @@ $docIdForOcr = $documentId; // For OCR fallback
                                     top: ${hl.y * scaleY}px;
                                     width: ${hl.w * scaleX}px;
                                     height: ${hl.h * scaleY}px;
-                                    background: rgba(85, 140, 45, 0.65);
-                                    border: 2px solid #365e10;
+                                    background: rgba(85, 140, 45, 0.3);
+                                    mix-blend-mode: multiply;
                                     border-radius: 2px;
-                                    box-shadow: 0 0 4px rgba(0,0,0,0.3);
+                                    cursor: pointer;
                                 `;
                                 rect.title = hl.term;
                                 overlay.appendChild(rect);
@@ -1094,10 +1094,9 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                     // Dibujar resaltados sobre el canvas
                     if (allTerms.length > 0) {
-                        ctx.globalAlpha = 0.70;
-                        ctx.strokeStyle = '#365e10';
-                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.3; // Más transparente para impresión
                         ctx.fillStyle = '#558c2d'; // Verde amarillento
+                        // No stroke, no border
 
                         if (false) { // FORZAR OCR: Siempre usar OCR para impresión
                             // CAMINO 1: PDF con texto embebido - usar coordenadas de PDF.js
@@ -1137,7 +1136,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                                         const w = hl.w * scaleX;
                                         const h = hl.h * scaleY;
                                         ctx.fillRect(x, y, w, h);
-                                        ctx.strokeRect(x, y, w, h);
+                                        // ctx.strokeRect(x, y, w, h); // ELIMINADO BORDE EN IMPRESIÓN
                                     }
                                     console.log(`Print: ${ocrResult.highlights.length} resaltados OCR en página ${pageNum}`);
                                 }
