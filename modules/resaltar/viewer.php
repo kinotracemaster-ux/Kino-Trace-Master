@@ -727,12 +727,12 @@ $docIdForOcr = $documentId; // For OCR fallback
                 statusDiv.innerHTML = html;
             }
 
-            // ESCANEO PROGRESIVO: Escanea y resalta inmediatamente
-            console.log(`Iniciando escaneo de ${totalPages} páginas...`);
+            // ESCANEO PROGRESIVO: Escanea y resalta en lotes paralelos (Velocidad x4)
+            console.log(`Iniciando escaneo de ${totalPages} páginas (Concurrencia: 4)...`);
 
-            for (let i = 1; i <= totalPages; i++) {
+            // Función individual para procesar una página
+            const processPage = async (i) => {
                 updateStatus(i);
-
                 try {
                     const docId = <?= $docIdForOcr ?>;
                     const termsStr = encodeURIComponent(termsToFind.join(','));
@@ -746,18 +746,20 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                     // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
                     if (ocrResult.success && ocrResult.match_count > 0) {
-
+                        
                         // Añadir términos encontrados al set de encontrados
                         if (ocrResult.matches && ocrResult.matches.length > 0) {
                             ocrResult.matches.forEach(m => {
                                 // Normalizar para el set (aunque el servidor ya lo hizo)
-                                foundTermsSet.add(m.term);
+                                foundTermsSet.add(m.term); 
                             });
                         }
 
                         // Si el servidor dice que hay matches, es página positiva
                         console.log(`✓ Página ${i}: ${ocrResult.match_count} coincidencias encontradas (Server verify)`);
                         pagesWithMatches.push(i);
+                        // Ordenar para mostrar bonito
+                        pagesWithMatches.sort((a, b) => a - b);
 
                         // RESALTAR INMEDIATAMENTE esta página (con resultados ya cacheados)
                         const wrapper = document.getElementById('page-' + i);
@@ -776,11 +778,23 @@ $docIdForOcr = $documentId; // For OCR fallback
                     }
                 } catch (e) {
                     console.warn(`⚠ Error en página ${i}, continuando...`, e);
-                    // Continuar con la siguiente página aunque haya error
                 }
+            };
 
-                // Pausa mínima para UI
-                if (i % 5 === 0) await new Promise(r => setTimeout(r, 1));
+            // Procesar en lotes de 4 (Parallel Batching)
+            const BATCH_SIZE = 4;
+            for (let i = 1; i <= totalPages; i += BATCH_SIZE) {
+                const batch = [];
+                for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
+                    batch.push(processPage(j));
+                }
+                
+                // Esperar a que todo el lote termine antes de lanzar el siguiente
+                // Esto evita saturar el navegador con demasiadas peticiones a la vez
+                await Promise.all(batch);
+                
+                // Pequeña pausa para no bloquear UI
+                await new Promise(r => setTimeout(r, 10));
             }
 
             console.log(`✓ Escaneo completado. Total: ${totalPages} páginas, Coincidencias: ${pagesWithMatches.length}`);

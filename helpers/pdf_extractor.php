@@ -269,8 +269,8 @@ function extract_with_ocr(string $pdfPath, array $options = []): string
             $escapedImage = escapeshellarg($image);
             $escapedOut = escapeshellarg($image); // tesseract añade .txt
 
-            // tesseract imagen salida -l spa
-            $cmdOcr = "$tesseractPath $escapedImage $escapedOut -l spa";
+            // tesseract imagen salida -l spa --oem 1 (LSTM only, faster)
+            $cmdOcr = "$tesseractPath $escapedImage $escapedOut -l spa --oem 1";
             exec($cmdOcr);
 
             $txtFile = $image . '.txt';
