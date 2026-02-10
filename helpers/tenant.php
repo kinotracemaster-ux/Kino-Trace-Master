@@ -44,10 +44,35 @@ function client_db_path(string $code): string
 function open_client_db(string $code): PDO
 {
     $path = client_db_path($code);
-    $dsn = 'sqlite:' . $path;
-    $db = new PDO($dsn);
-    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    return $db;
+
+    if (!file_exists($path)) {
+        // Intento de auto-reparación básica: buscar en database_initial si existe
+        $code = sanitize_code($code);
+        $initialPath = BASE_DIR . "/database_initial/{$code}/{$code}.db";
+
+        if (file_exists($initialPath)) {
+            // Intentar copiar automáticamente
+            $dir = dirname($path);
+            if (!is_dir($dir))
+                mkdir($dir, 0777, true);
+            copy($initialPath, $path);
+            chmod($path, 0666);
+        } else {
+            throw new Exception("Base de datos de cliente no encontrada: $code");
+        }
+    }
+
+    try {
+        $dsn = 'sqlite:' . $path;
+        $db = new PDO($dsn);
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        return $db;
+    } catch (PDOException $e) {
+        // Mensaje más descriptivo con permisos
+        $perms = substr(sprintf('%o', fileperms($path)), -4);
+        $dirPerms = substr(sprintf('%o', fileperms(dirname($path))), -4);
+        throw new PDOException("Error abriendo BD ($code). Permisos DB: $perms, Dir: $dirPerms. Error: " . $e->getMessage());
+    }
 }
 
 /**
