@@ -782,7 +782,8 @@ $docIdForOcr = $documentId; // For OCR fallback
             };
 
             // Procesar en lotes de 4 (Parallel Batching)
-            const BATCH_SIZE = 4;
+            // Procesar en lotes de 2 (Parallel Batching - ajustado para evitar freeze)
+            const BATCH_SIZE = 2;
             for (let i = 1; i <= totalPages; i += BATCH_SIZE) {
                 const batch = [];
                 for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
@@ -793,8 +794,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 // Esto evita saturar el navegador con demasiadas peticiones a la vez
                 await Promise.all(batch);
 
-                // Pequeña pausa para no bloquear UI
-                await new Promise(r => setTimeout(r, 10));
+                // Pausa para no bloquear UI (100ms)
+                await new Promise(r => setTimeout(r, 100));
             }
 
             console.log(`✓ Escaneo completado. Total: ${totalPages} páginas, Coincidencias: ${pagesWithMatches.length}`);
