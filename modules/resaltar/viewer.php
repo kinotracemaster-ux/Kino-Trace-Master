@@ -240,6 +240,58 @@ $docIdForOcr = $documentId; // For OCR fallback
             padding: 2px 0;
         }
 
+        /* --- OCR HIGHLIGHT OVERLAYS (Gradientes por término) --- */
+        .ocr-highlight {
+            mix-blend-mode: multiply;
+            border-radius: 2px;
+            cursor: pointer;
+            animation: highlightFadeIn 0.25s ease-out;
+        }
+
+        /* Colores distintos por término (data-term-index) */
+        .ocr-highlight[data-term-index="0"] {
+            background: linear-gradient(180deg, rgba(85, 140, 45, 0.40) 0%, rgba(85, 140, 45, 0.25) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(85, 140, 45, 0.3);
+        }
+
+        .ocr-highlight[data-term-index="1"] {
+            background: linear-gradient(180deg, rgba(33, 150, 243, 0.40) 0%, rgba(33, 150, 243, 0.25) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(33, 150, 243, 0.3);
+        }
+
+        .ocr-highlight[data-term-index="2"] {
+            background: linear-gradient(180deg, rgba(255, 152, 0, 0.40) 0%, rgba(255, 152, 0, 0.25) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.3);
+        }
+
+        .ocr-highlight[data-term-index="3"] {
+            background: linear-gradient(180deg, rgba(156, 39, 176, 0.40) 0%, rgba(156, 39, 176, 0.25) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(156, 39, 176, 0.3);
+        }
+
+        .ocr-highlight[data-term-index="4"] {
+            background: linear-gradient(180deg, rgba(244, 67, 54, 0.40) 0%, rgba(244, 67, 54, 0.25) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(244, 67, 54, 0.3);
+        }
+
+        /* Fallback para índice >= 5 */
+        .ocr-highlight:not([data-term-index]) {
+            background: linear-gradient(180deg, rgba(85, 140, 45, 0.35) 0%, rgba(85, 140, 45, 0.20) 100%) !important;
+            box-shadow: 0 0 0 1px rgba(85, 140, 45, 0.25);
+        }
+
+        @keyframes highlightFadeIn {
+            from {
+                opacity: 0;
+                transform: scale(1.05);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
         /* --- UI COMPONENTS --- */
         .page-number {
             text-align: center;
@@ -958,20 +1010,27 @@ $docIdForOcr = $documentId; // For OCR fallback
                                 z-index: 5;
                             `;
 
-                            // Dibujar cada rectángulo de resaltado
+                            // Construir mapa de índices de términos para colores distintos
+                            const termIndexMap = new Map();
+                            allTerms.forEach((t, idx) => termIndexMap.set(t.toLowerCase(), idx));
+
+                            // Dibujar cada rectángulo con padding dinámico y color por término
                             for (const hl of result.highlights) {
+                                // Padding dinámico proporcional al alto de la palabra
+                                const padX = hl.h * 0.05; // 5% del alto
+                                const padY = hl.h * 0.10; // 10% del alto
+
+                                const termIdx = termIndexMap.get((hl.term || '').toLowerCase()) ?? 0;
+
                                 const rect = document.createElement('div');
-                                rect.className = 'ocr-highlight'; // Clase para auto-scroll
+                                rect.className = 'ocr-highlight';
+                                rect.setAttribute('data-term-index', Math.min(termIdx, 4));
                                 rect.style.cssText = `
                                     position: absolute;
-                                    left: ${hl.x * scaleX}px;
-                                    top: ${hl.y * scaleY}px;
-                                    width: ${hl.w * scaleX}px;
-                                    height: ${hl.h * scaleY}px;
-                                    background: rgba(85, 140, 45, 0.3);
-                                    mix-blend-mode: multiply;
-                                    border-radius: 2px;
-                                    cursor: pointer;
+                                    left: ${(hl.x - padX) * scaleX}px;
+                                    top: ${(hl.y - padY) * scaleY}px;
+                                    width: ${(hl.w + padX * 2) * scaleX}px;
+                                    height: ${(hl.h + padY * 2) * scaleY}px;
                                 `;
                                 rect.title = hl.term;
                                 overlay.appendChild(rect);
