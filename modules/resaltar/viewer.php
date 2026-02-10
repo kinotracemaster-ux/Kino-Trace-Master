@@ -771,11 +771,12 @@ $docIdForOcr = $documentId; // For OCR fallback
                         const wrapper = document.getElementById('page-' + i);
                         if (wrapper && wrapper.dataset.rendered !== 'ocr-complete') {
                             // Solo re-renderizar si la página ya tiene canvas (fue lazy-loaded)
-                            // Si no tiene canvas, el IntersectionObserver se encargará usando el cache
                             if (wrapper.querySelector('canvas')) {
                                 await renderPage(i, wrapper);
+                                wrapper.dataset.rendered = 'ocr-complete';
                             }
-                            wrapper.dataset.rendered = 'ocr-complete';
+                            // Si NO tiene canvas, NO marcar como rendered
+                            // El IntersectionObserver se encargará de renderizarla usando ocrResultsCache
                         }
 
                         // Scroll a primera coincidencia
