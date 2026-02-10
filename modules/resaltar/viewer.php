@@ -660,14 +660,20 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                 document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
 
-                // Carga inicial forzada (primeras páginas) para UX rápido
-                for (let i = 1; i <= Math.min(numPages, 3); i++) {
+                // Carga inicial forzada (SOLO PRIMERA PÁGINA) para evitar bloqueo
+                /* for (let i = 1; i <= Math.min(numPages, 3); i++) {
                     const el = document.getElementById('page-' + i);
                     if (el) { renderPage(i, el); el.dataset.rendered = 'true'; }
-                }
+                } */
+                // Solo página 1 inmediata
+                const p1 = document.getElementById('page-1');
+                if (p1) { renderPage(1, p1); p1.dataset.rendered = 'true'; }
 
-                // INICIAR RADAR (Búsqueda silenciosa para status y scroll)
-                scanAllPagesForSummary();
+                // INICIAR RADAR (Búsqueda silenciosa) CON RETRASO
+                // Dar tiempo a que el navegador respire tras cargar el PDF y primera página
+                setTimeout(() => {
+                    scanAllPagesForSummary();
+                }, 1500);
 
             } catch (err) {
                 console.error("Error loadPDF:", err);
@@ -764,7 +770,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                         // RESALTAR INMEDIATAMENTE esta página (con resultados ya cacheados)
                         const wrapper = document.getElementById('page-' + i);
                         if (wrapper && wrapper.dataset.rendered !== 'ocr-complete') {
-                            await renderPage(i, wrapper);
+                            // Solo re-renderizar si la página ya tiene canvas (fue lazy-loaded)
+                            // Si no tiene canvas, el IntersectionObserver se encargará usando el cache
+                            if (wrapper.querySelector('canvas')) {
+                                await renderPage(i, wrapper);
+                            }
                             wrapper.dataset.rendered = 'ocr-complete';
                         }
 
@@ -781,9 +791,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             };
 
-            // Procesar en lotes de 4 (Parallel Batching)
-            // Procesar en lotes de 2 (Parallel Batching - ajustado para evitar freeze)
-            const BATCH_SIZE = 2;
+            // Procesar en lotes de 4 (Parallel Batching - optimizado tras reducir carga OCR)
+            const BATCH_SIZE = 4;
             for (let i = 1; i <= totalPages; i += BATCH_SIZE) {
                 const batch = [];
                 for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
@@ -791,11 +800,10 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
 
                 // Esperar a que todo el lote termine antes de lanzar el siguiente
-                // Esto evita saturar el navegador con demasiadas peticiones a la vez
                 await Promise.all(batch);
 
-                // Pausa para no bloquear UI (100ms)
-                await new Promise(r => setTimeout(r, 100));
+                // Pausa breve para no bloquear UI
+                await new Promise(r => setTimeout(r, 50));
             }
 
             console.log(`✓ Escaneo completado. Total: ${totalPages} páginas, Coincidencias: ${pagesWithMatches.length}`);
