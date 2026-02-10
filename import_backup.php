@@ -112,6 +112,14 @@ if (is_dir($clientesSourceDir)) {
             mkdir($initialClientDir, 0777, true);
         }
 
+        // Asegurar estructura de uploads en database_initial también
+        if (!is_dir($initialClientDir . '/uploads')) {
+            mkdir($initialClientDir . '/uploads', 0777, true);
+            mkdir($initialClientDir . '/uploads/manifiestos', 0777, true);
+            mkdir($initialClientDir . '/uploads/declaraciones', 0777, true);
+            mkdir($initialClientDir . '/uploads/facturas', 0777, true);
+        }
+
         // Copiar DB
         $sourceDb = $clientesSourceDir . '/' . $file;
 

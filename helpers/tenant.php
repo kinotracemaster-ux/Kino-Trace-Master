@@ -328,16 +328,23 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
 
     // 2. Búsqueda recursiva (fallback final)
     // Si el archivo se movió a una carpeta no estándar
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($uploadsDir, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::SELF_FIRST
-    );
+    if (is_dir($uploadsDir)) {
+        try {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($uploadsDir, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
 
-    foreach ($iterator as $file) {
-        if ($file->isFile()) {
-            if ($file->getFilename() === $filename) {
-                return $file->getPathname();
+            foreach ($iterator as $file) {
+                if ($file->isFile()) {
+                    if ($file->getFilename() === $filename) {
+                        return $file->getPathname();
+                    }
+                }
             }
+        } catch (UnexpectedValueException $e) {
+            // Ignorar errores de permisos o directorios
+            return null;
         }
     }
 
