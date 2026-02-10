@@ -260,7 +260,7 @@ function extract_with_ocr(string $pdfPath, array $options = []): string
 
         // Sin límite de páginas para extraer de TODO el documento
         // Usar DPI configurable
-        $cmdConvert = "$pdftoppmPath -png -r $dpi $escapedPdf $escapedPrefix";
+        $cmdConvert = "$pdftoppmPath -png -gray -r $dpi $escapedPdf $escapedPrefix";
         exec($cmdConvert);
 
         // 2. Procesar cada imagen con Tesseract
@@ -297,8 +297,8 @@ function extract_with_ocr(string $pdfPath, array $options = []): string
  * Convierte una página específica del PDF a imagen y aplica OCR.
  * 
  * OPTIMIZADO v3:
- * - DPI reducido a 96 (suficiente para búsqueda OCR, ~60% más rápido)
- * - Solo 1 ejecución de Tesseract (HOCR), texto se reconstruye de las palabras
+ * - DPI 150 (balance velocidad/calidad para búsqueda OCR)
+ * - Solo 1 ejecución de Tesseract (HOCR + OEM 1 LSTM-only), texto se reconstruye de las palabras
  * 
  * @param string $pdfPath Ruta al archivo PDF.
  * @param int $pageNum Número de página (1-indexed).
@@ -353,7 +353,7 @@ function extract_with_ocr_coordinates(string $pdfPath, int $pageNum = 1): array
         $escapedImage = escapeshellarg($imagePath);
         $escapedHocr = escapeshellarg($hocrOutput);
 
-        $cmdOcr = "$tesseractPath $escapedImage $escapedHocr -l spa hocr";
+        $cmdOcr = "$tesseractPath $escapedImage $escapedHocr -l spa --oem 1 hocr";
         exec($cmdOcr, $ocrOutput, $ocrReturnCode);
 
         $hocrFile = $hocrOutput . '.hocr';
