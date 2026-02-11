@@ -60,34 +60,36 @@ function call_gemini(string $prompt, array $context = []): array
         ]
     ];
 
-    $options = [
-        'http' => [
-            'header' => "Content-Type: application/json\r\n",
-            'method' => 'POST',
-            'content' => json_encode($data),
-            'timeout' => 30
-        ]
-    ];
-
-    $contextStream = stream_context_create($options);
-
     try {
-        $response = @file_get_contents($url, false, $contextStream);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($data),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
 
-        if ($response === false) {
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($response === false || $curlError) {
             return [
                 'success' => false,
-                'error' => 'Error de conexión con Gemini API',
+                'error' => 'Error de conexión con Gemini API: ' . ($curlError ?: 'sin respuesta'),
                 'response' => null
             ];
         }
 
         $result = json_decode($response, true);
 
-        if (isset($result['error'])) {
+        if ($httpCode !== 200 || isset($result['error'])) {
             return [
                 'success' => false,
-                'error' => $result['error']['message'] ?? 'Error desconocido de Gemini',
+                'error' => $result['error']['message'] ?? "Error HTTP $httpCode de Gemini",
                 'response' => null
             ];
         }
