@@ -3,3 +3,9 @@ php_value post_max_size 512M
 php_value memory_limit 1024M
 php_value max_execution_time 300
 php_value max_input_time 300
+
+# Bloquear acceso a archivos sensibles
+<FilesMatch "\.(db|sql|zip|env|log|json)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>

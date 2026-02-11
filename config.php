@@ -14,7 +14,7 @@
 
 // Ruta base del proyecto
 define('BASE_DIR', __DIR__);
-define('APP_VERSION', time()); // Cache buster auto-generado
+define('APP_VERSION', substr(md5_file(__FILE__), 0, 8)); // Cache buster estable basado en contenido
 
 // Directorio donde se almacenan los datos de cada cliente
 define('CLIENTS_DIR', BASE_DIR . DIRECTORY_SEPARATOR . 'clients');
@@ -55,9 +55,10 @@ function recursive_copy($src, $dst)
     closedir($dir);
 }
 
-// Ejecutar copia recursiva si existe el directorio origen
+// Ejecutar copia recursiva SOLO si es el primer arranque (no existe central.db)
+// Esto evita la sobrecarga de escanear 100+ archivos en cada request
 $initialDir = BASE_DIR . '/database_initial';
-if (is_dir($initialDir)) {
+if (is_dir($initialDir) && !file_exists(CENTRAL_DB)) {
     recursive_copy($initialDir, CLIENTS_DIR);
 }
 

@@ -10,7 +10,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers/tenant.php';
 
 // Admin secret password
-define('ADMIN_SECRET', '3312');
+define('ADMIN_SECRET', getenv('ADMIN_SECRET') ?: '3312');
 
 $error = '';
 $adminError = '';

@@ -67,6 +67,10 @@ function open_client_db(string $code): PDO
         $db = new PDO($dsn);
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
+        // Optimización SQLite: WAL Mode y Foreign Keys
+        $db->exec("PRAGMA journal_mode=WAL");
+        $db->exec("PRAGMA foreign_keys=ON");
+
         // Auto-migración: Asegurar que el esquema esté actualizado (ej: tablas nuevas)
         ensure_client_schema($db);
 
@@ -406,7 +410,60 @@ function ensure_client_schema(PDO $db): void
         )"
     );
 
-    // Seed inicial si está vacía: Insertamos configuración por defecto
-    // Usamos INSERT OR IGNORE para evitar duplicados si ya existe ID 1
+    // Seed inicial si está vacía
     $db->exec("INSERT OR IGNORE INTO configuracion_extraccion (id, prefix, terminator, min_length, max_length) VALUES (1, '', '/', 4, 50)");
+
+    // --- MEJORAS FEBRERO 2026: Fase Estabilidad y Practicidad ---
+
+    // 1. Tabla tipos_documento
+    $db->exec(
+        "CREATE TABLE IF NOT EXISTS tipos_documento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL UNIQUE,
+            nombre TEXT NOT NULL,
+            activo INTEGER DEFAULT 1
+        )"
+    );
+
+    // Seed de tipos base si tabla vacía
+    $count = $db->query("SELECT COUNT(*) FROM tipos_documento")->fetchColumn();
+    if ($count == 0) {
+        $db->exec("INSERT INTO tipos_documento (codigo, nombre) VALUES 
+            ('documento', 'Documento General'),
+            ('manifiesto', 'Manifiesto'),
+            ('declaracion', 'Declaración'),
+            ('factura', 'Factura')");
+    }
+
+    // 2. Tabla log_actividad
+    $db->exec(
+        "CREATE TABLE IF NOT EXISTS log_actividad (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            accion TEXT NOT NULL,
+            detalle TEXT,
+            ip TEXT,
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+        )"
+    );
+
+    // 3. Columnas nuevas en documentos (texto_extraido, estado_extraccion)
+    // Usamos PRAGMA para verificar existencia antes de agregar
+    $cols = $db->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('texto_extraido', $cols)) {
+        $db->exec("ALTER TABLE documentos ADD COLUMN texto_extraido TEXT");
+    }
+    if (!in_array('estado_extraccion', $cols)) {
+        $db->exec("ALTER TABLE documentos ADD COLUMN estado_extraccion TEXT DEFAULT 'pendiente'");
+    }
+
+    // --- MEJORAS FEBRERO 2026: Fase Rendimiento ---
+    // Índices para búsquedas rápidas (IF NOT EXISTS es seguro)
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_numero ON documentos(numero)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_tipo ON documentos(tipo)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_fecha ON documentos(fecha)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_estado ON documentos(estado)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_origen ON vinculos(documento_origen_id)");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_destino ON vinculos(documento_destino_id)");
 }
