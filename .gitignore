@@ -1,5 +1,5 @@
-# Dependencias
-/vendor/
+# Dependencias (incluir vendor/ para Railway — no hay composer install en deploy)
+# /vendor/
 
 # Variables de entorno locales
 .env
