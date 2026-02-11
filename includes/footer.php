@@ -582,3 +582,45 @@
         };
     });
 </script>
+
+<?php if (empty($_SESSION['is_admin'])): ?>
+    <!-- Protección contra inspección casual -->
+    <script>
+        (function () {
+            // Bloquear atajos de teclado de DevTools
+            document.addEventListener('keydown', function (e) {
+                // F12
+                if (e.key === 'F12') { e.preventDefault(); return false; }
+                // Ctrl+Shift+I (Inspector), Ctrl+Shift+J (Console), Ctrl+Shift+C (Selector)
+                if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes(e.key.toUpperCase())) { e.preventDefault(); return false; }
+                // Ctrl+U (Ver fuente)
+                if (e.ctrlKey && e.key.toUpperCase() === 'U') { e.preventDefault(); return false; }
+            });
+
+            // Bloquear menú contextual (clic derecho)
+            document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+            // Limpiar consola y mostrar advertencia
+            function warnConsole() {
+                console.clear();
+                console.log('%c⚠️ ACCESO RESTRINGIDO', 'color:#ef4444;font-size:2rem;font-weight:bold;');
+                console.log('%cEsta consola es solo para personal autorizado.\nEl uso no autorizado puede ser registrado.', 'color:#94a3b8;font-size:1rem;');
+            }
+
+            // Detectar DevTools abierto (por tamaño de ventana)
+            var dtOpen = false;
+            setInterval(function () {
+                var widthThreshold = window.outerWidth - window.innerWidth > 160;
+                var heightThreshold = window.outerHeight - window.innerHeight > 160;
+                if (widthThreshold || heightThreshold) {
+                    if (!dtOpen) { dtOpen = true; warnConsole(); }
+                } else {
+                    dtOpen = false;
+                }
+            }, 1500);
+
+            // Limpiar consola al inicio
+            warnConsole();
+        })();
+    </script>
+<?php endif; ?>
