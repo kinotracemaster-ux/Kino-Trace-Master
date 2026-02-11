@@ -119,7 +119,7 @@ try {
     $extractedText = extract_text_from_pdf($pdfPath);
 
     if (empty($extractedText)) {
-        echo "<p class='bad'>❌ NO SE PUDO EXTRAER TEXTO</p>";
+        echo "<p class='bad'>❌ NO SE PUDO EXTRAER TEXTO (pdftotext)</p>";
         echo "<p>El PDF puede estar protegido, ser una imagen escaneada, o estar corrupto.</p>";
 
         Logger::error('No se pudo extraer texto del PDF', [
@@ -131,71 +131,93 @@ try {
         $wordCount = str_word_count($extractedText);
 
         echo "<table>";
-        echo "<tr><td>Estado</td><td class='good'>✅ Texto extraído correctamente</td></tr>";
+        echo "<tr><td>Estado (pdftotext)</td><td class='good'>✅ Texto extraído correctamente</td></tr>";
         echo "<tr><td>Caracteres</td><td>" . number_format($textLength) . "</td></tr>";
         echo "<tr><td>Palabras</td><td>" . number_format($wordCount) . "</td></tr>";
         echo "</table>";
+    }
 
-        // BÚSQUEDA DE COINCIDENCIAS
-        if (!empty($searchTerm)) {
-            echo "<h2>🎯 Búsqueda de Coincidencias</h2>";
+    // M10: Test OCR con coordenadas (mismo pipeline que el visor real)
+    echo "<h2>🔬 Pipeline OCR con Coordenadas (Real)</h2>";
+    if (function_exists('extract_with_ocr_coordinates')) {
+        $ocrResult = extract_with_ocr_coordinates($pdfPath, 1);
+        echo "<table>";
+        echo "<tr><td>OCR Success</td><td class='" . ($ocrResult['success'] ? 'good' : 'bad') . "'>" . ($ocrResult['success'] ? '✅ Sí' : '❌ No') . "</td></tr>";
+        echo "<tr><td>Palabras OCR</td><td>" . count($ocrResult['words'] ?? []) . "</td></tr>";
+        echo "<tr><td>Dimensiones imagen</td><td>" . ($ocrResult['image_width'] ?? 0) . " x " . ($ocrResult['image_height'] ?? 0) . " px</td></tr>";
+        echo "</table>";
 
-            $foundPositions = [];
-            $pos = 0;
-            while (($pos = stripos($extractedText, $searchTerm, $pos)) !== false) {
-                $foundPositions[] = $pos;
-                $pos += strlen($searchTerm);
-            }
-
-            $matchCount = count($foundPositions);
-
-            if ($matchCount > 0) {
-                echo "<p class='good'>✅ ENCONTRADAS {$matchCount} COINCIDENCIAS</p>";
-
-                echo "<h3>Primeras 10 coincidencias con contexto:</h3>";
-                foreach (array_slice($foundPositions, 0, 10) as $i => $position) {
-                    $start = max(0, $position - 60);
-                    $end = min($textLength, $position + strlen($searchTerm) + 60);
-                    $snippet = substr($extractedText, $start, $end - $start);
-
-                    // Resaltar la coincidencia
-                    $snippet = str_ireplace($searchTerm, "<mark>$searchTerm</mark>", $snippet);
-
-                    echo "<pre>Coincidencia " . ($i + 1) . " (posición $position):\n";
-                    echo ($start > 0 ? '...' : '') . htmlspecialchars_decode($snippet) . ($end < $textLength ? '...' : '');
-                    echo "</pre>";
+        if (!empty($searchTerm) && !empty($ocrResult['words'])) {
+            $ocrMatches = 0;
+            foreach ($ocrResult['words'] as $word) {
+                if (mb_stripos($word['text'], $searchTerm, 0, 'UTF-8') !== false) {
+                    $ocrMatches++;
                 }
-
-                Logger::info('Coincidencias encontradas', [
-                    'doc_id' => $documentId,
-                    'search_term' => $searchTerm,
-                    'match_count' => $matchCount
-                ]);
-
-            } else {
-                echo "<p class='bad'>❌ NO SE ENCONTRARON COINCIDENCIAS</p>";
-
-                echo "<h3>🔧 Sugerencias:</h3>";
-                echo "<ul>";
-                echo "<li>Verifica que el término esté escrito correctamente</li>";
-                echo "<li>El PDF puede tener codificación especial de caracteres</li>";
-                echo "<li>Intenta buscar palabras más cortas o comunes</li>";
-                echo "<li>El texto puede estar en otra codificación (UTF-8, Latin1, etc)</li>";
-                echo "</ul>";
-
-                // Muestra muestra del texto para ayudar
-                echo "<h3>📄 Primeros 500 caracteres del texto extraído:</h3>";
-                echo "<pre>" . htmlspecialchars(substr($extractedText, 0, 500)) . "...</pre>";
-
-                Logger::warning('No se encontraron coincidencias', [
-                    'doc_id' => $documentId,
-                    'search_term' => $searchTerm,
-                    'text_sample' => substr($extractedText, 0, 200)
-                ]);
             }
+            echo "<p class='" . ($ocrMatches > 0 ? 'good' : 'bad') . "'>" . ($ocrMatches > 0 ? "✅ OCR: $ocrMatches coincidencias con coordenadas" : "❌ OCR: Sin coincidencias") . "</p>";
+        }
+    } else {
+        echo "<p class='bad'>❌ extract_with_ocr_coordinates() no está disponible</p>";
+    }
+
+    // BÚSQUEDA DE COINCIDENCIAS (pdftotext)
+    if (!empty($searchTerm) && !empty($extractedText)) {
+        echo "<h2>🎯 Búsqueda de Coincidencias</h2>";
+
+        $foundPositions = [];
+        $pos = 0;
+        $textLength = strlen($extractedText);
+        while (($pos = stripos($extractedText, $searchTerm, $pos)) !== false) {
+            $foundPositions[] = $pos;
+            $pos += strlen($searchTerm);
         }
 
-        // PREVIEW DEL TEXTO
+        $matchCount = count($foundPositions);
+
+        if ($matchCount > 0) {
+            echo "<p class='good'>✅ ENCONTRADAS {$matchCount} COINCIDENCIAS</p>";
+
+            echo "<h3>Primeras 10 coincidencias con contexto:</h3>";
+            foreach (array_slice($foundPositions, 0, 10) as $i => $position) {
+                $start = max(0, $position - 60);
+                $end = min($textLength, $position + strlen($searchTerm) + 60);
+                $snippet = substr($extractedText, $start, $end - $start);
+                $snippet = str_ireplace($searchTerm, "<mark>$searchTerm</mark>", $snippet);
+                echo "<pre>Coincidencia " . ($i + 1) . " (posición $position):\n";
+                echo ($start > 0 ? '...' : '') . htmlspecialchars_decode($snippet) . ($end < $textLength ? '...' : '');
+                echo "</pre>";
+            }
+
+            Logger::info('Coincidencias encontradas', [
+                'doc_id' => $documentId,
+                'search_term' => $searchTerm,
+                'match_count' => $matchCount
+            ]);
+
+        } else {
+            echo "<p class='bad'>❌ NO SE ENCONTRARON COINCIDENCIAS</p>";
+
+            echo "<h3>🔧 Sugerencias:</h3>";
+            echo "<ul>";
+            echo "<li>Verifica que el término esté escrito correctamente</li>";
+            echo "<li>El PDF puede tener codificación especial de caracteres</li>";
+            echo "<li>Intenta buscar palabras más cortas o comunes</li>";
+            echo "<li>El texto puede estar en otra codificación (UTF-8, Latin1, etc)</li>";
+            echo "</ul>";
+
+            echo "<h3>📄 Primeros 500 caracteres del texto extraído:</h3>";
+            echo "<pre>" . htmlspecialchars(substr($extractedText, 0, 500)) . "...</pre>";
+
+            Logger::warning('No se encontraron coincidencias', [
+                'doc_id' => $documentId,
+                'search_term' => $searchTerm,
+                'text_sample' => substr($extractedText, 0, 200)
+            ]);
+        }
+    }
+
+    // PREVIEW DEL TEXTO
+    if (!empty($extractedText)) {
         echo "<h2>📄 Preview del Texto Completo (primeros 2000 caracteres)</h2>";
         echo "<pre>" . htmlspecialchars(substr($extractedText, 0, 2000)) . "...</pre>";
     }

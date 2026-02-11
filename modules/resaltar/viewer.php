@@ -116,6 +116,10 @@ if ($documentId > 0) {
         die('Documento no encontrado');
     $pdfPath = resolve_pdf_path($clientCode, $document);
 } else {
+    // M4: Sanitizar para prevenir path traversal (../../etc/passwd)
+    $fileParam = str_replace('\\', '/', $fileParam);
+    $fileParam = preg_replace('#(^|/)\.\.(/|$)#', '', $fileParam);
+    $fileParam = ltrim($fileParam, '/');
     $pdfPath = $uploadsDir . $fileParam;
     $document = [
         'id' => 0,
@@ -145,7 +149,7 @@ $docIdForOcr = $documentId; // For OCR fallback
     <title>Visor Resaltado - <?= htmlspecialchars($document['numero']) ?></title>
     <link rel="stylesheet" href="../../assets/css/styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mark.js/dist/mark.min.js"></script>
+    <!-- M5: Mark.js removido — el visor usa OCR overlays, no text-layer marking -->
     <style>
         /* --- LAYOUT --- */
         .viewer-container {
@@ -226,16 +230,16 @@ $docIdForOcr = $documentId; // For OCR fallback
             color: transparent;
         }
 
-        /* Verde gris (Hits Manuales) - Visible en impresión B/N */
+        /* M1: Naranja (Hits Manuales) - Color diferenciado para modo estricto */
         .highlight-hit {
-            background-color: rgba(85, 140, 45, 0.70) !important;
+            background-color: rgba(255, 152, 0, 0.70) !important;
             border: none;
             padding: 2px 0;
         }
 
-        /* Verde gris suave (Contexto Automático) */
+        /* M1: Verde suave (Contexto Automático) - Diferente a hits */
         .highlight-context {
-            background-color: rgba(85, 140, 45, 0.70) !important;
+            background-color: rgba(85, 140, 45, 0.50) !important;
             border: none;
             padding: 2px 0;
         }
@@ -751,15 +755,25 @@ $docIdForOcr = $documentId; // For OCR fallback
             let foundTermsSet = new Set();
             let firstMatchScrolled = false;
 
-            // Función para actualizar status en tiempo real
+            // M9: Función para actualizar status con barra de progreso visual
+            let pagesScanned = 0;
             function updateStatus(currentPage, isComplete = false) {
+                pagesScanned = Math.max(pagesScanned, currentPage);
                 const missingTerms = termsToFind.filter(t => !foundTermsSet.has(t));
+                const pct = Math.round((pagesScanned / totalPages) * 100);
                 let html = '';
 
                 if (!isComplete) {
                     html += `<div class="scanning-status-box">
-                        <span class="spinner-mini"></span> 
-                        <span>Escaneando página ${currentPage} de ${totalPages}...</span>
+                        <div style="flex:1;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                                <span><span class="spinner-mini"></span> Escaneando...</span>
+                                <span style="font-size:12px;">${pagesScanned}/${totalPages} (${pct}%)</span>
+                            </div>
+                            <div style="background:rgba(255,255,255,0.3); border-radius:4px; height:6px; overflow:hidden;">
+                                <div style="background:white; height:100%; width:${pct}%; border-radius:4px; transition:width 0.3s ease;"></div>
+                            </div>
+                        </div>
                     </div>`;
                 }
 
@@ -1042,25 +1056,7 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                     console.log(`OCR: ${result.match_count} coincidencias en página ${pageNum}`);
                 } else {
-                    // Mostrar badge de "no encontrado" en la página
-                    const noMatchBadge = document.createElement('div');
-                    noMatchBadge.style.cssText = `
-                        position: absolute;
-                        top: 10px;
-                        right: 10px;
-                        background: #dc2626;
-                        color: white;
-                        padding: 8px 15px;
-                        border-radius: 8px;
-                        z-index: 100;
-                        font-family: system-ui, sans-serif;
-                        font-size: 13px;
-                        font-weight: bold;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-                    `;
-                    noMatchBadge.innerHTML = `⚠️ OCR: Sin coincidencias`;
-                    wrapper.appendChild(noMatchBadge);
-
+                    // M3: Solo log silencioso — sin badge rojo para páginas sin coincidencias
                     console.log(`OCR: Sin coincidencias en página ${pageNum}`);
                 }
             } catch (e) {
@@ -1127,10 +1123,17 @@ $docIdForOcr = $documentId; // For OCR fallback
                         ctx.fillStyle = '#558c2d'; // Verde amarillento
 
                         try {
-                            const docId = <?= $docIdForOcr ?>;
-                            const termsStr = encodeURIComponent(allTerms.join(','));
-                            const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${pageNum}&terms=${termsStr}`);
-                            const ocrResult = await ocrResp.json();
+                            // M2: Usar cache del cliente si el radar ya escaneó esta página
+                            let ocrResult;
+                            if (ocrResultsCache.has(pageNum)) {
+                                ocrResult = ocrResultsCache.get(pageNum);
+                                console.log(`Print página ${pageNum}: usando cache (sin HTTP)`);
+                            } else {
+                                const docId = <?= $docIdForOcr ?>;
+                                const termsStr = encodeURIComponent(allTerms.join(','));
+                                const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${pageNum}&terms=${termsStr}`);
+                                ocrResult = await ocrResp.json();
+                            }
 
                             if (ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
                                 const scaleX = tempCanvas.width / ocrResult.image_width;

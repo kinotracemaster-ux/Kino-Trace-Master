@@ -25,6 +25,19 @@ try {
     }
 
     $clientCode = $_SESSION['client_code'];
+
+    // M8: Limpieza automática de archivos temporales > 1 hora
+    $tempDir = CLIENTS_DIR . "/{$clientCode}/uploads/temp/";
+    if (is_dir($tempDir)) {
+        $oldFiles = glob($tempDir . 'unified_voraz_*.pdf');
+        $cutoff = time() - 3600; // 1 hora
+        foreach ($oldFiles as $oldFile) {
+            if (is_file($oldFile) && filemtime($oldFile) < $cutoff) {
+                @unlink($oldFile);
+            }
+        }
+    }
+
     $input = json_decode(file_get_contents('php://input'), true);
 
     if (!isset($input['documents']) || !isset($input['codes'])) {
