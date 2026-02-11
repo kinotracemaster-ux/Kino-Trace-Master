@@ -656,6 +656,8 @@ $docIdForOcr = $documentId; // For OCR fallback
         const context = <?= json_encode(array_values($context)) ?>.map(String).map(s => s.trim()).filter(s => s.length > 0);
 
         const pdfUrl = '<?= addslashes($pdfUrl) ?>';
+        const docIdForOcr = <?= $docIdForOcr ?>;
+        const fileForOcr = '<?= addslashes($relativePath) ?>';
         const container = document.getElementById('pdfContainer');
         const scale = 1.5;
         let pdfDoc = null;
@@ -811,11 +813,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                     if (ocrResultsCache.has(i)) {
                         ocrResult = ocrResultsCache.get(i);
                     } else {
-                        const docId = <?= $docIdForOcr ?>;
                         const termsStr = encodeURIComponent(termsToFind.join(','));
-                        const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${i}&terms=${termsStr}`);
+                        const fileFallback = docIdForOcr === 0 && fileForOcr ? `&file=${encodeURIComponent(fileForOcr)}` : '';
+                        const ocrResp = await fetch(`ocr_text.php?doc=${docIdForOcr}&page=${i}&terms=${termsStr}${fileFallback}`);
                         ocrResult = await ocrResp.json();
-                        
+
                         if (ocrResult.success) {
                             ocrResultsCache.set(i, ocrResult);
                         }
@@ -979,9 +981,9 @@ $docIdForOcr = $documentId; // For OCR fallback
                     result = ocrResultsCache.get(pageNum);
                     console.log(`OCR página ${pageNum}: usando cache`);
                 } else {
-                    const docId = <?= $docIdForOcr ?>;
                     const termsStr = encodeURIComponent(allTerms.join(','));
-                    const response = await fetch(`ocr_text.php?doc=${docId}&page=${pageNum}&terms=${termsStr}`);
+                    const fileFallback = docIdForOcr === 0 && fileForOcr ? `&file=${encodeURIComponent(fileForOcr)}` : '';
+                    const response = await fetch(`ocr_text.php?doc=${docIdForOcr}&page=${pageNum}&terms=${termsStr}${fileFallback}`);
                     result = await response.json();
                     // Guardar en cache
                     if (result.success) {
