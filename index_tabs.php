@@ -813,77 +813,57 @@ COD001
             // First call to get initial pending count
             let pending = 999;
             let batchNum = 0;
+            const batchSize = force ? 50 : 10;
 
-            batchNum++;
-            const batchSize = 5;
-            const offset = (batchNum - 1) * batchSize;
-            status.innerHTML = `🔄 Procesando lote #${batchNum}... (Indexados: ${totalIndexedSession})`;
+            while (pending > 0) {
+                batchNum++;
+                const offset = (batchNum - 1) * batchSize;
+                status.innerHTML = `🔄 Procesando lote #${batchNum}... (Indexados: ${totalIndexedSession})`;
 
-            try {
-                const url = `${apiUrl}?action=reindex_documents&batch=${batchSize}` + (force ? `&force=true&offset=${offset}` : '');
-                const response = await fetch(url);
-                const result = await response.json();
+                try {
+                    const url = `${apiUrl}?action=reindex_documents&batch=${batchSize}` + (force ? `&force=true&offset=${offset}` : '');
+                    const response = await fetch(url);
+                    const result = await response.json();
 
-                if (!result.success) {
-                    status.innerHTML = `❌ Error: ${result.error || 'Error desconocido'}`;
+                    if (!result.success) {
+                        status.innerHTML = `❌ Error: ${result.error || 'Error desconocido'}`;
+                        break;
+                    }
+
+                    totalIndexedSession += result.indexed;
+                    pending = result.pending;
+
+                    status.innerHTML = `✅ Indexados: ${totalIndexedSession}, Pendientes: ${pending}`;
+
+                    if (result.errors && result.errors.length > 0) {
+                        console.log('Errores de indexación:', result.errors);
+                    }
+
+                    // Stop conditions
+                    if (!force && result.indexed === 0 && pending > 0) {
+                        status.innerHTML += ` <span style="color: var(--warning);">(${pending} archivos no encontrados o ilegibles)</span>`;
+                        break;
+                    }
+
+                    if (force && result.indexed === 0) {
+                        status.innerHTML = `✅ Proceso finalizado. ${totalIndexedSession} documentos procesados.`;
+                        break;
+                    }
+
+                    if (!force && pending === 0) {
+                        status.innerHTML = `✅ ¡Completado! Pendientes finalizados.`;
+                        break;
+                    }
+
+                } catch (error) {
+                    status.innerHTML = `❌ Error de red: ${error.message}`;
                     break;
                 }
-
-                totalIndexedSession += result.indexed; // indexed in this batch
-                pending = result.pending; // remaining pending
-
-                status.innerHTML = `✅ Indexados: ${totalIndexedSession}, Pendientes: ${pending}`;
-
-                if (result.errors && result.errors.length > 0) {
-                    console.log('Errores de indexación:', result.errors);
-                }
-
-                // Stop conditions
-                if (!force && result.indexed === 0 && pending > 0) {
-                    status.innerHTML += ` <span style="color: var(--warning);">(${pending} archivos no encontrados o ilegibles)</span>`;
-                    break;
-                }
-
-                if (force && result.indexed === 0) {
-                    // In force mode, if we process a batch and index 0, check if we are done
-                    // But force re-index might re-process already indexed ones, so server logic handles limits?
-                    // Actually SystemController force logic selects by LIMIT batchSize. 
-                    // It doesn't track "processed" vs "unprocessed" in force mode easily unless we add an offset or flag.
-                    // Let's assume the user wants to run it once or twice. 
-                    // SystemController with force=true selects LIMIT ? docs. It selects the FIRST N docs. 
-                    // It does NOT iterate. 
-
-                    // Wait, SystemController query for force is: "SELECT ... LIMIT ?"
-                    // This means it ALWAYS selects the first N docs. It doesn't paginate.
-                    // This loop will just process the same first 10 docs over and over if we don't paginate.
-
-                    // I NEED TO FIX SYSTEMCONTROLLER TO SUPPORT PAGINATION OR OFFSET FOR FORCE MODE.
-                    // For now, let's just run ONE big batch or rely on "pending" logic which is not relevant for force.
-
-                    // Let's break after one batch for force mode in this iteration of the fix, 
-                    // OR update SystemController to handle offset.
-
-                    // Updating SystemController is better. But for now let's just run it until pending logic works?
-                    // No, force ignores pending.
-
-                    status.innerHTML = `✅ Proceso finalizado. ${totalIndexedSession} documentos procesados.`;
-                    break;
-                }
-
-                if (!force && pending === 0) {
-                    status.innerHTML = `✅ ¡Completado! Pendientes finalizados.`;
-                    break;
-                }
-
-            } catch (error) {
-                status.innerHTML = `❌ Error de red: ${error.message}`;
-                break;
             }
-        }
 
-        btn.disabled = false;
-        btn.textContent = originalText;
-        isIndexing = false;
+            btn.disabled = false;
+            btn.textContent = originalText;
+            isIndexing = false;
         }
 
         // ============ Single Code Search Tab ============
