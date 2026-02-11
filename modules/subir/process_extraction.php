@@ -99,15 +99,21 @@ try {
     $stmtUpdate = $db->prepare("UPDATE documentos SET datos_extraidos = ?, estado = 'procesado' WHERE id = ?");
     $stmtUpdate->execute([json_encode($datosExtraidos), $docId]);
 
-    // Insertar códigos en tabla relacional
+    // MERGE de códigos: agregar los auto-extraídos SIN borrar los manuales del usuario
     if (!empty($codes)) {
-        // Limpiar códigos anteriores si los hubiera (reproceso)
-        $db->prepare("DELETE FROM codigos WHERE documento_id = ?")->execute([$docId]);
+        // Obtener códigos ya existentes (los que el usuario ingresó manualmente)
+        $existingStmt = $db->prepare("SELECT codigo FROM codigos WHERE documento_id = ?");
+        $existingStmt->execute([$docId]);
+        $existingCodes = array_map('strtolower', $existingStmt->fetchAll(PDO::FETCH_COLUMN));
 
         $insertCode = $db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
+        $added = 0;
         foreach (array_unique($codes) as $c) {
-            if (!empty($c)) {
-                $insertCode->execute([$docId, trim($c)]);
+            $c = trim($c);
+            // Solo insertar si no existe ya (evita duplicados con los manuales)
+            if (!empty($c) && !in_array(strtolower($c), $existingCodes)) {
+                $insertCode->execute([$docId, $c]);
+                $added++;
             }
         }
     }
