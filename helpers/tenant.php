@@ -66,6 +66,10 @@ function open_client_db(string $code): PDO
         $dsn = 'sqlite:' . $path;
         $db = new PDO($dsn);
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+        // Auto-migración: Asegurar que el esquema esté actualizado (ej: tablas nuevas)
+        ensure_client_schema($db);
+
         return $db;
     } catch (PDOException $e) {
         // Mensaje más descriptivo con permisos
@@ -378,4 +382,31 @@ function get_client_config(string $code): ?array
     } catch (PDOException $e) {
         return null;
     }
+}
+
+/**
+ * Asegura que el esquema de la base de datos del cliente esté actualizado.
+ * Se ejecuta automáticamente al abrir la conexión para garantizar que todas las tablas existan.
+ * Esto permite desplegar actualizaciones de esquema sin migraciones manuales complejas.
+ *
+ * @param PDO $db Conexión a la base de datos del cliente.
+ */
+function ensure_client_schema(PDO $db): void
+{
+    // Tabla configuracion_extraccion (Agregada en Update Feb 2026)
+    // Usada por el módulo de subida para definir patrones de códigos.
+    $db->exec(
+        "CREATE TABLE IF NOT EXISTS configuracion_extraccion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prefix TEXT DEFAULT '',
+            terminator TEXT DEFAULT '/',
+            min_length INTEGER DEFAULT 4,
+            max_length INTEGER DEFAULT 50,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )"
+    );
+
+    // Seed inicial si está vacía: Insertamos configuración por defecto
+    // Usamos INSERT OR IGNORE para evitar duplicados si ya existe ID 1
+    $db->exec("INSERT OR IGNORE INTO configuracion_extraccion (id, prefix, terminator, min_length, max_length) VALUES (1, '', '/', 4, 50)");
 }
