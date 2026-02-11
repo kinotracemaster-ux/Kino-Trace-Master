@@ -15,6 +15,7 @@
 // Ruta base del proyecto
 define('BASE_DIR', __DIR__);
 define('APP_VERSION', substr(md5_file(__FILE__), 0, 8)); // Cache buster estable basado en contenido
+define('APP_BRANCH', getenv('APP_BRANCH') ?: 'main'); // Rama activa (para indicador visual)
 
 // Directorio donde se almacenan los datos de cada cliente
 define('CLIENTS_DIR', BASE_DIR . DIRECTORY_SEPARATOR . 'clients');

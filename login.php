@@ -196,6 +196,13 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
         </div>
     </div>
 
+    <?php if (defined('APP_BRANCH') && APP_BRANCH !== 'main'): ?>
+        <div
+            style="position:fixed;top:0;left:0;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;font-size:0.7rem;font-weight:700;padding:0.25rem 1rem;z-index:10000;letter-spacing:0.1em;border-radius:0 0 8px 0;box-shadow:0 2px 8px rgba(245,158,11,0.4);pointer-events:none;">
+            🧪 <?= strtoupper(htmlspecialchars(APP_BRANCH)) ?>
+        </div>
+    <?php endif; ?>
+
     <footer class="app-footer" style="position: fixed; bottom: 0; left: 0; right: 0; background: transparent;">
         Elaborado por <a href="#">KINO GENIUS</a>
     </footer>
