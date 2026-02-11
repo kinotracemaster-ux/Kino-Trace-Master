@@ -512,6 +512,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             gap: 0.5rem;
             flex-wrap: wrap;
             margin-top: 1rem;
+            justify-content: center;
         }
 
         .code-count {
