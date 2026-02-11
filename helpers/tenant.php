@@ -154,7 +154,17 @@ function create_client_structure(
         . "    discrepancias TEXT,\n"
         . "    FOREIGN KEY(documento_origen_id) REFERENCES documentos(id) ON DELETE CASCADE,\n"
         . "    FOREIGN KEY(documento_destino_id) REFERENCES documentos(id) ON DELETE CASCADE\n"
-        . ");"
+        . ");\n"
+        . "CREATE TABLE IF NOT EXISTS configuracion_extraccion (\n"
+        . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+        . "    prefix TEXT DEFAULT '',\n"
+        . "    terminator TEXT DEFAULT '/',\n"
+        . "    min_length INTEGER DEFAULT 4,\n"
+        . "    max_length INTEGER DEFAULT 50,\n"
+        . "    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n"
+        . ");\n"
+        . "INSERT INTO configuracion_extraccion (id, prefix, terminator, min_length, max_length) \n"
+        . "SELECT 1, '', '/', 4, 50 WHERE NOT EXISTS (SELECT 1 FROM configuracion_extraccion);"
     );
 
     // 3. Registrar cliente en la base de control
