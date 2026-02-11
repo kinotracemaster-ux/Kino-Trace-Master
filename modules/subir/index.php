@@ -500,14 +500,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             color: white;
         }
 
-        .btn-ai {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
 
-        .btn-ai:hover {
-            opacity: 0.9;
-        }
 
         .btn:disabled {
             opacity: 0.5;
@@ -625,14 +618,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
         }
 
-        .ai-badge {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 0.15rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            margin-left: 0.5rem;
-        }
+
 
         /* Responsive Improvements */
         @media (max-width: 900px) {
@@ -858,11 +844,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <button type="button" class="btn btn-primary" onclick="extractCodes()">
                         🔍 Extraer Códigos del PDF
                     </button>
-                    <?php if ($geminiConfigured): ?>
-                        <button type="button" class="btn btn-ai" onclick="aiExtract()">
-                            🤖 Extracción con IA <span class="ai-badge">Gemini</span>
-                        </button>
-                    <?php endif; ?>
+
                 </div>
 
                 <div class="loading" id="extractLoading">
