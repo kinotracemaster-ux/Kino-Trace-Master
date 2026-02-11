@@ -584,43 +584,93 @@
 </script>
 
 <?php if (empty($_SESSION['is_admin'])): ?>
-    <!-- Protección contra inspección casual -->
-    <script>
-        (function () {
-            // Bloquear atajos de teclado de DevTools
-            document.addEventListener('keydown', function (e) {
-                // F12
-                if (e.key === 'F12') { e.preventDefault(); return false; }
-                // Ctrl+Shift+I (Inspector), Ctrl+Shift+J (Console), Ctrl+Shift+C (Selector)
-                if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes(e.key.toUpperCase())) { e.preventDefault(); return false; }
-                // Ctrl+U (Ver fuente)
-                if (e.ctrlKey && e.key.toUpperCase() === 'U') { e.preventDefault(); return false; }
-            });
+<!-- Protección de propiedad intelectual — KINO GENIUS -->
+<style>
+    /* Bloquear selección de texto (excepto inputs/textareas) */
+    body, body * {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+    }
+    /* Permitir selección SOLO en campos de formulario */
+    input, textarea, select, [contenteditable="true"], .allow-select, .allow-select * {
+        -webkit-user-select: text !important;
+        -moz-user-select: text !important;
+        -ms-user-select: text !important;
+        user-select: text !important;
+    }
+    /* Ocultar impresión */
+    @media print {
+        body { display: none !important; }
+        html::after {
+            content: "Contenido protegido — KINO GENIUS ©";
+            display: block;
+            text-align: center;
+            padding: 2rem;
+            font-size: 2rem;
+            color: #999;
+        }
+    }
+</style>
+<script>
+(function(){
+    // === 1. Bloquear atajos de teclado ===
+    document.addEventListener('keydown', function(e) {
+        // F12
+        if (e.key === 'F12') { e.preventDefault(); return false; }
+        // Ctrl+Shift+I/J/C (DevTools)
+        if (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key.toUpperCase())) { e.preventDefault(); return false; }
+        // Ctrl+U (Ver fuente)
+        if (e.ctrlKey && e.key.toUpperCase() === 'U') { e.preventDefault(); return false; }
+        // Ctrl+S (Guardar página)
+        if (e.ctrlKey && e.key.toUpperCase() === 'S') { e.preventDefault(); return false; }
+        // Ctrl+P (Imprimir)
+        if (e.ctrlKey && e.key.toUpperCase() === 'P') { e.preventDefault(); return false; }
+        // Ctrl+A (Seleccionar todo) — solo fuera de inputs
+        if (e.ctrlKey && e.key.toUpperCase() === 'A') {
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag !== 'input' && tag !== 'textarea') { e.preventDefault(); return false; }
+        }
+        // Ctrl+C/X (Copiar/Cortar) — solo fuera de inputs
+        if (e.ctrlKey && ['C','X'].includes(e.key.toUpperCase())) {
+            var tag2 = (e.target.tagName || '').toLowerCase();
+            if (tag2 !== 'input' && tag2 !== 'textarea') { e.preventDefault(); return false; }
+        }
+    });
 
-            // Bloquear menú contextual (clic derecho)
-            document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    // === 2. Bloquear clic derecho ===
+    document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
-            // Limpiar consola y mostrar advertencia
-            function warnConsole() {
-                console.clear();
-                console.log('%c⚠️ ACCESO RESTRINGIDO', 'color:#ef4444;font-size:2rem;font-weight:bold;');
-                console.log('%cEsta consola es solo para personal autorizado.\nEl uso no autorizado puede ser registrado.', 'color:#94a3b8;font-size:1rem;');
-            }
+    // === 3. Bloquear arrastrar elementos ===
+    document.addEventListener('dragstart', function(e) { e.preventDefault(); });
+    document.addEventListener('drop', function(e) { e.preventDefault(); });
 
-            // Detectar DevTools abierto (por tamaño de ventana)
-            var dtOpen = false;
-            setInterval(function () {
-                var widthThreshold = window.outerWidth - window.innerWidth > 160;
-                var heightThreshold = window.outerHeight - window.innerHeight > 160;
-                if (widthThreshold || heightThreshold) {
-                    if (!dtOpen) { dtOpen = true; warnConsole(); }
-                } else {
-                    dtOpen = false;
-                }
-            }, 1500);
+    // === 4. Bloquear copiar/cortar fuera de inputs ===
+    ['copy','cut'].forEach(function(evt){
+        document.addEventListener(evt, function(e) {
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag !== 'input' && tag !== 'textarea') { e.preventDefault(); }
+        });
+    });
 
-            // Limpiar consola al inicio
-            warnConsole();
-        })();
-    </script>
+    // === 5. Consola — advertencia ===
+    function warnConsole() {
+        console.clear();
+        console.log('%c⛔ KINO GENIUS — Propiedad Intelectual Protegida', 'color:#ef4444;font-size:1.5rem;font-weight:bold;');
+        console.log('%cEste software es propiedad exclusiva de KINO GENIUS.\nCualquier intento de copia o ingeniería inversa está prohibido.\n© ' + new Date().getFullYear(), 'color:#94a3b8;font-size:0.9rem;');
+    }
+
+    // === 6. Detectar DevTools ===
+    var dtOpen = false;
+    setInterval(function(){
+        var w = window.outerWidth - window.innerWidth > 160;
+        var h = window.outerHeight - window.innerHeight > 160;
+        if (w || h) { if (!dtOpen) { dtOpen = true; warnConsole(); } }
+        else { dtOpen = false; }
+    }, 1500);
+
+    warnConsole();
+})();
+</script>
 <?php endif; ?>
