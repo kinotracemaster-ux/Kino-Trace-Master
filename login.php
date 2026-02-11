@@ -162,6 +162,13 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
                 </button>
             </form>
 
+            <div style="text-align: center; margin-top: 1rem;">
+                <a href="forgot_password.php"
+                    style="font-size: 0.8rem; color: var(--text-muted); text-decoration: none;">
+                    ¿Olvidaste tu contraseña?
+                </a>
+            </div>
+
             <div class="admin-link">
                 <button type="button" onclick="openAdminModal()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24"

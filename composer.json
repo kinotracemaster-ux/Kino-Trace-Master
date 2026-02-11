@@ -3,8 +3,9 @@
     "description": "Kino Trace Application",
     "type": "project",
     "require": {
-        "php": "7.4",
-        "setasign/fpdi-tcpdf": "^2.3"
+        "php": ">=7.4",
+        "setasign/fpdi-tcpdf": "^2.3",
+        "phpmailer/phpmailer": "^7.0"
     },
     "authors": [
         {

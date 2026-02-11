@@ -83,6 +83,18 @@ try {
         . "    fecha_creacion TEXT DEFAULT (datetime('now'))\n"
         . ");"
     );
+    // Migración: agregar columnas de email y recuperación de contraseña
+    $newColumns = [
+        'email' => "ALTER TABLE control_clientes ADD COLUMN email TEXT",
+        'reset_token' => "ALTER TABLE control_clientes ADD COLUMN reset_token TEXT",
+        'reset_token_expiry' => "ALTER TABLE control_clientes ADD COLUMN reset_token_expiry TEXT",
+    ];
+    foreach ($newColumns as $col => $sql) {
+        try {
+            $centralDb->exec($sql);
+        } catch (PDOException $e) { /* columna ya existe */
+        }
+    }
 } catch (PDOException $e) {
     // Si la conexión falla, detener la ejecución con un mensaje claro
     die('❌ Error conectando a la base central: ' . $e->getMessage());

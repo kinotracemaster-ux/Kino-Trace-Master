@@ -96,6 +96,7 @@ function open_client_db(string $code): PDO
  * @param string $titulo Título de la aplicación que verá el cliente.
  * @param string $colorP Color primario de la interfaz del cliente.
  * @param string $colorS Color secundario de la interfaz del cliente.
+ * @param string $email Correo electrónico del cliente (para recuperación de contraseña).
  * @return void
  */
 function create_client_structure(
@@ -104,7 +105,8 @@ function create_client_structure(
     string $password_hash,
     string $titulo = '',
     string $colorP = '#2563eb',
-    string $colorS = '#F87171'
+    string $colorS = '#F87171',
+    string $email = ''
 ): void {
     global $centralDb;
     $code = sanitize_code($code);
@@ -179,10 +181,10 @@ function create_client_structure(
     // Insert the new client into the control table. Note: we do not include
     // 'activo' here because the schema defines a default of 1 (active).
     $stmt = $centralDb->prepare(
-        'INSERT INTO control_clientes (codigo, nombre, password_hash, titulo, color_primario, color_secundario) ' .
-        'VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO control_clientes (codigo, nombre, password_hash, titulo, color_primario, color_secundario, email) ' .
+        'VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->execute([$code, $name, $password_hash, $titulo, $colorP, $colorS]);
+    $stmt->execute([$code, $name, $password_hash, $titulo, $colorP, $colorS, $email]);
 }
 
 /**

@@ -33,6 +33,7 @@ try {
             $code = sanitize_code($_POST['code'] ?? '');
             $name = trim($_POST['name'] ?? '');
             $password = $_POST['password'] ?? '';
+            $email = trim($_POST['email'] ?? '');
             $titulo = trim($_POST['titulo'] ?? '');
             $colorP = trim($_POST['color_primario'] ?? '#3b82f6');
             $colorS = trim($_POST['color_secundario'] ?? '#64748b');
@@ -48,7 +49,7 @@ try {
                     $error = 'Ya existe un cliente con ese código.';
                 } else {
                     $hash = password_hash($password, PASSWORD_DEFAULT);
-                    create_client_structure($code, $name, $hash, $titulo, $colorP, $colorS);
+                    create_client_structure($code, $name, $hash, $titulo, $colorP, $colorS, $email);
 
                     $extraMsg = '';
 
@@ -169,13 +170,14 @@ try {
         elseif ($action === 'update_colors') {
             $code = sanitize_code($_POST['client_code'] ?? '');
             $titulo = trim($_POST['titulo'] ?? '');
+            $email = trim($_POST['email'] ?? '');
             $colorP = trim($_POST['color_primario'] ?? '#3b82f6');
             $colorS = trim($_POST['color_secundario'] ?? '#64748b');
 
             if ($code !== '') {
-                $stmt = $centralDb->prepare('UPDATE control_clientes SET titulo = ?, color_primario = ?, color_secundario = ? WHERE codigo = ?');
-                $stmt->execute([$titulo, $colorP, $colorS, $code]);
-                
+                $stmt = $centralDb->prepare('UPDATE control_clientes SET titulo = ?, email = ?, color_primario = ?, color_secundario = ? WHERE codigo = ?');
+                $stmt->execute([$titulo, $email, $colorP, $colorS, $code]);
+
                 $logoMsg = '';
                 // Process logo upload if provided
                 if (!empty($_FILES['logo_file']['tmp_name']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
@@ -186,14 +188,15 @@ try {
                         // Remove old logos
                         foreach (['png', 'jpg', 'jpeg', 'gif'] as $ext) {
                             $old = $logoDir . 'logo.' . $ext;
-                            if (file_exists($old)) unlink($old);
+                            if (file_exists($old))
+                                unlink($old);
                         }
                         if (move_uploaded_file($_FILES['logo_file']['tmp_name'], $logoPath)) {
                             $logoMsg = ' + Logo actualizado.';
                         }
                     }
                 }
-                
+
                 $message = "✅ Cliente '{$code}' actualizado." . $logoMsg;
             }
         }
@@ -296,7 +299,7 @@ try {
 
 // Obtener lista de clientes con detalles
 $clients = $centralDb->query("
-    SELECT codigo, nombre, titulo, color_primario, color_secundario, activo, fecha_creacion 
+    SELECT codigo, nombre, titulo, email, color_primario, color_secundario, activo, fecha_creacion 
     FROM control_clientes 
     ORDER BY nombre
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -601,6 +604,9 @@ $clientCodes = array_column($clients, 'codigo');
                         <?php if ($cli['titulo']): ?>
                             <div class="client-meta">📍 <?= htmlspecialchars($cli['titulo']) ?></div>
                         <?php endif; ?>
+                        <?php if (!empty($cli['email'])): ?>
+                            <div class="client-meta">📧 <?= htmlspecialchars($cli['email']) ?></div>
+                        <?php endif; ?>
 
                         <div class="client-colors">
                             <div class="color-swatch"
@@ -613,7 +619,7 @@ $clientCodes = array_column($clients, 'codigo');
 
                         <div class="client-actions">
                             <button class="btn btn-secondary btn-xs"
-                                onclick="openEditModal('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['titulo']) ?>', '<?= htmlspecialchars($cli['color_primario']) ?>', '<?= htmlspecialchars($cli['color_secundario']) ?>')">
+                                onclick="openEditModal('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['titulo']) ?>', '<?= htmlspecialchars($cli['email'] ?? '') ?>', '<?= htmlspecialchars($cli['color_primario']) ?>', '<?= htmlspecialchars($cli['color_secundario']) ?>')">
                                 Editar
                             </button>
                             <button class="btn btn-secondary btn-xs"
@@ -670,9 +676,16 @@ $clientCodes = array_column($clients, 'codigo');
                                 <input type="password" class="form-input" name="password" required>
                             </div>
                             <div class="form-group">
+                                <label class="form-label">📧 Correo Electrónico</label>
+                                <input type="email" class="form-input" name="email" placeholder="cliente@empresa.com">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
                                 <label class="form-label">Título del Dashboard</label>
                                 <input type="text" class="form-input" name="titulo" placeholder="Mi Empresa">
                             </div>
+                            <div class="form-group"></div>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Colores</label>
@@ -804,6 +817,11 @@ $clientCodes = array_column($clients, 'codigo');
                     <input type="text" class="form-input" name="titulo" id="editTitulo">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">📧 Correo Electrónico</label>
+                    <input type="email" class="form-input" name="email" id="editEmail"
+                        placeholder="cliente@empresa.com">
+                </div>
+                <div class="form-group">
                     <label class="form-label">Colores</label>
                     <div class="color-row">
                         <div>
@@ -819,7 +837,8 @@ $clientCodes = array_column($clients, 'codigo');
                 <div class="form-group">
                     <label class="form-label">🖼️ Logo del Cliente</label>
                     <div id="currentLogoPreview" style="margin-bottom: 0.5rem;"></div>
-                    <input type="file" class="form-input" name="logo_file" accept=".png,.jpg,.jpeg,.gif" style="padding: 0.5rem;">
+                    <input type="file" class="form-input" name="logo_file" accept=".png,.jpg,.jpeg,.gif"
+                        style="padding: 0.5rem;">
                     <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
                         Dejar vacío para mantener el logo actual
                     </p>
@@ -857,9 +876,10 @@ $clientCodes = array_column($clients, 'codigo');
     </div>
 
     <script>
-        function openEditModal(code, titulo, colorP, colorS) {
+        function openEditModal(code, titulo, email, colorP, colorS) {
             document.getElementById('editClientCode').value = code;
             document.getElementById('editTitulo').value = titulo || '';
+            document.getElementById('editEmail').value = email || '';
             document.getElementById('editColorP').value = colorP || '#3b82f6';
             document.getElementById('editColorS').value = colorS || '#64748b';
             document.getElementById('editModal').classList.add('active');
