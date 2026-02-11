@@ -296,8 +296,8 @@ function extract_with_ocr(string $pdfPath, array $options = []): string
  * Extrae texto con coordenadas usando Tesseract OCR con formato HOCR.
  * Convierte una página específica del PDF a imagen y aplica OCR.
  * 
- * OPTIMIZADO v3:
- * - DPI 150 (balance velocidad/calidad para búsqueda OCR)
+ * OPTIMIZADO v4:
+ * - DPI 96 (prioridad velocidad para resaltado visual, coordenadas suficientes)
  * - Solo 1 ejecución de Tesseract (HOCR + OEM 1 LSTM-only), texto se reconstruye de las palabras
  * 
  * @param string $pdfPath Ruta al archivo PDF.
@@ -329,8 +329,8 @@ function extract_with_ocr_coordinates(string $pdfPath, int $pageNum = 1): array
         $imagePrefix = $tempDir . '/page';
         $escapedPrefix = escapeshellarg($imagePrefix);
 
-        // -r 150 DPI (balance velocidad/calidad para OCR)
-        $cmdConvert = "$pdftoppmPath -png -gray -r 150 -f $pageNum -l $pageNum $escapedPdf $escapedPrefix";
+        // -r 96 DPI (prioridad velocidad para resaltado, coordenadas suficientes)
+        $cmdConvert = "$pdftoppmPath -png -gray -r 96 -f $pageNum -l $pageNum $escapedPdf $escapedPrefix";
         exec($cmdConvert, $output, $returnCode);
 
         // Buscar la imagen generada

@@ -1038,8 +1038,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                             const termIndexMap = new Map();
                             allTerms.forEach((t, idx) => termIndexMap.set(t.toLowerCase(), idx));
 
-                            // Dibujar cada rectángulo con padding dinámico y color por término
-                            for (const hl of result.highlights) {
+                            // Dibujar cada rectángulo PROGRESIVAMENTE (uno por uno)
+                            // Esto da la percepción visual de "escaneando y resaltando"
+                            const highlights = result.highlights;
+                            for (let i = 0; i < highlights.length; i++) {
+                                const hl = highlights[i];
                                 // Padding dinámico proporcional al alto de la palabra
                                 const padX = hl.h * 0.05; // 5% del alto
                                 const padY = hl.h * 0.10; // 10% del alto
@@ -1055,9 +1058,18 @@ $docIdForOcr = $documentId; // For OCR fallback
                                     top: ${(hl.y - padY) * scaleY}px;
                                     width: ${(hl.w + padX * 2) * scaleX}px;
                                     height: ${(hl.h + padY * 2) * scaleY}px;
+                                    opacity: 0;
                                 `;
                                 rect.title = hl.term;
                                 overlay.appendChild(rect);
+
+                                // Efecto progresivo: cada highlight aparece con delay escalonado
+                                ((el, delay) => {
+                                    setTimeout(() => {
+                                        el.style.opacity = '1';
+                                        el.style.animation = 'highlightFadeIn 0.3s ease-out';
+                                    }, delay);
+                                })(rect, i * 60); // 60ms entre cada highlight
                             }
 
                             wrapper.appendChild(overlay);
