@@ -806,14 +806,19 @@ $docIdForOcr = $documentId; // For OCR fallback
             const processPage = async (i) => {
                 updateStatus(i);
                 try {
-                    const docId = <?= $docIdForOcr ?>;
-                    const termsStr = encodeURIComponent(termsToFind.join(','));
-                    const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${i}&terms=${termsStr}`);
-                    const ocrResult = await ocrResp.json();
-
-                    // OPTIMIZACIÓN: Guardar resultado en cache para evitar petición duplicada
-                    if (ocrResult.success) {
-                        ocrResultsCache.set(i, ocrResult);
+                    let ocrResult;
+                    // OPTIMIZACIÓN: Usar cache si ya existe (ej: renderizado manual previo)
+                    if (ocrResultsCache.has(i)) {
+                        ocrResult = ocrResultsCache.get(i);
+                    } else {
+                        const docId = <?= $docIdForOcr ?>;
+                        const termsStr = encodeURIComponent(termsToFind.join(','));
+                        const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${i}&terms=${termsStr}`);
+                        ocrResult = await ocrResp.json();
+                        
+                        if (ocrResult.success) {
+                            ocrResultsCache.set(i, ocrResult);
+                        }
                     }
 
                     // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
@@ -922,21 +927,24 @@ $docIdForOcr = $documentId; // For OCR fallback
                 wrapper.style.minHeight = "auto";
                 wrapper.style.color = "inherit";
 
-                // 2. Aplicar highlights OCR si hay términos
+                // 2. Aplicar highlights OCR de forma NO BLOQUEANTE
+                // La página ya es visible — highlights se agregan encima como overlay
                 const allTerms = [...hits, ...context];
                 if (allTerms.length > 0) {
-                    await applyOcrHighlight(wrapper, null, pageNum, allTerms);
-
-                    // Auto-scroll al primer resaltado encontrado
-                    if (!hasScrollToMark) {
-                        const firstMark = wrapper.querySelector('.ocr-highlight');
-                        if (firstMark) {
-                            hasScrollToMark = true;
-                            setTimeout(() => {
-                                firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }, 500);
+                    // Fire-and-forget: no bloquea el renderizado de la página
+                    applyOcrHighlight(wrapper, null, pageNum, allTerms).then(() => {
+                        wrapper.dataset.rendered = 'ocr-complete';
+                        // Auto-scroll al primer resaltado encontrado
+                        if (!hasScrollToMark) {
+                            const firstMark = wrapper.querySelector('.ocr-highlight');
+                            if (firstMark) {
+                                hasScrollToMark = true;
+                                setTimeout(() => {
+                                    firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }, 300);
+                            }
                         }
-                    }
+                    }).catch(e => console.warn('OCR highlight error:', e));
                 }
 
             } catch (err) {
@@ -1283,7 +1291,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                         if (imagesLoaded === totalImages) {
                             setTimeout(() => window.print(), 300);
              }
-                    };
+         };
                 }
             });
         }

@@ -439,7 +439,8 @@ if (!empty($searchTerm)) {
 
                 // M7: OCR fallback si no hay texto nativo O si Mark.js no encontró nada
                 if (termsToHighlight.length > 0 && (!hasNativeText || !markFound)) {
-                    await applyOcrHighlight(wrapper, pageNum);
+                    // Fire-and-forget: no bloquea el renderizado
+                    applyOcrHighlight(wrapper, pageNum).catch(e => console.warn('OCR fallback error:', e));
                 }
 
             } catch (err) {
