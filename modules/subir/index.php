@@ -87,6 +87,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!empty($_FILES['file']['tmp_name']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
                 $originalFileName = $_FILES['file']['name'];
 
+                /* 
+                // OPTIMIZACIÓN: Permitir duplicados a petición del usuario
+                // Se comenta la validación de nombre y hash para agilizar la subida
+
                 // Validar nombre de archivo duplicado
                 $checkFileStmt = $db->prepare("SELECT id, numero FROM documentos WHERE ruta_archivo LIKE ?");
                 $checkFileStmt->execute(['%/' . basename($originalFileName)]);
@@ -103,6 +107,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if ($existingHash) {
                     throw new Exception('⚠️ Este archivo ya fue subido anteriormente (Documento #' . $existingHash['numero'] . '). El contenido es idéntico.');
                 }
+                */
+
+                // Calculamos hash solo para guardarlo, pero sin validar unicidad
+                $tempHash = hash_file('sha256', $_FILES['file']['tmp_name']);
 
                 // Crear directorio
                 $clientDir = CLIENTS_DIR . '/' . $code;
@@ -286,7 +294,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             font-family: 'Segoe UI', system-ui, sans-serif;
             background: #f3f4f6;
             margin: 0;
-            min-height: auto !important; /* PREVENT IFRAME RESIZE LOOP */
+            min-height: auto !important;
+            /* PREVENT IFRAME RESIZE LOOP */
         }
 
         .container {
