@@ -201,7 +201,7 @@ try {
             }
         }
 
-        // IMPORTAR SQL
+        // IMPORTAR SQL (MySQL dump → KINO-TRACE SQLite)
         elseif ($action === 'import_sql') {
             $code = sanitize_code($_POST['client_code'] ?? '');
 
@@ -211,44 +211,72 @@ try {
                 $sqlContent = file_get_contents($_FILES['sql_file']['tmp_name']);
                 $db = open_client_db($code);
 
-                // Clean MySQL-specific syntax for SQLite compatibility
-                $sqlContent = preg_replace('/\/\*!.*?\*\/;?/s', '', $sqlContent); // Remove MySQL comments /*!...*/
-                $sqlContent = preg_replace('/SET\s+[^;]+;/i', '', $sqlContent); // Remove SET statements
-                $sqlContent = preg_replace('/LOCK\s+TABLES[^;]+;/i', '', $sqlContent); // Remove LOCK TABLES
-                $sqlContent = preg_replace('/UNLOCK\s+TABLES;?/i', '', $sqlContent); // Remove UNLOCK TABLES
-                $sqlContent = preg_replace('/ENGINE\s*=\s*\w+/i', '', $sqlContent); // Remove ENGINE=
-                $sqlContent = preg_replace('/DEFAULT\s+CHARSET\s*=\s*\w+/i', '', $sqlContent); // Remove CHARSET
-                $sqlContent = preg_replace('/COLLATE\s*=?\s*\w+/i', '', $sqlContent); // Remove COLLATE
-                $sqlContent = preg_replace('/AUTO_INCREMENT\s*=\s*\d+/i', '', $sqlContent); // Remove AUTO_INCREMENT=N
-                $sqlContent = preg_replace('/ON\s+UPDATE\s+CURRENT_TIMESTAMP/i', '', $sqlContent); // Remove ON UPDATE
-                $sqlContent = preg_replace('/`/s', '"', $sqlContent); // Convert backticks to double quotes
-                $sqlContent = preg_replace('/int\s*\(\d+\)/i', 'INTEGER', $sqlContent); // int(11) -> INTEGER
-                $sqlContent = preg_replace('/varchar\s*\(\d+\)/i', 'TEXT', $sqlContent); // varchar -> TEXT
-                $sqlContent = preg_replace('/datetime/i', 'TEXT', $sqlContent); // datetime -> TEXT
-                $sqlContent = preg_replace('/--.*$/m', '', $sqlContent); // Remove -- comments
+                // Parse documents from INSERT INTO `documents`
+                preg_match_all(
+                    "/INSERT\s+INTO\s+`?documents`?.*?VALUES\s*(.+?)\s*;/si",
+                    $sqlContent,
+                    $docMatches
+                );
 
-                // Split into statements and execute
-                $statements = array_filter(array_map('trim', explode(';', $sqlContent)));
-                $executed = 0;
-                $errors = 0;
+                $idMap = []; // old_id => new_id
+                $docCount = 0;
+                $stmtDoc = $db->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo, original_path) VALUES (?, ?, ?, ?, ?)");
 
-                foreach ($statements as $stmt) {
-                    if (empty($stmt) || strlen($stmt) < 5)
-                        continue;
-                    try {
-                        $db->exec($stmt);
-                        $executed++;
-                    } catch (PDOException $e) {
-                        $errors++;
-                        // Continue with other statements
+                foreach ($docMatches[1] as $block) {
+                    preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                    foreach ($rows[1] as $row) {
+                        $vals = str_getcsv($row, ',', "'");
+                        if (count($vals) < 4)
+                            continue;
+                        $oldId = (int) trim($vals[0]);
+                        $name = trim($vals[1]);
+                        $date = trim($vals[2]);
+                        $path = trim($vals[3]);
+
+                        $stmtDoc->execute(['importado_sql', $name, $date, 'pending', $path]);
+                        $idMap[$oldId] = (int) $db->lastInsertId();
+                        $docCount++;
                     }
                 }
 
-                if ($errors > 0) {
-                    $message = "⚠️ SQL importado con {$executed} sentencias OK, {$errors} errores ignorados.";
-                } else {
-                    $message = "✅ SQL importado correctamente: {$executed} sentencias ejecutadas.";
+                // Parse codes from INSERT INTO `codes`
+                preg_match_all(
+                    "/INSERT\s+INTO\s+`?codes`?.*?VALUES\s*(.+?)\s*;/si",
+                    $sqlContent,
+                    $codeMatches
+                );
+
+                $codeCount = 0;
+                $stmtCode = $db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
+
+                foreach ($codeMatches[1] as $block) {
+                    preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                    foreach ($rows[1] as $row) {
+                        $vals = str_getcsv($row, ',', "'");
+                        if (count($vals) < 3)
+                            continue;
+                        $oldDocId = (int) trim($vals[1]);
+                        $codeVal = trim($vals[2]);
+
+                        $newDocId = $idMap[$oldDocId] ?? null;
+                        if ($newDocId) {
+                            $stmtCode->execute([$newDocId, $codeVal]);
+                            $codeCount++;
+                        }
+                    }
                 }
+
+                $extraMsg = "";
+
+                // Process ZIP if provided
+                if (!empty($_FILES['zip_file']['tmp_name']) && $_FILES['zip_file']['error'] === UPLOAD_ERR_OK) {
+                    require_once __DIR__ . '/../helpers/pdf_linker.php';
+                    $uploadDir = CLIENTS_DIR . "/{$code}/uploads/sql_import/";
+                    processZipAndLink($db, $_FILES['zip_file']['tmp_name'], $uploadDir, 'sql_import/');
+                    $extraMsg = " + PDFs del ZIP enlazados.";
+                }
+
+                $message = "✅ SQL importado: {$docCount} documentos, {$codeCount} códigos.{$extraMsg}";
             }
         }
 
@@ -773,7 +801,7 @@ $clientCodes = array_column($clients, 'codigo');
                     </form>
                 </div>
 
-                <!-- Import SQL -->
+                <!-- Import SQL + ZIP -->
                 <div class="form-card">
                     <h3>
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
@@ -781,7 +809,7 @@ $clientCodes = array_column($clients, 'codigo');
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
                         </svg>
-                        Importar SQL
+                        Importar SQL + ZIP
                     </h3>
                     <form method="post" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="import_sql">
@@ -795,10 +823,61 @@ $clientCodes = array_column($clients, 'codigo');
                             </select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Archivo SQL *</label>
-                            <input type="file" class="form-input" name="sql_file" accept=".sql" required>
+                            <label class="form-label">🗄️ Archivo SQL * (phpMyAdmin export)</label>
+                            <input type="file" class="form-input" name="sql_file" accept=".sql" required
+                                style="padding: 0.5rem;">
+                            <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                Tablas <code>documents</code> + <code>codes</code>
+                            </p>
                         </div>
-                        <button type="submit" class="btn btn-primary" style="width: 100%;">Importar SQL</button>
+                        <div class="form-group">
+                            <label class="form-label">📦 ZIP con PDFs (opcional)</label>
+                            <input type="file" class="form-input" name="zip_file" accept=".zip"
+                                style="padding: 0.5rem;">
+                            <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                Si el ZIP es muy grande, usa "Enlazar PDFs por Lotes" después
+                            </p>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">🗄️ Importar SQL</button>
+                    </form>
+                </div>
+
+                <!-- Batch ZIP Linking -->
+                <div class="form-card">
+                    <h3>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        Enlazar PDFs por Lotes
+                    </h3>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                        Sube ZIPs de PDFs para enlazar a documentos existentes. Puedes repetir varias veces.
+                    </p>
+                    <form id="batchZipForm" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label class="form-label">Cliente destino *</label>
+                            <select class="form-select" name="client_code" id="batchClient" required>
+                                <option value="">Seleccione cliente...</option>
+                                <?php foreach ($clientCodes as $c): ?>
+                                    <option value="<?= htmlspecialchars($c) ?>"><?= htmlspecialchars($c) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📦 ZIP con PDFs *</label>
+                            <input type="file" class="form-input" name="zip_file" accept=".zip" required
+                                style="padding: 0.5rem;">
+                            <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                Máximo ~400MB por lote. Repita para subir todos.
+                            </p>
+                        </div>
+                        <button type="button" class="btn btn-primary" style="width: 100%;" onclick="submitBatchZip()"
+                            id="batchBtn">
+                            📦 Subir y Enlazar Lote
+                        </button>
+                        <div id="batchResult" style="margin-top: 0.75rem; font-size: 0.85rem; display: none;"></div>
                     </form>
                 </div>
             </div>
@@ -903,6 +982,77 @@ $clientCodes = array_column($clients, 'codigo');
                 }
             });
         });
+
+        // Batch ZIP upload via AJAX
+        let batchCount = 0;
+        async function submitBatchZip() {
+            const form = document.getElementById('batchZipForm');
+            const btn = document.getElementById('batchBtn');
+            const resultDiv = document.getElementById('batchResult');
+            const clientCode = document.getElementById('batchClient').value;
+
+            if (!clientCode) { alert('Seleccione un cliente.'); return; }
+
+            const zipInput = form.querySelector('input[name="zip_file"]');
+            if (!zipInput.files.length) { alert('Seleccione un archivo ZIP.'); return; }
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Subiendo...';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ Subiendo y enlazando PDFs...';
+
+            // We need to set the session to the target client temporarily
+            const formData = new FormData();
+            formData.append('zip_file', zipInput.files[0]);
+            formData.append('client_code', clientCode);
+
+            try {
+                batchCount++;
+                const response = await fetch('../modules/importar_datos/link_zip_admin.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const text = await response.text();
+                let result;
+                try { result = JSON.parse(text); } catch (e) {
+                    resultDiv.innerHTML = '❌ Respuesta inválida: ' + text.substring(0, 200);
+                    btn.disabled = false;
+                    btn.textContent = '📦 Subir y Enlazar Lote';
+                    return;
+                }
+
+                let html = '';
+                if (result.success) {
+                    html += `<div style="color: var(--accent-success);">✅ Lote #${batchCount} completado</div>`;
+                    if (result.pending !== undefined) {
+                        html += `<div>📊 Documentos sin PDF: <strong>${result.pending}</strong></div>`;
+                        if (result.pending === 0) {
+                            html += `<div style="color: var(--accent-success);">🎉 ¡Todos los documentos tienen PDF!</div>`;
+                        }
+                    }
+                } else {
+                    html += `<div style="color: var(--accent-danger);">❌ ${result.error || 'Error desconocido'}</div>`;
+                }
+
+                if (result.logs) {
+                    result.logs.slice(-5).forEach(l => {
+                        html += `<div style="font-size: 0.75rem; color: var(--text-muted);">${l.msg}</div>`;
+                    });
+                }
+
+                resultDiv.innerHTML = html;
+
+                // Reset file input for next batch
+                zipInput.value = '';
+
+            } catch (err) {
+                resultDiv.innerHTML = '❌ Error de conexión: ' + err.message;
+            }
+
+            btn.disabled = false;
+            btn.textContent = '📦 Subir y Enlazar Lote';
+        }
     </script>
 </body>
 
