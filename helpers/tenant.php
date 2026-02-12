@@ -326,6 +326,16 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
         return $candidate;
     }
 
+    // Caso B2: ruta_archivo con prefijo erróneo de importación antigua
+    // Ej: "uploads/client_kino/csv_import/file.pdf" → buscar en ../../uploads/client_kino/csv_import/
+    $ruta = $document['ruta_archivo'];
+    if (preg_match('#^uploads/client_[^/]+/#', $ruta)) {
+        $legacyPath = dirname($uploadsDir, 2) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $ruta);
+        if (file_exists($legacyPath)) {
+            return $legacyPath;
+        }
+    }
+
     // Caso C: Ruta relativa a uploads, pero quitando posibles prefijos de carpeta en la ruta de BD
     // Si ruta_bd es "manifiestos/archivo.pdf", ya probamos eso arriba.
     // Si es solo "archivo.pdf", probamos en subcarpetas comunes.
@@ -336,6 +346,7 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
         'declaraciones',
         'facturas',
         'otros',
+        'csv_import',
         'tmp'
     ];
 

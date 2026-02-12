@@ -176,10 +176,10 @@ try {
 
         // 2. Process ZIP
         $zipFile = $_FILES['zip_file']['tmp_name'];
-        $uploadDir = __DIR__ . "/../../uploads/client_" . $clientCode . "/csv_import";
+        $uploadDir = __DIR__ . "/../../clients/" . $clientCode . "/uploads/csv_import";
 
         logMsg("📦 Procesando ZIP y Enlazando PDFs...");
-        processZipAndLink($db, $zipFile, $uploadDir, "uploads/client_{$clientCode}/csv_import/");
+        processZipAndLink($db, $zipFile, $uploadDir, "csv_import/");
 
         $response['success'] = true;
     }

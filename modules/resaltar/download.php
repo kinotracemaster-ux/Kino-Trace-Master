@@ -43,22 +43,11 @@ if (!$pdfPath) {
     die("Archivo PDF no encontrado en el servidor.<br>Rutas revisadas automáticamente.<br>Carpetas disponibles: $foldersStr");
 }
 
-// Calculate relative path for URL
-// Note: We need the relative URL from the webroot.
-// Assuming this script is in /modules/resaltar/
-// And uploads are in /clients/CODE/uploads/
-// We need to return ../../clients/CODE/uploads/RELATIVE_PATH
-
-// $uploadsDir is absolute path e.g. C:\...\clients\code\uploads\
-// $pdfPath is absolute path e.g. C:\...\clients\code\uploads\manifiestos\file.pdf
-
-// Get the part after uploads/
-$relativePath = substr($pdfPath, strlen($uploadsDir));
-// Ensure no leading slash issues
-$relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
-
-// Redirect to the static file
-$redirectUrl = "../../clients/{$clientCode}/uploads/{$relativePath}";
-
-header("Location: $redirectUrl");
+// Serve the file directly (works regardless of file location on disk)
+$filename = basename($pdfPath);
+header('Content-Type: application/pdf');
+header('Content-Disposition: inline; filename="' . $filename . '"');
+header('Content-Length: ' . filesize($pdfPath));
+header('Cache-Control: public, max-age=3600');
+readfile($pdfPath);
 exit;

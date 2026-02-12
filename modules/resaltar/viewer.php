@@ -137,7 +137,17 @@ if (!$pdfPath || !file_exists($pdfPath)) {
 
 $relativePath = str_replace($uploadsDir, '', $pdfPath);
 $baseUrl = '../../';
-$pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
+// If the path wasn't inside uploadsDir, build URL relative to project root
+if ($relativePath === $pdfPath || str_starts_with($relativePath, DIRECTORY_SEPARATOR) === false && str_contains($relativePath, 'uploads/client_')) {
+    $projectRoot = realpath(__DIR__ . '/../../');
+    $realPdfPath = realpath($pdfPath);
+    $relFromRoot = str_replace($projectRoot . DIRECTORY_SEPARATOR, '', $realPdfPath);
+    $relFromRoot = str_replace('\\', '/', $relFromRoot);
+    $pdfUrl = $baseUrl . $relFromRoot;
+} else {
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
+}
 $docIdForOcr = $documentId; // For OCR fallback
 ?>
 <!DOCTYPE html>

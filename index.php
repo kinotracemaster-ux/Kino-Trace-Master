@@ -1474,7 +1474,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                                 🖍️ Resaltar (${doc.all_codes ? doc.all_codes.split(',').length : docCodes.length})
                             </button>
                             
-                            <a href="clients/${clientCode}/uploads/${doc.ruta_archivo}" target="_blank" 
+                            <a href="modules/resaltar/download.php?doc=${doc.id}" target="_blank" 
                                class="btn btn-secondary"
                                style="background-color: white; border: 1px solid #d1d5db; color: #374151; padding: 0.5rem 1rem; border-radius: 6px; text-decoration: none; font-size: 0.875rem;">
                                 📄 Original

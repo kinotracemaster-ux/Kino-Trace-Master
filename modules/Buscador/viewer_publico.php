@@ -51,7 +51,18 @@ if (!$pdfPath || !file_exists($pdfPath)) {
 
 $relativePath = str_replace($uploadsDir, '', $pdfPath);
 $baseUrl = '../../';
-$pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
+// If the path wasn't inside uploadsDir, build URL relative to project root
+if ($relativePath === $pdfPath || str_starts_with($relativePath, DIRECTORY_SEPARATOR) === false && str_contains($relativePath, 'uploads/client_')) {
+    // Legacy path or path outside standard uploads dir → use relative to project root
+    $projectRoot = realpath(__DIR__ . '/../../');
+    $realPdfPath = realpath($pdfPath);
+    $relativePath = str_replace($projectRoot . DIRECTORY_SEPARATOR, '', $realPdfPath);
+    $relativePath = str_replace('\\', '/', $relativePath);
+    $pdfUrl = $baseUrl . $relativePath;
+} else {
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
+}
 
 // Preparar términos a resaltar
 $termsToHighlight = [];
