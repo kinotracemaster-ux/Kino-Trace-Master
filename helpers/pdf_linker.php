@@ -6,6 +6,14 @@
  * Extracted from modules/importar_sql/process.php to support CSV/Excel mass import.
  */
 
+// Fallback logMsg for contexts that don't define it (e.g. admin panel)
+if (!function_exists('logMsg')) {
+    function logMsg($msg, $type = "info")
+    {
+        // silent — caller can define their own logMsg before including this file
+    }
+}
+
 if (!function_exists('normalizeKey')) {
     function normalizeKey($s)
     {
