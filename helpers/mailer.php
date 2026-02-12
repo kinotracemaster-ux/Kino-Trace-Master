@@ -1,90 +1,48 @@
 <?php
 /**
- * Helper de correo electrónico usando PHPMailer + SMTP.
+ * Helper de correo electrónico - KINO TRACE
  * 
- * Variables de entorno requeridas:
- *   SMTP_HOST     - Servidor SMTP (ej: smtp.gmail.com)
- *   SMTP_PORT     - Puerto (ej: 587)
- *   SMTP_USER     - Usuario/email de autenticación
- *   SMTP_PASS     - Contraseña o App Password
- *   SMTP_FROM     - Email del remitente (opcional, usa SMTP_USER)
- *   SMTP_FROM_NAME - Nombre del remitente (opcional, default: KINO TRACE)
+ * Soporta dos backends:
+ *   1. Resend (HTTP API) — recomendado para Railway/Docker
+ *   2. SMTP (PHPMailer)  — fallback para servidores tradicionales
+ * 
+ * Variables de entorno:
+ *   RESEND_API_KEY  - API key de Resend (https://resend.com) — usar este para Railway
+ *   MAIL_FROM       - Email del remitente (ej: onboarding@resend.dev o tu@tudominio.com)
+ *   MAIL_FROM_NAME  - Nombre del remitente (default: KINO TRACE)
+ * 
+ *   --- O para SMTP tradicional ---
+ *   SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_PORT
  */
-
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\SMTP;
-use PHPMailer\PHPMailer\Exception;
-
-require_once __DIR__ . '/../vendor/autoload.php';
 
 /**
  * Lee una variable de entorno de cualquier fuente disponible.
- * Railway puede exponerlas vía getenv(), $_ENV o $_SERVER.
  */
-function smtp_env(string $key): string
+function mail_env(string $key): string
 {
     return getenv($key) ?: ($_ENV[$key] ?? ($_SERVER[$key] ?? ''));
 }
 
 /**
- * Verifica si el servicio SMTP está configurado.
+ * Verifica si el servicio de correo está configurado.
  */
-function is_smtp_configured(): bool
+function is_mail_configured(): bool
 {
-    return smtp_env('SMTP_HOST') !== '' && smtp_env('SMTP_USER') !== '' && smtp_env('SMTP_PASS') !== '';
+    // Resend tiene prioridad
+    if (mail_env('RESEND_API_KEY') !== '') {
+        return true;
+    }
+    // Fallback a SMTP
+    return mail_env('SMTP_HOST') !== '' && mail_env('SMTP_USER') !== '' && mail_env('SMTP_PASS') !== '';
 }
 
 /**
- * Envía un correo de recuperación de contraseña.
- *
- * @param string $to       Email del destinatario
- * @param string $nombre   Nombre del cliente
- * @param string $resetLink URL completa de recuperación
- * @return array ['success' => bool, 'error' => string|null]
+ * Genera el HTML del correo de recuperación.
  */
-function send_reset_email(string $to, string $nombre, string $resetLink): array
+function build_reset_email_html(string $nombre, string $resetLink): string
 {
-    if (!is_smtp_configured()) {
-        return ['success' => false, 'error' => 'SMTP no configurado. Configure las variables de entorno SMTP_HOST, SMTP_USER y SMTP_PASS.'];
-    }
-
-    $mail = new PHPMailer(true);
-
-    try {
-        // Configuración SMTP
-        $mail->isSMTP();
-        $mail->Host = smtp_env('SMTP_HOST');
-        $mail->SMTPAuth = true;
-        $mail->Username = smtp_env('SMTP_USER');
-        $mail->Password = smtp_env('SMTP_PASS');
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-        $port = (int) (smtp_env('SMTP_PORT') ?: 465);
-        $mail->Port = $port;
-        // Si el puerto es 587, usar STARTTLS en vez de SMTPS
-        if ($port === 587) {
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        }
-        // Forzar IPv4 y opciones SSL para Railway/Docker
-        $mail->SMTPOptions = [
-            'socket' => ['bindto' => '0.0.0.0:0'],
-            'ssl' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-                'allow_self_signed' => true
-            ]
-        ];
-        $mail->CharSet = 'UTF-8';
-
-        // Remitente y destinatario
-        $fromEmail = smtp_env('SMTP_FROM') ?: smtp_env('SMTP_USER');
-        $fromName = smtp_env('SMTP_FROM_NAME') ?: 'KINO TRACE';
-        $mail->setFrom($fromEmail, $fromName);
-        $mail->addAddress($to, $nombre);
-
-        // Contenido del correo
-        $mail->isHTML(true);
-        $mail->Subject = 'Recuperar Contraseña - KINO TRACE';
-        $mail->Body = <<<HTML
+    $year = date('Y');
+    return <<<HTML
 <!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -111,20 +69,136 @@ function send_reset_email(string $to, string $nombre, string $resetLink): array
             </p>
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 1.5rem 0;">
             <p style="color: #94a3b8; font-size: 0.75rem; text-align: center;">
-                © <?= date('Y') ?> KINO GENIUS — Gestión Documental
+                © {$year} KINO GENIUS — Gestión Documental
             </p>
         </div>
     </div>
 </body>
 </html>
 HTML;
+}
 
-        $mail->AltBody = "Hola {$nombre},\n\nPara restablecer su contraseña, visite:\n{$resetLink}\n\nEste enlace expira en 1 hora.\nSi no solicitó este cambio, ignore este correo.";
+/**
+ * Envía correo vía Resend HTTP API.
+ */
+function send_via_resend(string $to, string $nombre, string $subject, string $html, string $textBody): array
+{
+    $apiKey = mail_env('RESEND_API_KEY');
+    $from = mail_env('MAIL_FROM') ?: 'KINO TRACE <onboarding@resend.dev>';
+    $fromName = mail_env('MAIL_FROM_NAME') ?: 'KINO TRACE';
+
+    // Si MAIL_FROM no tiene formato "Nombre <email>", agregarlo
+    if (strpos($from, '<') === false) {
+        $from = "{$fromName} <{$from}>";
+    }
+
+    $payload = json_encode([
+        'from' => $from,
+        'to' => [$to],
+        'subject' => $subject,
+        'html' => $html,
+        'text' => $textBody
+    ]);
+
+    $ch = curl_init('https://api.resend.com/emails');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $apiKey,
+            'Content-Type: application/json'
+        ],
+        CURLOPT_TIMEOUT => 15,
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError) {
+        return ['success' => false, 'error' => 'Error de conexión: ' . $curlError];
+    }
+
+    if ($httpCode >= 200 && $httpCode < 300) {
+        return ['success' => true, 'error' => null];
+    }
+
+    $data = json_decode($response, true);
+    $errorMsg = $data['message'] ?? $data['error'] ?? "Error HTTP {$httpCode}";
+    return ['success' => false, 'error' => 'Error Resend: ' . $errorMsg];
+}
+
+/**
+ * Envía correo vía SMTP (PHPMailer).
+ */
+function send_via_smtp(string $to, string $nombre, string $subject, string $html, string $textBody): array
+{
+    require_once __DIR__ . '/../vendor/autoload.php';
+
+    $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+
+    try {
+        $mail->isSMTP();
+        $mail->Host = mail_env('SMTP_HOST');
+        $mail->SMTPAuth = true;
+        $mail->Username = mail_env('SMTP_USER');
+        $mail->Password = mail_env('SMTP_PASS');
+        $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $port = (int) (mail_env('SMTP_PORT') ?: 465);
+        $mail->Port = $port;
+        if ($port === 587) {
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+        }
+        $mail->SMTPOptions = [
+            'socket' => ['bindto' => '0.0.0.0:0'],
+            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true]
+        ];
+        $mail->CharSet = 'UTF-8';
+
+        $fromEmail = mail_env('SMTP_FROM') ?: mail_env('SMTP_USER');
+        $fromName = mail_env('MAIL_FROM_NAME') ?: 'KINO TRACE';
+        $mail->setFrom($fromEmail, $fromName);
+        $mail->addAddress($to, $nombre);
+
+        $mail->isHTML(true);
+        $mail->Subject = $subject;
+        $mail->Body = $html;
+        $mail->AltBody = $textBody;
 
         $mail->send();
         return ['success' => true, 'error' => null];
 
-    } catch (Exception $e) {
-        return ['success' => false, 'error' => 'Error al enviar correo: ' . $mail->ErrorInfo];
+    } catch (\Exception $e) {
+        return ['success' => false, 'error' => 'Error SMTP: ' . $mail->ErrorInfo];
     }
+}
+
+/**
+ * Envía un correo de recuperación de contraseña.
+ * Usa Resend si RESEND_API_KEY está configurada, sino SMTP.
+ *
+ * @param string $to       Email del destinatario
+ * @param string $nombre   Nombre del cliente
+ * @param string $resetLink URL completa de recuperación
+ * @return array ['success' => bool, 'error' => string|null]
+ */
+function send_reset_email(string $to, string $nombre, string $resetLink): array
+{
+    if (!is_mail_configured()) {
+        return ['success' => false, 'error' => 'Correo no configurado. Configure RESEND_API_KEY o las variables SMTP.'];
+    }
+
+    $subject = 'Recuperar Contraseña - KINO TRACE';
+    $html = build_reset_email_html($nombre, $resetLink);
+    $textBody = "Hola {$nombre},\n\nPara restablecer su contraseña, visite:\n{$resetLink}\n\nEste enlace expira en 1 hora.\nSi no solicitó este cambio, ignore este correo.";
+
+    // Resend tiene prioridad (funciona en Railway)
+    if (mail_env('RESEND_API_KEY') !== '') {
+        return send_via_resend($to, $nombre, $subject, $html, $textBody);
+    }
+
+    // Fallback a SMTP
+    return send_via_smtp($to, $nombre, $subject, $html, $textBody);
 }
