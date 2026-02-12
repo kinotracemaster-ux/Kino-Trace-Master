@@ -383,66 +383,94 @@ $pageTitle = 'Importación de Datos';
                 <!-- ═══ TAB 2: SQL Import    ═══ -->
                 <!-- ═══════════════════════════════ -->
                 <div class="tab-content" id="tab-sql">
-                    <div class="format-spec" style="border-color: rgba(16, 185, 129, 0.3);">
-                        <h4>🗄️ Importar desde SQL (MySQL/phpMyAdmin)</h4>
-                        <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">
-                            Sube un archivo <code>.sql</code> exportado de phpMyAdmin que contenga las tablas:
-                        </p>
-                        <ul>
-                            <li><code>documents</code> → columnas: <code>id</code>, <code>name</code>,
-                                <code>date</code>, <code>path</code></li>
-                            <li><code>codes</code> → columnas: <code>id</code>, <code>document_id</code>,
-                                <code>code</code></li>
-                        </ul>
-                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            Los documentos y códigos se importarán automáticamente a la base de datos de este cliente.
-                        </p>
+                    <!-- ── FASE 1: Importar SQL ── -->
+                    <div id="sqlPhase1">
+                        <div class="format-spec" style="border-color: rgba(16, 185, 129, 0.3);">
+                            <h4>🗄️ Paso 1: Importar datos desde SQL</h4>
+                            <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">
+                                Sube el archivo <code>.sql</code> exportado de phpMyAdmin con las tablas
+                                <code>documents</code> y <code>codes</code>.
+                            </p>
+                            <p style="font-size: 0.8rem; color: var(--text-muted);">
+                                Primero se importan los datos. Los PDFs se suben después por lotes.
+                            </p>
+                        </div>
+
+                        <form id="importFormSQL" class="import-section">
+                            <div class="import-grid single">
+                                <div class="upload-card sql-mode" id="sqlZone">
+                                    <input type="file" name="sql_file" accept=".sql" class="file-input" required
+                                        onchange="handleFileSelect(this, 'sqlArea', 'sqlFileInfo'); validateSqlFiles();">
+                                    <div id="sqlArea">
+                                        <div class="upload-icon">🗄️</div>
+                                        <h3 class="text-lg font-semibold mb-2">Archivo SQL</h3>
+                                        <p class="text-sm text-gray-500">Arrastre su archivo .sql aquí</p>
+                                        <p class="text-xs text-gray-600 mt-2">Exportación de phpMyAdmin</p>
+                                    </div>
+                                    <div id="sqlFileInfo" class="file-info" style="display: none;"></div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 1rem;">
+                                <button type="button" class="btn-process btn-sql" id="sqlProcessBtn" disabled
+                                    onclick="submitSQL()">
+                                    <span class="btn-text">🗄️ IMPORTAR DATOS SQL</span>
+                                    <div class="loading-spinner hidden" id="sqlSpinner"></div>
+                                </button>
+                            </div>
+                        </form>
                     </div>
 
-                    <form id="importFormSQL" class="import-section">
-                        <div class="import-grid">
-                            <!-- SQL Upload -->
-                            <div class="upload-card sql-mode" id="sqlZone">
-                                <input type="file" name="sql_file" accept=".sql" class="file-input" required
-                                    onchange="handleFileSelect(this, 'sqlArea', 'sqlFileInfo'); validateSqlFiles();">
-                                <div id="sqlArea">
-                                    <div class="upload-icon">🗄️</div>
-                                    <h3 class="text-lg font-semibold mb-2">Archivo SQL</h3>
-                                    <p class="text-sm text-gray-500">Arrastre su archivo .sql aquí</p>
-                                    <p class="text-xs text-gray-600 mt-2">Exportación de phpMyAdmin</p>
-                                </div>
-                                <div id="sqlFileInfo" class="file-info" style="display: none;"></div>
-                            </div>
-
-                            <!-- ZIP Upload (optional) -->
-                            <div class="upload-card sql-mode" id="sqlZipZone">
-                                <input type="file" name="zip_file" accept=".zip" class="file-input"
-                                    onchange="handleFileSelect(this, 'sqlZipArea', 'sqlZipFileInfo');">
-                                <div id="sqlZipArea">
-                                    <div class="upload-icon">📦</div>
-                                    <h3 class="text-lg font-semibold mb-2">
-                                        Archivo ZIP <span class="optional-label">OPCIONAL</span>
-                                    </h3>
-                                    <p class="text-sm text-gray-500">Arrastre su archivo .zip aquí</p>
-                                    <p class="text-xs text-gray-600 mt-2">Contiene: PDFs del cliente</p>
-                                </div>
-                                <div id="sqlZipFileInfo" class="file-info" style="display: none;"></div>
-                            </div>
+                    <!-- ── FASE 2: Subir ZIPs por lotes ── -->
+                    <div id="sqlPhase2" style="display: none;">
+                        <div class="format-spec" style="border-color: rgba(59, 130, 246, 0.3);">
+                            <h4>📦 Paso 2: Subir PDFs por lotes (ZIP)</h4>
+                            <p style="font-size: 0.875rem; margin-bottom: 0.5rem;">
+                                Sube los PDFs en varios ZIPs más pequeños. Puedes repetir este paso las veces que necesites.
+                            </p>
+                            <p style="font-size: 0.8rem; color: var(--text-muted);">
+                                Los PDFs se enlazarán automáticamente a los documentos importados por nombre de archivo.
+                            </p>
                         </div>
 
-                        <div class="flex gap-4" style="display: flex; gap: 1rem;">
-                            <button type="button" class="btn-process btn-sql" id="sqlProcessBtn" disabled
-                                onclick="submitSQL()">
-                                <span class="btn-text">🗄️ IMPORTAR DESDE SQL</span>
-                                <div class="loading-spinner hidden" id="sqlSpinner"></div>
-                            </button>
-
-                            <button type="button" class="btn-process"
-                                style="background: var(--accent-danger); width: auto;" onclick="resetDatabase()">
-                                🗑️ Limpiar Todo
-                            </button>
+                        <div id="pendingCounter" class="format-spec" style="border-color: rgba(251, 191, 36, 0.3); text-align: center; padding: 1rem; display: none;">
+                            <span style="font-size: 1.1rem;">📊 Documentos sin PDF: <strong id="pendingCount" style="color: #fbbf24; font-size: 1.3rem;">0</strong></span>
                         </div>
-                    </form>
+
+                        <form id="zipBatchForm" class="import-section">
+                            <div class="import-grid single">
+                                <div class="upload-card" id="batchZipZone">
+                                    <input type="file" name="zip_file" accept=".zip" class="file-input" required
+                                        onchange="handleFileSelect(this, 'batchZipArea', 'batchZipFileInfo'); validateBatchZip();">
+                                    <div id="batchZipArea">
+                                        <div class="upload-icon">📦</div>
+                                        <h3 class="text-lg font-semibold mb-2">ZIP con PDFs (Lote)</h3>
+                                        <p class="text-sm text-gray-500">Arrastre un ZIP aquí (máx. ~400MB por lote)</p>
+                                        <p class="text-xs text-gray-600 mt-2">Repita para subir todos los lotes</p>
+                                    </div>
+                                    <div id="batchZipFileInfo" class="file-info" style="display: none;"></div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 1rem;">
+                                <button type="button" class="btn-process" id="batchZipBtn" disabled
+                                    onclick="submitBatchZip()">
+                                    <span class="btn-text">📦 SUBIR Y ENLAZAR ESTE LOTE</span>
+                                    <div class="loading-spinner hidden" id="batchSpinner"></div>
+                                </button>
+
+                                <button type="button" class="btn-process"
+                                    style="background: var(--accent-danger); width: auto;" onclick="resetDatabase()">
+                                    🗑️ Limpiar Todo
+                                </button>
+                            </div>
+                        </form>
+
+                        <div id="batchHistory" style="margin-top: 1rem; display: none;">
+                            <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem; color: var(--text-muted);">📋 Lotes subidos:</h4>
+                            <div id="batchList" style="font-size: 0.85rem;"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ═══ Shared Console ═══ -->
@@ -616,7 +644,9 @@ $pageTitle = 'Importación de Datos';
             }
         }
 
-        // ── Submit SQL Import ──
+        // ── Submit SQL Import (Phase 1 → Phase 2) ──
+        let batchCount = 0;
+
         async function submitSQL() {
             const form = document.getElementById('importFormSQL');
             const btn = document.getElementById('sqlProcessBtn');
@@ -651,10 +681,109 @@ $pageTitle = 'Importación de Datos';
                 }
 
                 if (result.success) {
-                    log('🎉 ¡Importación SQL completada! Los datos están listos.', 'success');
-                    btn.innerHTML = '<span class="btn-text">NUEVA IMPORTACIÓN</span>';
+                    log('🎉 ¡Datos SQL importados! Ahora puedes subir los PDFs por lotes.', 'success');
+                    
+                    // Transition to Phase 2
+                    document.getElementById('sqlPhase1').style.display = 'none';
+                    document.getElementById('sqlPhase2').style.display = 'block';
+                    
+                    log('📦 Paso 2: Sube los PDFs en ZIPs de ~400MB o menos.', 'info');
+                } else {
+                    log('❌ Error: ' + (result.error || 'Desconocido'), 'error');
                     btn.disabled = false;
-                    btn.onclick = function () { window.location.reload(); };
+                }
+
+            } catch (err) {
+                log('❌ Error de conexión: ' + err.message, 'error');
+                btn.disabled = false;
+            } finally {
+                spinner.classList.add('hidden');
+            }
+        }
+
+        // ── Validate Batch ZIP ──
+        function validateBatchZip() {
+            const zipInput = document.querySelector('#zipBatchForm input[name="zip_file"]');
+            const btn = document.getElementById('batchZipBtn');
+
+            if (zipInput && zipInput.files.length > 0) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.filter = 'none';
+            } else if (btn) {
+                btn.disabled = true;
+            }
+        }
+
+        // ── Submit Batch ZIP (Phase 2, repeatable) ──
+        async function submitBatchZip() {
+            const form = document.getElementById('zipBatchForm');
+            const btn = document.getElementById('batchZipBtn');
+            const spinner = document.getElementById('batchSpinner');
+
+            btn.disabled = true;
+            spinner.classList.remove('hidden');
+
+            const formData = new FormData(form);
+            const fileName = formData.get('zip_file')?.name || 'ZIP';
+
+            try {
+                batchCount++;
+                log(`📤 Subiendo lote #${batchCount}: ${fileName}...`, 'info');
+                log('⏳ Extrayendo y enlazando PDFs...', 'warning');
+
+                const response = await fetch('link_zip.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const text = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    log('❌ Respuesta inválida: ' + text.substring(0, 200), 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                if (result.logs) {
+                    result.logs.forEach(l => log(l.msg, l.type));
+                }
+
+                if (result.success) {
+                    // Update pending counter
+                    if (result.pending !== undefined) {
+                        document.getElementById('pendingCounter').style.display = 'block';
+                        const countEl = document.getElementById('pendingCount');
+                        countEl.textContent = result.pending;
+                        countEl.style.color = result.pending > 0 ? '#fbbf24' : '#34d399';
+                    }
+
+                    // Add to batch history
+                    const historyDiv = document.getElementById('batchHistory');
+                    const listDiv = document.getElementById('batchList');
+                    historyDiv.style.display = 'block';
+                    const entry = document.createElement('div');
+                    entry.innerHTML = `<span style="color: #34d399;">✅</span> Lote #${batchCount}: ${fileName}`;
+                    entry.style.marginBottom = '0.25rem';
+                    listDiv.appendChild(entry);
+
+                    // Reset the file input for another batch
+                    form.reset();
+                    const area = document.getElementById('batchZipArea');
+                    const info = document.getElementById('batchZipFileInfo');
+                    area.style.opacity = '1';
+                    info.style.display = 'none';
+                    document.getElementById('batchZipZone').classList.remove('active');
+
+                    if (result.pending === 0) {
+                        log('🎉 ¡TODOS los documentos tienen PDF enlazado! Importación completa.', 'success');
+                        btn.innerHTML = '<span class="btn-text">✅ IMPORTACIÓN COMPLETA</span>';
+                    } else {
+                        log(`📦 Puedes subir el siguiente lote. Faltan ${result.pending} documentos.`, 'info');
+                        btn.disabled = true; // Re-enable when new file selected
+                    }
                 } else {
                     log('❌ Error: ' + (result.error || 'Desconocido'), 'error');
                     btn.disabled = false;
