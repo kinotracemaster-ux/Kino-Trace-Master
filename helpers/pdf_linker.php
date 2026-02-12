@@ -287,5 +287,12 @@ if (!function_exists('processZipAndLink')) {
             foreach ($unmatched as $f)
                 logMsg(" - $f", "warn");
         }
+
+        return [
+            'updated' => $updatedDocs,
+            'created' => $createdDocs,
+            'duplicates' => count($duplicates),
+            'unmatched' => count($unmatched),
+        ];
     }
 }

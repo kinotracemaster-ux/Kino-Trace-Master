@@ -160,8 +160,9 @@ try {
                         require_once __DIR__ . '/../helpers/pdf_linker.php';
                         $newDb = $newDb ?? open_client_db($code);
                         $uploadDir = CLIENTS_DIR . "/{$code}/uploads/sql_import/";
-                        processZipAndLink($newDb, $_FILES['zip_file']['tmp_name'], $uploadDir, 'sql_import/');
-                        $extraMsg .= " + PDFs del ZIP enlazados.";
+                        $zipResult = processZipAndLink($newDb, $_FILES['zip_file']['tmp_name'], $uploadDir, 'sql_import/');
+                        $linked = ($zipResult['updated'] ?? 0) + ($zipResult['created'] ?? 0);
+                        $extraMsg .= " + ZIP: {$linked} PDFs enlazados.";
                     }
 
                     $message = "✅ Cliente '{$name}' creado correctamente." . $extraMsg;
