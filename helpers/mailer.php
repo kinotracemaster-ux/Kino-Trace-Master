@@ -18,11 +18,20 @@ use PHPMailer\PHPMailer\Exception;
 require_once __DIR__ . '/../vendor/autoload.php';
 
 /**
+ * Lee una variable de entorno de cualquier fuente disponible.
+ * Railway puede exponerlas vía getenv(), $_ENV o $_SERVER.
+ */
+function smtp_env(string $key): string
+{
+    return getenv($key) ?: ($_ENV[$key] ?? ($_SERVER[$key] ?? ''));
+}
+
+/**
  * Verifica si el servicio SMTP está configurado.
  */
 function is_smtp_configured(): bool
 {
-    return !empty(getenv('SMTP_HOST')) && !empty(getenv('SMTP_USER')) && !empty(getenv('SMTP_PASS'));
+    return smtp_env('SMTP_HOST') !== '' && smtp_env('SMTP_USER') !== '' && smtp_env('SMTP_PASS') !== '';
 }
 
 /**
@@ -44,17 +53,17 @@ function send_reset_email(string $to, string $nombre, string $resetLink): array
     try {
         // Configuración SMTP
         $mail->isSMTP();
-        $mail->Host = getenv('SMTP_HOST');
+        $mail->Host = smtp_env('SMTP_HOST');
         $mail->SMTPAuth = true;
-        $mail->Username = getenv('SMTP_USER');
-        $mail->Password = getenv('SMTP_PASS');
+        $mail->Username = smtp_env('SMTP_USER');
+        $mail->Password = smtp_env('SMTP_PASS');
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port = (int) (getenv('SMTP_PORT') ?: 587);
+        $mail->Port = (int) (smtp_env('SMTP_PORT') ?: 587);
         $mail->CharSet = 'UTF-8';
 
         // Remitente y destinatario
-        $fromEmail = getenv('SMTP_FROM') ?: getenv('SMTP_USER');
-        $fromName = getenv('SMTP_FROM_NAME') ?: 'KINO TRACE';
+        $fromEmail = smtp_env('SMTP_FROM') ?: smtp_env('SMTP_USER');
+        $fromName = smtp_env('SMTP_FROM_NAME') ?: 'KINO TRACE';
         $mail->setFrom($fromEmail, $fromName);
         $mail->addAddress($to, $nombre);
 
