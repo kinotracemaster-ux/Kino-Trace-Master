@@ -1,8 +1,10 @@
 <?php
 /**
- * Importación Masiva (CSV + ZIP) - KINO TRACE
+ * Importación Masiva - KINO TRACE
  * 
- * Versión modernizada con diseño avanzado.
+ * Soporta dos modos:
+ * 1. CSV + ZIP: Formato CSV propio con archivos PDF en ZIP
+ * 2. SQL + ZIP: Dump MySQL (phpMyAdmin) con PDFs en ZIP
  */
 session_start();
 require_once __DIR__ . '/../../config.php';
@@ -16,7 +18,7 @@ if (!isset($_SESSION['client_code'])) {
 $clientCode = $_SESSION['client_code'];
 $currentModule = 'importar_masiva';
 $baseUrl = '../../';
-$pageTitle = 'Importación Masiva (CSV + ZIP)';
+$pageTitle = 'Importación de Datos';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -27,11 +29,63 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
     <title><?= $pageTitle ?> - KINO TRACE</title>
     <link rel="stylesheet" href="../../assets/css/styles.css">
     <style>
+        /* ── Tab Switcher ── */
+        .tab-nav {
+            display: flex;
+            gap: 0;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 1rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .tab-btn.active {
+            color: var(--accent-primary);
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .tab-btn.active-sql {
+            color: #10b981;
+            border-bottom-color: #10b981;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* ── Upload Cards ── */
         .import-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 2rem;
             margin-bottom: 2rem;
+        }
+
+        .import-grid.single {
+            grid-template-columns: 1fr;
+            max-width: 500px;
         }
 
         .upload-card {
@@ -57,6 +111,11 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             background: rgba(16, 185, 129, 0.05);
         }
 
+        .upload-card.sql-mode:hover {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.05);
+        }
+
         .file-input {
             position: absolute;
             top: 0;
@@ -78,6 +137,11 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             color: var(--accent-primary);
         }
 
+        .upload-card.sql-mode:hover .upload-icon {
+            color: #10b981;
+        }
+
+        /* ── Console ── */
         .console-output {
             background: #1e1e1e;
             color: #10b981;
@@ -105,6 +169,7 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             min-width: 65px;
         }
 
+        /* ── Buttons ── */
         .btn-process {
             background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
             color: white;
@@ -132,6 +197,15 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             opacity: 0.7;
             cursor: not-allowed;
             filter: grayscale(1);
+        }
+
+        .btn-sql {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-sql:hover:not(:disabled) {
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.6);
         }
 
         .loading-spinner {
@@ -189,6 +263,27 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             margin-bottom: 0.5rem;
             font-size: 0.875rem;
         }
+
+        .sql-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .optional-label {
+            display: inline-block;
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
     </style>
 </head>
 
@@ -204,74 +299,157 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
                     <div class="card-header border-b border-gray-800 pb-4">
                         <h2
                             class="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-                            📦 Importación Masiva (CSV + ZIP)
+                            📦 Importación de Datos
                         </h2>
                         <p class="text-gray-400 mt-2">
-                            Importa estructura completa con datos CSV y documentos PDF en ZIP simultáneamente.
+                            Importa documentos y códigos desde archivos CSV o SQL con sus PDFs en ZIP.
                         </p>
                     </div>
                 </div>
 
-                <!-- Format Spec -->
-                <div class="format-spec">
-                    <h4>📋 Formato CSV Requerido</h4>
-                    <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">El archivo debe tener las siguientes
-                        columnas:</p>
-                    <ul>
-                        <li><code>nombre_pdf</code>: Nombre exacto del PDF (ej: <code>1748_KARDOO.pdf</code>) - Clave
-                            para enlazar</li>
-                        <li><code>nombre_doc</code>: Número o nombre visible (ej: <code>KARDOO AGOSTO 2020A</code>)</li>
-                        <li><code>fecha</code>: Fecha del documento (formato: <code>YYYY-MM-DD</code>)</li>
-                        <li><code>codigos</code>: Códigos separados por comas (ej: <code>K-353A, K-609</code>)</li>
-                    </ul>
+                <!-- ═══ Tab Navigation ═══ -->
+                <div class="tab-nav">
+                    <button class="tab-btn active" onclick="switchTab('csv')">
+                        📊 CSV + ZIP
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('sql')">
+                        🗄️ SQL + ZIP <span class="sql-badge">NUEVO</span>
+                    </button>
                 </div>
 
-                <form id="importForm" class="import-section">
-                    <div class="import-grid">
-                        <!-- CSV Upload -->
-                        <div class="upload-card" id="csvZone">
-                            <input type="file" name="csv_file" accept=".csv" class="file-input" required
-                                onchange="handleFileSelect(this, 'csvArea', 'csvName')">
-                            <div id="csvArea">
-                                <div class="upload-icon">📊</div>
-                                <h3 class="text-lg font-semibold mb-2">Archivo CSV</h3>
-                                <p class="text-sm text-gray-500">Arrastre su archivo .csv aquí</p>
-                                <p class="text-xs text-gray-600 mt-2">Contiene: Datos y Códigos</p>
-                            </div>
-                            <div id="csvName" class="file-info" style="display: none;"></div>
-                        </div>
-
-                        <!-- ZIP Upload -->
-                        <div class="upload-card" id="zipZone">
-                            <input type="file" name="zip_file" accept=".zip" class="file-input" required
-                                onchange="handleFileSelect(this, 'zipArea', 'zipName')">
-                            <div id="zipArea">
-                                <div class="upload-icon">📦</div>
-                                <h3 class="text-lg font-semibold mb-2">Archivo ZIP</h3>
-                                <p class="text-sm text-gray-500">Arrastre su archivo .zip aquí</p>
-                                <p class="text-xs text-gray-600 mt-2">Contiene: PDFs nombrados</p>
-                            </div>
-                            <div id="zipName" class="file-info" style="display: none;"></div>
-                        </div>
+                <!-- ═══════════════════════════════ -->
+                <!-- ═══ TAB 1: CSV Import    ═══ -->
+                <!-- ═══════════════════════════════ -->
+                <div class="tab-content active" id="tab-csv">
+                    <div class="format-spec">
+                        <h4>📋 Formato CSV Requerido</h4>
+                        <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">El archivo debe tener las siguientes
+                            columnas:</p>
+                        <ul>
+                            <li><code>nombre_pdf</code>: Nombre exacto del PDF (ej: <code>1748_KARDOO.pdf</code>) -
+                                Clave
+                                para enlazar</li>
+                            <li><code>nombre_doc</code>: Número o nombre visible (ej: <code>KARDOO AGOSTO 2020A</code>)
+                            </li>
+                            <li><code>fecha</code>: Fecha del documento (formato: <code>YYYY-MM-DD</code>)</li>
+                            <li><code>codigos</code>: Códigos separados por comas (ej: <code>K-353A, K-609</code>)</li>
+                        </ul>
                     </div>
 
-                    <div class="flex gap-4" style="display: flex; gap: 1rem;">
-                        <button type="button" class="btn-process" id="processBtn" disabled>
-                            <span class="btn-text">INICIAR IMPORTACIÓN</span>
-                            <div class="loading-spinner hidden" id="spinner"></div>
-                        </button>
+                    <form id="importFormCSV" class="import-section">
+                        <div class="import-grid">
+                            <!-- CSV Upload -->
+                            <div class="upload-card" id="csvZone">
+                                <input type="file" name="csv_file" accept=".csv" class="file-input" required
+                                    onchange="handleFileSelect(this, 'csvArea', 'csvFileInfo')">
+                                <div id="csvArea">
+                                    <div class="upload-icon">📊</div>
+                                    <h3 class="text-lg font-semibold mb-2">Archivo CSV</h3>
+                                    <p class="text-sm text-gray-500">Arrastre su archivo .csv aquí</p>
+                                    <p class="text-xs text-gray-600 mt-2">Contiene: Datos y Códigos</p>
+                                </div>
+                                <div id="csvFileInfo" class="file-info" style="display: none;"></div>
+                            </div>
 
-                        <button type="button" class="btn-process" style="background: var(--accent-danger); width: auto;"
-                            onclick="resetDatabase()">
-                            🗑️ Limpiar Todo
-                        </button>
+                            <!-- ZIP Upload -->
+                            <div class="upload-card" id="csvZipZone">
+                                <input type="file" name="zip_file" accept=".zip" class="file-input" required
+                                    onchange="handleFileSelect(this, 'csvZipArea', 'csvZipFileInfo')">
+                                <div id="csvZipArea">
+                                    <div class="upload-icon">📦</div>
+                                    <h3 class="text-lg font-semibold mb-2">Archivo ZIP</h3>
+                                    <p class="text-sm text-gray-500">Arrastre su archivo .zip aquí</p>
+                                    <p class="text-xs text-gray-600 mt-2">Contiene: PDFs nombrados</p>
+                                </div>
+                                <div id="csvZipFileInfo" class="file-info" style="display: none;"></div>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-4" style="display: flex; gap: 1rem;">
+                            <button type="button" class="btn-process" id="csvProcessBtn" disabled onclick="submitCSV()">
+                                <span class="btn-text">INICIAR IMPORTACIÓN CSV</span>
+                                <div class="loading-spinner hidden" id="csvSpinner"></div>
+                            </button>
+
+                            <button type="button" class="btn-process"
+                                style="background: var(--accent-danger); width: auto;" onclick="resetDatabase()">
+                                🗑️ Limpiar Todo
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ═══════════════════════════════ -->
+                <!-- ═══ TAB 2: SQL Import    ═══ -->
+                <!-- ═══════════════════════════════ -->
+                <div class="tab-content" id="tab-sql">
+                    <div class="format-spec" style="border-color: rgba(16, 185, 129, 0.3);">
+                        <h4>🗄️ Importar desde SQL (MySQL/phpMyAdmin)</h4>
+                        <p style="font-size: 0.875rem; margin-bottom: 0.75rem;">
+                            Sube un archivo <code>.sql</code> exportado de phpMyAdmin que contenga las tablas:
+                        </p>
+                        <ul>
+                            <li><code>documents</code> → columnas: <code>id</code>, <code>name</code>,
+                                <code>date</code>, <code>path</code></li>
+                            <li><code>codes</code> → columnas: <code>id</code>, <code>document_id</code>,
+                                <code>code</code></li>
+                        </ul>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            Los documentos y códigos se importarán automáticamente a la base de datos de este cliente.
+                        </p>
                     </div>
-                </form>
 
+                    <form id="importFormSQL" class="import-section">
+                        <div class="import-grid">
+                            <!-- SQL Upload -->
+                            <div class="upload-card sql-mode" id="sqlZone">
+                                <input type="file" name="sql_file" accept=".sql" class="file-input" required
+                                    onchange="handleFileSelect(this, 'sqlArea', 'sqlFileInfo'); validateSqlFiles();">
+                                <div id="sqlArea">
+                                    <div class="upload-icon">🗄️</div>
+                                    <h3 class="text-lg font-semibold mb-2">Archivo SQL</h3>
+                                    <p class="text-sm text-gray-500">Arrastre su archivo .sql aquí</p>
+                                    <p class="text-xs text-gray-600 mt-2">Exportación de phpMyAdmin</p>
+                                </div>
+                                <div id="sqlFileInfo" class="file-info" style="display: none;"></div>
+                            </div>
+
+                            <!-- ZIP Upload (optional) -->
+                            <div class="upload-card sql-mode" id="sqlZipZone">
+                                <input type="file" name="zip_file" accept=".zip" class="file-input"
+                                    onchange="handleFileSelect(this, 'sqlZipArea', 'sqlZipFileInfo');">
+                                <div id="sqlZipArea">
+                                    <div class="upload-icon">📦</div>
+                                    <h3 class="text-lg font-semibold mb-2">
+                                        Archivo ZIP <span class="optional-label">OPCIONAL</span>
+                                    </h3>
+                                    <p class="text-sm text-gray-500">Arrastre su archivo .zip aquí</p>
+                                    <p class="text-xs text-gray-600 mt-2">Contiene: PDFs del cliente</p>
+                                </div>
+                                <div id="sqlZipFileInfo" class="file-info" style="display: none;"></div>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-4" style="display: flex; gap: 1rem;">
+                            <button type="button" class="btn-process btn-sql" id="sqlProcessBtn" disabled
+                                onclick="submitSQL()">
+                                <span class="btn-text">🗄️ IMPORTAR DESDE SQL</span>
+                                <div class="loading-spinner hidden" id="sqlSpinner"></div>
+                            </button>
+
+                            <button type="button" class="btn-process"
+                                style="background: var(--accent-danger); width: auto;" onclick="resetDatabase()">
+                                🗑️ Limpiar Todo
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ═══ Shared Console ═══ -->
                 <div class="console-output" id="consoleLog">
                     <div class="console-line">
                         <span class="console-time">[<?= date('H:i:s') ?>]</span>
-                        <span>Sistema listo. Esperando archivos CSV y ZIP...</span>
+                        <span>Sistema listo. Seleccione el modo de importación (CSV o SQL)...</span>
                     </div>
                 </div>
             </div>
@@ -281,6 +459,23 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
     </div>
 
     <script>
+        // ── Tab Switching ──
+        function switchTab(mode) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'active-sql'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            if (mode === 'csv') {
+                document.querySelectorAll('.tab-btn')[0].classList.add('active');
+                document.getElementById('tab-csv').classList.add('active');
+                log('📊 Modo CSV seleccionado', 'info');
+            } else {
+                document.querySelectorAll('.tab-btn')[1].classList.add('active', 'active-sql');
+                document.getElementById('tab-sql').classList.add('active');
+                log('🗄️ Modo SQL seleccionado', 'info');
+            }
+        }
+
+        // ── File Selection ──
         function handleFileSelect(input, areaId, nameId) {
             const file = input.files[0];
             const area = document.getElementById(areaId);
@@ -294,30 +489,38 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
                 nameDisplay.style.display = 'block';
                 log('✓ Archivo seleccionado: ' + file.name, 'success');
             }
-            validateFiles();
+            validateCsvFiles();
         }
 
-        function validateFiles() {
-            const csvInput = document.querySelector('input[name="csv_file"]');
-            const zipInput = document.querySelector('input[name="zip_file"]');
-            const btn = document.getElementById('processBtn');
+        // ── Validation ──
+        function validateCsvFiles() {
+            const csvInput = document.querySelector('#importFormCSV input[name="csv_file"]');
+            const zipInput = document.querySelector('#importFormCSV input[name="zip_file"]');
+            const btn = document.getElementById('csvProcessBtn');
 
-            if (csvInput.files.length > 0 && zipInput.files.length > 0) {
+            if (csvInput && zipInput && csvInput.files.length > 0 && zipInput.files.length > 0) {
                 btn.disabled = false;
                 btn.style.opacity = '1';
                 btn.style.filter = 'none';
-            } else {
+            } else if (btn) {
                 btn.disabled = true;
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('processBtn').addEventListener('click', (e) => {
-                e.preventDefault();
-                submitForm();
-            });
-        });
+        function validateSqlFiles() {
+            const sqlInput = document.querySelector('#importFormSQL input[name="sql_file"]');
+            const btn = document.getElementById('sqlProcessBtn');
 
+            if (sqlInput && sqlInput.files.length > 0) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.filter = 'none';
+            } else if (btn) {
+                btn.disabled = true;
+            }
+        }
+
+        // ── Console Logger ──
         function log(msg, type = 'info') {
             const consoleLog = document.getElementById('consoleLog');
             if (!consoleLog) return;
@@ -342,6 +545,7 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             consoleLog.scrollTop = consoleLog.scrollHeight;
         }
 
+        // ── Reset Database ──
         async function resetDatabase() {
             if (!confirm('⚠️ ¿ESTÁS SEGURO?\n\nEsto borrará TODOS los documentos y códigos de la base de datos actual.')) return;
 
@@ -368,10 +572,11 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             }
         }
 
-        async function submitForm() {
-            const form = document.getElementById('importForm');
-            const btn = document.getElementById('processBtn');
-            const spinner = document.getElementById('spinner');
+        // ── Submit CSV Import ──
+        async function submitCSV() {
+            const form = document.getElementById('importFormCSV');
+            const btn = document.getElementById('csvProcessBtn');
+            const spinner = document.getElementById('csvSpinner');
 
             btn.disabled = true;
             spinner.classList.remove('hidden');
@@ -380,7 +585,7 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
             formData.append('action', 'import');
 
             try {
-                log('📤 Subiendo archivos...', 'info');
+                log('📤 Subiendo archivos CSV + ZIP...', 'info');
 
                 const response = await fetch('process.php', {
                     method: 'POST',
@@ -394,8 +599,59 @@ $pageTitle = 'Importación Masiva (CSV + ZIP)';
                 }
 
                 if (result.success) {
-                    log('✅ Importación completada exitosamente', 'success');
+                    log('✅ Importación CSV completada exitosamente', 'success');
+                    btn.innerHTML = '<span class="btn-text">NUEVA IMPORTACIÓN</span>';
+                    btn.disabled = false;
+                    btn.onclick = function () { window.location.reload(); };
+                } else {
+                    log('❌ Error: ' + (result.error || 'Desconocido'), 'error');
+                    btn.disabled = false;
+                }
 
+            } catch (err) {
+                log('❌ Error de conexión: ' + err.message, 'error');
+                btn.disabled = false;
+            } finally {
+                spinner.classList.add('hidden');
+            }
+        }
+
+        // ── Submit SQL Import ──
+        async function submitSQL() {
+            const form = document.getElementById('importFormSQL');
+            const btn = document.getElementById('sqlProcessBtn');
+            const spinner = document.getElementById('sqlSpinner');
+
+            btn.disabled = true;
+            spinner.classList.remove('hidden');
+
+            const formData = new FormData(form);
+
+            try {
+                log('📤 Subiendo archivo SQL...', 'info');
+                log('⏳ Parseando e importando datos (esto puede tomar un momento)...', 'warning');
+
+                const response = await fetch('import_sql.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const text = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    log('❌ Respuesta inválida del servidor: ' + text.substring(0, 200), 'error');
+                    btn.disabled = false;
+                    return;
+                }
+
+                if (result.logs) {
+                    result.logs.forEach(l => log(l.msg, l.type));
+                }
+
+                if (result.success) {
+                    log('🎉 ¡Importación SQL completada! Los datos están listos.', 'success');
                     btn.innerHTML = '<span class="btn-text">NUEVA IMPORTACIÓN</span>';
                     btn.disabled = false;
                     btn.onclick = function () { window.location.reload(); };
