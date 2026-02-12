@@ -23,6 +23,7 @@ if (!isset($_SESSION['client_code']) || empty($_SESSION['is_admin'])) {
 
 $message = '';
 $error = '';
+$createdClientCode = '';
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -97,40 +98,76 @@ try {
                         $extraMsg = " + Datos de KINO copiados (" . count($docs) . " docs, " . count($codes) . " códigos).";
                     }
 
-                    // Process ZIP file if uploaded
-                    if (!empty($_FILES['zip_file']['tmp_name']) && $_FILES['zip_file']['error'] === UPLOAD_ERR_OK) {
-                        $zip = new ZipArchive();
-                        if ($zip->open($_FILES['zip_file']['tmp_name']) === TRUE) {
-                            $uploadDir = CLIENTS_DIR . "/{$code}/uploads/documento/";
-                            if (!file_exists($uploadDir)) {
-                                mkdir($uploadDir, 0777, true);
+                    // Process SQL file if uploaded (MySQL dump → KINO-TRACE SQLite)
+                    if (!empty($_FILES['sql_file']['tmp_name']) && $_FILES['sql_file']['error'] === UPLOAD_ERR_OK) {
+                        $sqlContent = file_get_contents($_FILES['sql_file']['tmp_name']);
+                        $newDb = open_client_db($code);
+
+                        // Parse documents
+                        preg_match_all(
+                            "/INSERT\s+INTO\s+`?documents`?.*?VALUES\s*(.+?)\s*;/si",
+                            $sqlContent, $docMatches
+                        );
+
+                        $idMap = [];
+                        $docCount = 0;
+                        $stmtDoc = $newDb->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo, original_path) VALUES (?, ?, ?, ?, ?)");
+
+                        foreach ($docMatches[1] as $block) {
+                            preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                            foreach ($rows[1] as $row) {
+                                $vals = str_getcsv($row, ',', "'");
+                                if (count($vals) < 4) continue;
+                                $oldId = (int)trim($vals[0]);
+                                $docName = trim($vals[1]);
+                                $docDate = trim($vals[2]);
+                                $docPath = trim($vals[3]);
+                                $stmtDoc->execute(['importado_sql', $docName, $docDate, 'pending', $docPath]);
+                                $idMap[$oldId] = (int)$newDb->lastInsertId();
+                                $docCount++;
                             }
+                        }
 
-                            $newDb = open_client_db($code);
-                            $pdfCount = 0;
+                        // Parse codes
+                        preg_match_all(
+                            "/INSERT\s+INTO\s+`?codes`?.*?VALUES\s*(.+?)\s*;/si",
+                            $sqlContent, $codeMatches
+                        );
 
-                            for ($i = 0; $i < $zip->numFiles; $i++) {
-                                $filename = $zip->getNameIndex($i);
-                                if (strtolower(pathinfo($filename, PATHINFO_EXTENSION)) !== 'pdf')
-                                    continue;
+                        $codeCount = 0;
+                        $stmtCode = $newDb->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
 
-                                $basename = basename($filename);
-                                $newFilename = time() . '_' . $pdfCount . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $basename);
-                                $content = $zip->getFromIndex($i);
-
-                                if ($content !== false && file_put_contents($uploadDir . $newFilename, $content)) {
-                                    $docName = pathinfo($basename, PATHINFO_FILENAME);
-                                    $stmt = $newDb->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo) VALUES (?, ?, ?, ?)");
-                                    $stmt->execute(['documento', $docName, date('Y-m-d'), $newFilename]);
-                                    $pdfCount++;
+                        foreach ($codeMatches[1] as $block) {
+                            preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                            foreach ($rows[1] as $row) {
+                                $vals = str_getcsv($row, ',', "'");
+                                if (count($vals) < 3) continue;
+                                $oldDocId = (int)trim($vals[1]);
+                                $codeVal = trim($vals[2]);
+                                $newDocId = $idMap[$oldDocId] ?? null;
+                                if ($newDocId) {
+                                    $stmtCode->execute([$newDocId, $codeVal]);
+                                    $codeCount++;
                                 }
                             }
-                            $zip->close();
-                            $extraMsg .= " + {$pdfCount} PDFs del ZIP importados.";
                         }
+
+                        $extraMsg .= " + SQL importado ({$docCount} docs, {$codeCount} códigos).";
+                    }
+
+                    // Process ZIP file if uploaded (link PDFs to documents)
+                    if (!empty($_FILES['zip_file']['tmp_name']) && $_FILES['zip_file']['error'] === UPLOAD_ERR_OK) {
+                        require_once __DIR__ . '/../helpers/pdf_linker.php';
+                        $newDb = $newDb ?? open_client_db($code);
+                        $uploadDir = CLIENTS_DIR . "/{$code}/uploads/sql_import/";
+                        processZipAndLink($newDb, $_FILES['zip_file']['tmp_name'], $uploadDir, 'sql_import/');
+                        $extraMsg .= " + PDFs del ZIP enlazados.";
                     }
 
                     $message = "✅ Cliente '{$name}' creado correctamente." . $extraMsg;
+                    
+                    // Store created client code for batch ZIP UI
+                    $createdClientCode = $code;
                 }
             }
         }
@@ -675,9 +712,10 @@ $clientCodes = array_column($clients, 'codigo');
             </div>
 
             <!-- Action Cards -->
-            <div class="cards-section">
-                <!-- Create Client -->
-                <div class="form-card">
+            <div class="cards-section" style="grid-template-columns: 1fr 1fr;">
+
+                <!-- ═══════════ CREAR NUEVO CLIENTE (full-width) ═══════════ -->
+                <div class="form-card" style="grid-column: 1 / -1;">
                     <h3>
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
                             stroke="currentColor">
@@ -686,9 +724,11 @@ $clientCodes = array_column($clients, 'codigo');
                         </svg>
                         Crear Nuevo Cliente
                     </h3>
-                    <form method="post" enctype="multipart/form-data">
+                    <form method="post" enctype="multipart/form-data" id="createForm">
                         <input type="hidden" name="action" value="create">
-                        <div class="form-row">
+
+                        <!-- ── Datos básicos ── -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
                             <div class="form-group">
                                 <label class="form-label">Código *</label>
                                 <input type="text" class="form-input" name="code" placeholder="ej: kino" required>
@@ -697,72 +737,118 @@ $clientCodes = array_column($clients, 'codigo');
                                 <label class="form-label">Nombre *</label>
                                 <input type="text" class="form-input" name="name" placeholder="KINO Company" required>
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">Contraseña *</label>
                                 <input type="password" class="form-input" name="password" required>
                             </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
                             <div class="form-group">
                                 <label class="form-label">📧 Correo Electrónico</label>
                                 <input type="email" class="form-input" name="email" placeholder="cliente@empresa.com">
                             </div>
-                        </div>
-                        <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">Título del Dashboard</label>
                                 <input type="text" class="form-input" name="titulo" placeholder="Mi Empresa">
                             </div>
-                            <div class="form-group"></div>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Colores</label>
-                            <div class="color-row">
-                                <div>
-                                    <input type="color" name="color_primario" value="#3b82f6">
-                                    <label>Primario</label>
-                                </div>
-                                <div>
-                                    <input type="color" name="color_secundario" value="#64748b">
-                                    <label>Secundario</label>
+                            <div class="form-group">
+                                <label class="form-label">Colores</label>
+                                <div class="color-row">
+                                    <div>
+                                        <input type="color" name="color_primario" value="#3b82f6">
+                                        <label>Primario</label>
+                                    </div>
+                                    <div>
+                                        <input type="color" name="color_secundario" value="#64748b">
+                                        <label>Secundario</label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
+                        <!-- ── Opciones adicionales ── -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem;">
+                            <div class="form-group">
+                                <label class="form-label">🖼️ Logo (PNG/JPG)</label>
+                                <input type="file" class="form-input" name="logo_file" accept=".png,.jpg,.jpeg,.gif"
+                                    style="padding: 0.5rem;">
+                                <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                    Recomendado: 200x80px
+                                </p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">🗄️ Archivo SQL (phpMyAdmin export)</label>
+                                <input type="file" class="form-input" name="sql_file" accept=".sql"
+                                    style="padding: 0.5rem;">
+                                <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                    Tablas <code>documents</code> + <code>codes</code>
+                                </p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">📦 ZIP con PDFs (opcional)</label>
+                                <input type="file" class="form-input" name="zip_file" accept=".zip"
+                                    style="padding: 0.5rem;">
+                                <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                    Si > 400MB, usa lotes después de crear
+                                </p>
+                            </div>
+                        </div>
+
                         <div class="form-group"
-                            style="padding: 0.75rem; background: rgba(59,130,246,0.05); border-radius: var(--radius-md); border: 1px dashed var(--border-color);">
+                            style="padding: 0.75rem; background: rgba(59,130,246,0.05); border-radius: var(--radius-md); border: 1px dashed var(--border-color); margin-top: 0.5rem;">
                             <label class="form-label" style="display: flex; align-items: center; gap: 0.5rem;">
                                 <input type="checkbox" name="copy_kino_data">
-                                <span>📦 Copiar datos de referencia de KINO</span>
+                                <span>📦 Copiar datos de referencia de KINO (119 docs + 18,400 códigos)</span>
                             </label>
-                            <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0.5rem 0 0 1.5rem;">
-                                Incluye 119 documentos y 18,400 códigos de inventario
-                            </p>
                         </div>
 
-                        <div class="form-group">
-                            <label class="form-label">🖼️ Logo del Cliente (PNG/JPG)</label>
-                            <input type="file" class="form-input" name="logo_file" accept=".png,.jpg,.jpeg,.gif"
-                                style="padding: 0.5rem;">
-                            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                Imagen pequeña para mostrar en Dashboard y Buscador (recomendado: 200x80px)
-                            </p>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="form-label">📁 Subir PDFs (ZIP opcional)</label>
-                            <input type="file" class="form-input" name="zip_file" accept=".zip"
-                                style="padding: 0.5rem;">
-                            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                Sube un archivo ZIP con PDFs para importar automáticamente
-                            </p>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary" style="width: 100%;">Crear Cliente</button>
+                        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.75rem; font-size: 1rem; padding: 0.75rem;">
+                            🚀 Crear Cliente
+                        </button>
                     </form>
                 </div>
 
-                <!-- Clone Client -->
+                <!-- ═══════════ ENLAZAR PDFs POR LOTES ═══════════ -->
+                <div class="form-card" id="batchZipCard" style="<?= !empty($createdClientCode) ? '' : '' ?>">
+                    <h3>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        📦 Enlazar PDFs por Lotes
+                    </h3>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                        Sube ZIPs con PDFs para enlazar a documentos ya importados. Puedes repetir varias veces (~400MB por lote).
+                    </p>
+                    <form id="batchZipForm" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label class="form-label">Cliente destino *</label>
+                            <select class="form-select" name="client_code" id="batchClient" required>
+                                <option value="">Seleccione cliente...</option>
+                                <?php foreach ($clientCodes as $c): ?>
+                                    <option value="<?= htmlspecialchars($c) ?>"
+                                        <?= (!empty($createdClientCode) && $c === $createdClientCode) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($c) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">📦 ZIP con PDFs *</label>
+                            <input type="file" class="form-input" name="zip_file" accept=".zip" required
+                                style="padding: 0.5rem;">
+                        </div>
+                        <button type="button" class="btn btn-primary" style="width: 100%;" onclick="submitBatchZip()"
+                            id="batchBtn">
+                            📦 Subir y Enlazar Lote
+                        </button>
+                        <div id="batchResult" style="margin-top: 0.75rem; font-size: 0.85rem; display: none;"></div>
+                        <div id="batchHistory" style="margin-top: 0.5rem; font-size: 0.8rem;"></div>
+                    </form>
+                </div>
+
+                <!-- ═══════════ CLONAR CLIENTE ═══════════ -->
                 <div class="form-card">
                     <h3>
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
@@ -798,86 +884,6 @@ $clientCodes = array_column($clients, 'codigo');
                             <input type="password" class="form-input" name="new_password" required>
                         </div>
                         <button type="submit" class="btn btn-primary" style="width: 100%;">Clonar Cliente</button>
-                    </form>
-                </div>
-
-                <!-- Import SQL + ZIP -->
-                <div class="form-card">
-                    <h3>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
-                            stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                        </svg>
-                        Importar SQL + ZIP
-                    </h3>
-                    <form method="post" enctype="multipart/form-data">
-                        <input type="hidden" name="action" value="import_sql">
-                        <div class="form-group">
-                            <label class="form-label">Cliente destino *</label>
-                            <select class="form-select" name="client_code" required>
-                                <option value="">Seleccione cliente...</option>
-                                <?php foreach ($clientCodes as $c): ?>
-                                    <option value="<?= htmlspecialchars($c) ?>"><?= htmlspecialchars($c) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">🗄️ Archivo SQL * (phpMyAdmin export)</label>
-                            <input type="file" class="form-input" name="sql_file" accept=".sql" required
-                                style="padding: 0.5rem;">
-                            <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                Tablas <code>documents</code> + <code>codes</code>
-                            </p>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">📦 ZIP con PDFs (opcional)</label>
-                            <input type="file" class="form-input" name="zip_file" accept=".zip"
-                                style="padding: 0.5rem;">
-                            <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                Si el ZIP es muy grande, usa "Enlazar PDFs por Lotes" después
-                            </p>
-                        </div>
-                        <button type="submit" class="btn btn-primary" style="width: 100%;">🗄️ Importar SQL</button>
-                    </form>
-                </div>
-
-                <!-- Batch ZIP Linking -->
-                <div class="form-card">
-                    <h3>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
-                            stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                        </svg>
-                        Enlazar PDFs por Lotes
-                    </h3>
-                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
-                        Sube ZIPs de PDFs para enlazar a documentos existentes. Puedes repetir varias veces.
-                    </p>
-                    <form id="batchZipForm" enctype="multipart/form-data">
-                        <div class="form-group">
-                            <label class="form-label">Cliente destino *</label>
-                            <select class="form-select" name="client_code" id="batchClient" required>
-                                <option value="">Seleccione cliente...</option>
-                                <?php foreach ($clientCodes as $c): ?>
-                                    <option value="<?= htmlspecialchars($c) ?>"><?= htmlspecialchars($c) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">📦 ZIP con PDFs *</label>
-                            <input type="file" class="form-input" name="zip_file" accept=".zip" required
-                                style="padding: 0.5rem;">
-                            <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                Máximo ~400MB por lote. Repita para subir todos.
-                            </p>
-                        </div>
-                        <button type="button" class="btn btn-primary" style="width: 100%;" onclick="submitBatchZip()"
-                            id="batchBtn">
-                            📦 Subir y Enlazar Lote
-                        </button>
-                        <div id="batchResult" style="margin-top: 0.75rem; font-size: 0.85rem; display: none;"></div>
                     </form>
                 </div>
             </div>
