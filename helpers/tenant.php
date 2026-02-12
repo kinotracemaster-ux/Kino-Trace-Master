@@ -463,23 +463,38 @@ function ensure_client_schema(PDO $db): void
     );
 
     // 3. Columnas nuevas en documentos (texto_extraido, estado_extraccion)
-    // Usamos PRAGMA para verificar existencia antes de agregar
-    $cols = $db->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
-    if (!in_array('texto_extraido', $cols)) {
-        $db->exec("ALTER TABLE documentos ADD COLUMN texto_extraido TEXT");
-    }
-    if (!in_array('estado_extraccion', $cols)) {
-        $db->exec("ALTER TABLE documentos ADD COLUMN estado_extraccion TEXT DEFAULT 'pendiente'");
+    // Verificar primero si la tabla documentos existe (puede ser un DB nuevo aún sin tablas)
+    $tableCheck = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='documentos'")->fetchColumn();
+    if ($tableCheck) {
+        // Usamos PRAGMA para verificar existencia antes de agregar
+        $cols = $db->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('texto_extraido', $cols)) {
+            $db->exec("ALTER TABLE documentos ADD COLUMN texto_extraido TEXT");
+        }
+        if (!in_array('estado_extraccion', $cols)) {
+            $db->exec("ALTER TABLE documentos ADD COLUMN estado_extraccion TEXT DEFAULT 'pendiente'");
+        }
+        if (!in_array('original_path', $cols)) {
+            $db->exec("ALTER TABLE documentos ADD COLUMN original_path TEXT");
+        }
+
+        // --- MEJORAS FEBRERO 2026: Fase Rendimiento ---
+        // Índices para búsquedas rápidas (IF NOT EXISTS es seguro)
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_numero ON documentos(numero)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_tipo ON documentos(tipo)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_fecha ON documentos(fecha)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_estado ON documentos(estado)");
     }
 
-    // --- MEJORAS FEBRERO 2026: Fase Rendimiento ---
-    // Índices para búsquedas rápidas (IF NOT EXISTS es seguro)
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_numero ON documentos(numero)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_tipo ON documentos(tipo)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_fecha ON documentos(fecha)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_estado ON documentos(estado)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_origen ON vinculos(documento_origen_id)");
-    $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_destino ON vinculos(documento_destino_id)");
+    // Índices en otras tablas (solo si existen)
+    $codigosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='codigos'")->fetchColumn();
+    if ($codigosExists) {
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
+    }
+    $vinculosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='vinculos'")->fetchColumn();
+    if ($vinculosExists) {
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_origen ON vinculos(documento_origen_id)");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_destino ON vinculos(documento_destino_id)");
+    }
 }
