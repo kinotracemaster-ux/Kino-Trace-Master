@@ -58,7 +58,10 @@ function open_client_db(string $code): PDO
             copy($initialPath, $path);
             chmod($path, 0666);
         } else {
-            throw new Exception("Base de datos de cliente no encontrada: $code");
+            // Crear directorio y dejar que PDO cree un nuevo archivo SQLite vacío
+            $dir = dirname($path);
+            if (!is_dir($dir))
+                mkdir($dir, 0777, true);
         }
     }
 
