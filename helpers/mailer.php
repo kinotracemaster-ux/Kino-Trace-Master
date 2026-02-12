@@ -57,8 +57,13 @@ function send_reset_email(string $to, string $nombre, string $resetLink): array
         $mail->SMTPAuth = true;
         $mail->Username = smtp_env('SMTP_USER');
         $mail->Password = smtp_env('SMTP_PASS');
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port = (int) (smtp_env('SMTP_PORT') ?: 587);
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+        $port = (int) (smtp_env('SMTP_PORT') ?: 465);
+        $mail->Port = $port;
+        // Si el puerto es 587, usar STARTTLS en vez de SMTPS
+        if ($port === 587) {
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        }
         $mail->CharSet = 'UTF-8';
 
         // Remitente y destinatario
