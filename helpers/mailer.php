@@ -64,6 +64,15 @@ function send_reset_email(string $to, string $nombre, string $resetLink): array
         if ($port === 587) {
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         }
+        // Forzar IPv4 y opciones SSL para Railway/Docker
+        $mail->SMTPOptions = [
+            'socket' => ['bindto' => '0.0.0.0:0'],
+            'ssl' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+                'allow_self_signed' => true
+            ]
+        ];
         $mail->CharSet = 'UTF-8';
 
         // Remitente y destinatario
