@@ -29,16 +29,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret'])) {
     }
 }
 
-// Handle normal login
+// Handle normal login (acepta código o correo electrónico)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
-    $codigo = sanitize_code($_POST['codigo'] ?? '');
+    $input = trim($_POST['codigo'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    if ($codigo === '' || $password === '') {
-        $error = 'Debe escribir un código y una contraseña.';
+    if ($input === '' || $password === '') {
+        $error = 'Debe escribir su código o correo y una contraseña.';
     } else {
-        $stmt = $centralDb->prepare('SELECT codigo, password_hash FROM control_clientes WHERE codigo = ? AND activo = 1 LIMIT 1');
-        $stmt->execute([$codigo]);
+        // Si contiene @, buscar por email; sino, buscar por código
+        if (strpos($input, '@') !== false) {
+            $stmt = $centralDb->prepare('SELECT codigo, password_hash FROM control_clientes WHERE email = ? AND activo = 1 LIMIT 1');
+            $stmt->execute([$input]);
+        } else {
+            $codigo = sanitize_code($input);
+            $stmt = $centralDb->prepare('SELECT codigo, password_hash FROM control_clientes WHERE codigo = ? AND activo = 1 LIMIT 1');
+            $stmt->execute([$codigo]);
+        }
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row || !password_verify($password, $row['password_hash'])) {
             $error = 'Credenciales inválidas.';
@@ -148,7 +155,7 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
                 <div class="form-group">
                     <label class="form-label" for="codigo">Usuario</label>
                     <input type="text" name="codigo" id="codigo" class="form-input" required
-                        placeholder="Ingrese su código de cliente" autocomplete="username">
+                        placeholder="Código o correo electrónico" autocomplete="username">
                 </div>
 
                 <div class="form-group">

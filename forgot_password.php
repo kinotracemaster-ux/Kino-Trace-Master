@@ -3,51 +3,74 @@
  * Forgot Password Page - KINO TRACE
  *
  * Allows clients to request a password reset link via email.
+ * Protegido con CSRF y rate limiting.
  */
 session_start();
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/autoload.php';
 require_once __DIR__ . '/helpers/mailer.php';
 
 $message = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = trim($_POST['email'] ?? '');
-
-    if ($email === '') {
-        $error = 'Debe ingresar su correo electrónico.';
+    // Validar CSRF
+    $csrfToken = $_POST['csrf_token'] ?? '';
+    if (!CsrfProtection::validate($csrfToken)) {
+        $error = 'Solicitud inválida. Recargue la página e intente de nuevo.';
     } else {
-        // Buscar cliente por email
-        $stmt = $centralDb->prepare('SELECT codigo, nombre, email FROM control_clientes WHERE email = ? AND activo = 1 LIMIT 1');
-        $stmt->execute([$email]);
-        $client = $stmt->fetch(PDO::FETCH_ASSOC);
+        // Rate limiting: máximo 5 solicitudes por IP por hora
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $rlKey = 'forgot_pw_' . md5($ip);
+        if (!isset($_SESSION[$rlKey])) {
+            $_SESSION[$rlKey] = ['count' => 0, 'reset_at' => time() + 3600];
+        }
+        if (time() > $_SESSION[$rlKey]['reset_at']) {
+            $_SESSION[$rlKey] = ['count' => 0, 'reset_at' => time() + 3600];
+        }
+        $_SESSION[$rlKey]['count']++;
 
-        if ($client) {
-            // Generar token seguro
-            $token = bin2hex(random_bytes(32));
-            $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
-
-            // Guardar token en BD
-            $stmt = $centralDb->prepare('UPDATE control_clientes SET reset_token = ?, reset_token_expiry = ? WHERE codigo = ?');
-            $stmt->execute([$token, $expiry, $client['codigo']]);
-
-            // Construir URL de reset
-            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-            $host = $_SERVER['HTTP_HOST'];
-            $basePath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
-            $resetLink = "{$protocol}://{$host}{$basePath}/reset_password.php?token={$token}";
-
-            // Enviar correo
-            $result = send_reset_email($client['email'], $client['nombre'], $resetLink);
-
-            if ($result['success']) {
-                $message = 'Se ha enviado un enlace de recuperación a su correo electrónico.';
-            } else {
-                $error = $result['error'];
-            }
+        if ($_SESSION[$rlKey]['count'] > 5) {
+            $error = 'Demasiados intentos. Intente de nuevo en 1 hora.';
         } else {
-            // No revelar si el email existe o no (seguridad)
-            $message = 'Si el correo está registrado, recibirá un enlace de recuperación.';
+            $email = trim($_POST['email'] ?? '');
+
+            if ($email === '') {
+                $error = 'Debe ingresar su correo electrónico.';
+            } else {
+                // Buscar cliente por email
+                $stmt = $centralDb->prepare('SELECT codigo, nombre, email FROM control_clientes WHERE email = ? AND activo = 1 LIMIT 1');
+                $stmt->execute([$email]);
+                $client = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($client) {
+                    // Generar token seguro
+                    $token = bin2hex(random_bytes(32));
+                    $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
+
+                    // Guardar token en BD
+                    $stmt = $centralDb->prepare('UPDATE control_clientes SET reset_token = ?, reset_token_expiry = ? WHERE codigo = ?');
+                    $stmt->execute([$token, $expiry, $client['codigo']]);
+
+                    // Construir URL de reset
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                    $host = $_SERVER['HTTP_HOST'];
+                    $basePath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+                    $resetLink = "{$protocol}://{$host}{$basePath}/reset_password.php?token={$token}";
+
+                    // Enviar correo
+                    $result = send_reset_email($client['email'], $client['nombre'], $resetLink);
+
+                    if ($result['success']) {
+                        $message = 'Se ha enviado un enlace de recuperación a su correo electrónico.';
+                    } else {
+                        $error = $result['error'];
+                    }
+                } else {
+                    // No revelar si el email existe o no (seguridad)
+                    $message = 'Si el correo está registrado, recibirá un enlace de recuperación.';
+                }
+            }
         }
     }
 }
@@ -140,6 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
 
                 <form method="post">
+                    <?= CsrfProtection::tokenField() ?>
                     <div class="form-group">
                         <label class="form-label" for="email">Correo Electrónico</label>
                         <input type="email" name="email" id="email" class="form-input" required
