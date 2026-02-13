@@ -160,10 +160,23 @@ try {
                     if (!empty($_FILES['zip_file']['tmp_name']) && $_FILES['zip_file']['error'] === UPLOAD_ERR_OK) {
                         require_once __DIR__ . '/../helpers/pdf_linker.php';
                         $newDb = $newDb ?? open_client_db($code);
+                        
+                        // Debug: verify docs exist before linking
+                        $pendingCount = $newDb->query("SELECT COUNT(*) FROM documentos WHERE ruta_archivo = 'pending'")->fetchColumn();
+                        $totalDocs = $newDb->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
+                        
                         $uploadDir = CLIENTS_DIR . "/{$code}/uploads/sql_import/";
                         $zipResult = processZipAndLink($newDb, $_FILES['zip_file']['tmp_name'], $uploadDir, 'sql_import/');
-                        $linked = ($zipResult['updated'] ?? 0) + ($zipResult['created'] ?? 0);
-                        $extraMsg .= " + ZIP: {$linked} PDFs enlazados.";
+                        $linked = $zipResult['updated'] ?? 0;
+                        $created = $zipResult['created'] ?? 0;
+                        $dupes = $zipResult['duplicates'] ?? 0;
+                        $unmatched = $zipResult['unmatched'] ?? 0;
+                        
+                        // Check how many still pending after linking
+                        $stillPending = $newDb->query("SELECT COUNT(*) FROM documentos WHERE ruta_archivo = 'pending'")->fetchColumn();
+                        
+                        $extraMsg .= " + ZIP: {$linked} vinculados, {$created} creados, {$dupes} duplicados, {$unmatched} sin procesar.";
+                        $extraMsg .= " (Antes: {$totalDocs} docs, {$pendingCount} pendientes → tras link: {$stillPending} pendientes).";
                     }
 
                     $message = "✅ Cliente '{$name}' creado correctamente." . $extraMsg;
