@@ -46,18 +46,18 @@ $currentSection = $currentSection ?? 'voraz';
 <!-- Sidebar -->
 <aside class="sidebar" id="sidebar">
     <!-- Header / Brand -->
-    <div class="sidebar-header" style="<?= $clientLogo ? 'padding: 1rem;' : '' ?>">
+    <div class="sidebar-header" style="padding: 1rem; text-align: center;">
+        <h1
+            style="font-size: 1rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0; line-height: 1.3;">
+            <?= htmlspecialchars($clientName) ?>
+        </h1>
         <?php if ($clientLogo): ?>
             <div style="width: 100%; display: flex; justify-content: center; align-items: center;">
                 <img src="<?= $baseUrl ?? './' ?><?= $clientLogo ?>" alt="<?= htmlspecialchars($clientName) ?>"
                     style="max-width: 100%; max-height: 60px; object-fit: contain;">
             </div>
         <?php else: ?>
-            <div class="sidebar-logo"><?= strtoupper(substr($clientName, 0, 1)) ?></div>
-            <div class="sidebar-brand">
-                <h1><?= htmlspecialchars($clientName) ?></h1>
-                <span>Gestor documental</span>
-            </div>
+            <div class="sidebar-logo" style="margin: 0 auto;"><?= strtoupper(substr($clientName, 0, 1)) ?></div>
         <?php endif; ?>
     </div>
 
