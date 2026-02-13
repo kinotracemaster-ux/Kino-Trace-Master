@@ -939,9 +939,9 @@ COD001
                             <div class="result-title">${doc.numero}</div>
                  <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
                                 <a href="../modules/resaltar/viewer.php?doc=${doc.id}" class="btn btn-primary" style="padding: 0.5rem 1rem;">👁️ Ver Documento</a>
-                                ${pdfUrl ? `<button onclick="openHighlighter('../resaltar/viewer.php?doc=${doc.id}&term=${encodeURIComponent(code)}')" class="btn btn-secondary" style="padding: 0.5rem 1rem; background: #fbbf24; color: #000;">🖍️ Resaltar</button>` : ''
-                                ${ pdfUrl ? `<a href="${pdfUrl}" target="_blank" class="btn btn-secondary" style="padding: 0.5rem 1rem;">📄 Ver PDF</a>` : '' }
-                            </div >
+                                ${pdfUrl ? `<button onclick="openHighlighter('../resaltar/viewer.php?doc=${doc.id}&term=${encodeURIComponent(code)}')" class="btn btn-secondary" style="padding: 0.5rem 1rem; background: #fbbf24; color: #000;">🖍️ Resaltar</button>` : ''}
+                                ${pdfUrl ? `<a href="${pdfUrl}" target="_blank" class="btn btn-secondary" style="padding: 0.5rem 1rem;">📄 Ver PDF</a>` : ''}
+                            </div>
                         </div >
                         `;
                 }).join('');
@@ -958,8 +958,8 @@ COD001
 
         function toggleTableCodes(e, docId) {
             if (e) e.preventDefault();
-            const row = document.getElementById(`codes - row - ${ docId } `);
-            const btn = document.getElementById(`btn - codes - ${ docId }`);
+            const row = document.getElementById(`codes-row-${docId}`);
+            const btn = document.getElementById(`btn-codes-${docId}`);
 
             if (row.classList.contains('hidden')) {
                 row.classList.remove('hidden');
@@ -984,10 +984,10 @@ COD001
             // Show modal
             const modal = document.getElementById('highlighterModal');
             modal.classList.remove('hidden');
-            
+
             // Open in new tab
             window.open(url, '_blank');
-            
+
             // Auto-hide modal after 3 seconds
             setTimeout(() => {
                 modal.classList.add('hidden');

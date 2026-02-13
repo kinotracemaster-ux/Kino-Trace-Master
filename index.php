@@ -1147,7 +1147,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                 status.innerHTML = `🔄 Procesando lote #${batchNum}... (Indexados: ${totalIndexedSession})`;
 
                 try {
-                    const response = await fetch(`${apiUrl}?action=reindex_documents&batch=10`);
+                    const response = await fetch(`${apiUrl}?action=reindex_documents&batch=50`);
                     const result = await response.json();
 
                     if (!result.success) {
