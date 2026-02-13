@@ -175,8 +175,17 @@ try {
                         // Check how many still pending after linking
                         $stillPending = $newDb->query("SELECT COUNT(*) FROM documentos WHERE ruta_archivo = 'pending'")->fetchColumn();
                         
+                        // Get orphan document names for display
+                        $orphanDocs = [];
+                        if ($stillPending > 0) {
+                            $orphanStmt = $newDb->query("SELECT id, numero, original_path FROM documentos WHERE ruta_archivo = 'pending' ORDER BY numero");
+                            $orphanDocs = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
+                        }
+                        
                         $extraMsg .= " + ZIP: {$linked} vinculados, {$created} creados, {$dupes} duplicados, {$unmatched} sin procesar.";
-                        $extraMsg .= " (Antes: {$totalDocs} docs, {$pendingCount} pendientes → tras link: {$stillPending} pendientes).";
+                        if ($stillPending > 0) {
+                            $extraMsg .= " ⚠️ {$stillPending} documentos sin PDF.";
+                        }
                     }
 
                     $message = "✅ Cliente '{$name}' creado correctamente." . $extraMsg;
@@ -371,6 +380,19 @@ try {
                     rmdir($dir);
                 }
                 $message = "🗑️ Cliente '{$delCode}' eliminado.";
+            }
+        }
+
+        // DIAGNOSTICAR HUÉRFANOS
+        elseif ($action === 'diagnose_orphans') {
+            $diagCode = sanitize_code($_POST['diag_code'] ?? '');
+            if ($diagCode !== '') {
+                $diagDb = open_client_db($diagCode);
+                $totalDocs = $diagDb->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
+                $orphanStmt = $diagDb->query("SELECT id, numero, original_path FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = '' ORDER BY numero");
+                $orphanDocs = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
+                $withPdf = $totalDocs - count($orphanDocs);
+                $message = "🔍 Diagnóstico de '{$diagCode}': {$totalDocs} documentos totales, {$withPdf} con PDF, " . count($orphanDocs) . " sin PDF.";
             }
         }
     }
@@ -660,6 +682,35 @@ $clientCodes = array_column($clients, 'codigo');
         <div class="admin-container">
             <?php if ($message): ?>
                 <div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
+                <?php if (!empty($orphanDocs)): ?>
+                    <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                        <details>
+                            <summary style="cursor: pointer; font-weight: 600; color: #856404;">
+                                ⚠️ <?= count($orphanDocs) ?> documentos sin PDF vinculado (click para ver lista)
+                            </summary>
+                            <div style="max-height: 300px; overflow-y: auto; margin-top: 0.5rem;">
+                                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                    <thead>
+                                        <tr style="background: #ffeeba; position: sticky; top: 0;">
+                                            <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd;">ID</th>
+                                            <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd;">Nombre (numero)</th>
+                                            <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd;">Archivo esperado (original_path)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($orphanDocs as $orphan): ?>
+                                            <tr>
+                                                <td style="padding: 4px 8px; border-bottom: 1px solid #eee;"><?= $orphan['id'] ?></td>
+                                                <td style="padding: 4px 8px; border-bottom: 1px solid #eee;"><?= htmlspecialchars($orphan['numero']) ?></td>
+                                                <td style="padding: 4px 8px; border-bottom: 1px solid #eee; font-family: monospace; font-size: 0.8rem;"><?= htmlspecialchars($orphan['original_path']) ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    </div>
+                <?php endif; ?>
             <?php endif; ?>
             <?php if ($error): ?>
                 <div class="alert alert-error"><?= htmlspecialchars($error) ?></div>
@@ -714,6 +765,11 @@ $clientCodes = array_column($clients, 'codigo');
                                     <button type="submit" class="btn btn-secondary btn-xs">
                                         <?= $cli['activo'] ? 'Pause' : 'Activar' ?>
                                     </button>
+                                </form>
+                                <form method="post">
+                                    <input type="hidden" name="action" value="diagnose_orphans">
+                                    <input type="hidden" name="diag_code" value="<?= htmlspecialchars($cli['codigo']) ?>">
+                                    <button type="submit" class="btn btn-secondary btn-xs" title="Ver documentos sin PDF">🔍 Huérfanos</button>
                                 </form>
                                 <form method="post"
                                     onsubmit="return confirm('¿Eliminar cliente <?= htmlspecialchars($cli['codigo']) ?> y todos sus datos?');">
