@@ -24,6 +24,16 @@ if (!is_dir($clientDir)) {
 
 $db = open_client_db($clientCode);
 
+// Cargar datos de página pública para footer
+$ppData = [];
+if (isset($centralDb)) {
+    $ppStmt = $centralDb->prepare('SELECT * FROM pagina_publica WHERE codigo = ? LIMIT 1');
+    $ppStmt->execute([$clientCode]);
+    $ppData = $ppStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+}
+$ppFooterTexto = $ppData['footer_texto'] ?? '';
+$ppFooterUrl = $ppData['footer_url'] ?? '';
+
 // Get parameters
 $documentId = isset($_GET['doc']) ? (int) $_GET['doc'] : 0;
 $searchTerm = isset($_GET['term']) ? trim($_GET['term']) : '';
@@ -302,11 +312,18 @@ if (!empty($searchTerm)) {
                 <?= htmlspecialchars($document['numero']) ?>
             </span>
         </div>
-        <?php if (!empty($searchTerm)): ?>
-            <span class="header-code">Código:
-                <?= htmlspecialchars(strtoupper($searchTerm)) ?>
-            </span>
-        <?php endif; ?>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <?php if (!empty($searchTerm)): ?>
+                <span class="header-code">Código:
+                    <?= htmlspecialchars(strtoupper($searchTerm)) ?>
+                </span>
+                <button id="btnResaltar" onclick="highlightCode()"
+                    style="background:#16a34a; color:white; border:none; padding:6px 14px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.2s;"
+                    onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">
+                    🔍 Resaltar Código
+                </button>
+            <?php endif; ?>
+        </div>
     </header>
 
     <!-- Visor PDF -->
@@ -319,10 +336,16 @@ if (!empty($searchTerm)) {
         </div>
     </div>
 
-    <!-- Footer -->
+    <!-- Footer dinámico -->
     <footer class="public-footer">
-        KINO COMPANY S.A.S - Importador directo de relojería y otros productos<br>
-        <a href="https://kinocompanysas.kyte.site/es" target="_blank">kinocompanysas.kyte.site</a>
+        <?php if ($ppFooterTexto): ?>
+            <?= htmlspecialchars($ppFooterTexto) ?><br>
+        <?php else: ?>
+            <?= htmlspecialchars($clientCode) ?><br>
+        <?php endif; ?>
+        <?php if ($ppFooterUrl): ?>
+            <a href="<?= htmlspecialchars($ppFooterUrl) ?>" target="_blank"><?= htmlspecialchars($ppFooterUrl) ?></a>
+        <?php endif; ?>
     </footer>
 
     <script>
@@ -335,11 +358,10 @@ if (!empty($searchTerm)) {
         const container = document.getElementById('pdfContainer');
         const scale = 1.5;
         let pdfDoc = null;
-        let hasScrolledToMark = false;
+        let highlightFound = false;
 
-        // M6: Lazy loading — OCR cache en memoria
-        const ocrCache = new Map();
         const pagesRendering = new Set();
+        const ocrCache = new Map();
 
         async function loadPDF() {
             try {
@@ -347,12 +369,10 @@ if (!empty($searchTerm)) {
                 const numPages = pdfDoc.numPages;
                 container.innerHTML = '';
 
-                // M6: Crear placeholders en vez de renderizar todo
                 for (let i = 1; i <= numPages; i++) {
                     createPlaceholder(i, numPages);
                 }
 
-                // M6: IntersectionObserver para lazy loading
                 const observer = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
                         if (entry.isIntersecting && !entry.target.dataset.rendered) {
@@ -365,7 +385,6 @@ if (!empty($searchTerm)) {
 
                 document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
 
-                // Forzar primera página inmediata
                 const p1 = document.getElementById('pub-page-1');
                 if (p1) { renderPage(1, p1); p1.dataset.rendered = 'true'; }
 
@@ -387,6 +406,7 @@ if (!empty($searchTerm)) {
             container.appendChild(outer);
         }
 
+        // Renderizar página SIN resaltar (solo canvas + text layer)
         async function renderPage(pageNum, wrapper) {
             if (pagesRendering.has(pageNum)) return;
             pagesRendering.add(pageNum);
@@ -401,7 +421,6 @@ if (!empty($searchTerm)) {
                 wrapper.style.minHeight = 'auto';
                 wrapper.style.display = 'block';
 
-                // Canvas
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.height = viewport.height;
@@ -410,12 +429,9 @@ if (!empty($searchTerm)) {
 
                 await page.render({ canvasContext: ctx, viewport: viewport }).promise;
 
-                // Intentar text layer + Mark.js primero
+                // Crear text layer (para poder marcar después)
                 const textContent = await page.getTextContent();
-                let hasNativeText = textContent.items && textContent.items.length > 0;
-                let markFound = false;
-
-                if (hasNativeText && termsToHighlight.length > 0) {
+                if (textContent.items && textContent.items.length > 0) {
                     const textDiv = document.createElement('div');
                     textDiv.className = 'text-layer';
                     textDiv.style.width = viewport.width + 'px';
@@ -428,30 +444,6 @@ if (!empty($searchTerm)) {
                         viewport: viewport,
                         textDivs: []
                     }).promise;
-
-                    // Mark.js highlighting
-                    const instance = new Mark(textDiv);
-                    instance.mark(termsToHighlight, {
-                        element: "mark",
-                        accuracy: "partially",
-                        separateWordSearch: false,
-                        done: () => {
-                            const marks = textDiv.querySelectorAll('mark');
-                            if (marks.length > 0) {
-                                markFound = true;
-                                if (!hasScrolledToMark) {
-                                    hasScrolledToMark = true;
-                                    setTimeout(() => marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
-                                }
-                            }
-                        }
-                    });
-                }
-
-                // M7: OCR fallback si no hay texto nativo O si Mark.js no encontró nada
-                if (termsToHighlight.length > 0 && (!hasNativeText || !markFound)) {
-                    // Fire-and-forget: no bloquea el renderizado
-                    applyOcrHighlight(wrapper, pageNum).catch(e => console.warn('OCR fallback error:', e));
                 }
 
             } catch (err) {
@@ -461,60 +453,118 @@ if (!empty($searchTerm)) {
             }
         }
 
-        // M7: OCR Highlight via overlay divs (misma técnica que viewer principal)
-        async function applyOcrHighlight(wrapper, pageNum) {
-            try {
-                let result;
-                if (ocrCache.has(pageNum)) {
-                    result = ocrCache.get(pageNum);
-                } else {
-                    const termsStr = encodeURIComponent(termsToHighlight.join(','));
-                    // Usa endpoint OCR público (sin sesión requerida)
-                    const resp = await fetch(`ocr_text_public.php?cliente=${clientCode}&doc=${docId}&page=${pageNum}&terms=${termsStr}`);
-                    result = await resp.json();
-                    if (result.success) ocrCache.set(pageNum, result);
+        // RESALTAR CÓDIGO: busca página por página, resalta solo el primero
+        async function highlightCode() {
+            if (!pdfDoc || termsToHighlight.length === 0) return;
+
+            const btn = document.getElementById('btnResaltar');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Buscando...';
+            highlightFound = false;
+
+            const numPages = pdfDoc.numPages;
+
+            for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+                if (highlightFound) break;
+
+                const wrapper = document.getElementById(`pub-page-${pageNum}`);
+                if (!wrapper) continue;
+
+                // Asegurar que la página esté renderizada
+                if (!wrapper.dataset.rendered || wrapper.dataset.rendered !== 'true') {
+                    wrapper.dataset.rendered = 'true';
+                    await renderPage(pageNum, wrapper);
                 }
 
-                if (result.success && result.highlights && result.highlights.length > 0 && result.image_width > 0) {
-                    const canvas = wrapper.querySelector('canvas');
-                    if (!canvas) return;
+                // Esperar a que termine de renderizar
+                while (pagesRendering.has(pageNum)) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
 
-                    const scaleX = canvas.width / result.image_width;
-                    const scaleY = canvas.height / result.image_height;
+                // Intentar Mark.js en text layer
+                const textLayer = wrapper.querySelector('.text-layer');
+                if (textLayer) {
+                    const found = await new Promise(resolve => {
+                        const instance = new Mark(textLayer);
+                        instance.mark(termsToHighlight, {
+                            element: "mark",
+                            accuracy: "partially",
+                            separateWordSearch: false,
+                            done: () => {
+                                const marks = textLayer.querySelectorAll('mark');
+                                resolve(marks.length > 0);
+                            }
+                        });
+                    });
 
-                    const overlay = document.createElement('div');
-                    overlay.style.cssText = `
-                        position: absolute; top: 0; left: 0;
-                        width: ${canvas.width}px; height: ${canvas.height}px;
-                        pointer-events: none; z-index: 5;
-                    `;
+                    if (found) {
+                        highlightFound = true;
+                        const firstMark = textLayer.querySelector('mark');
+                        setTimeout(() => firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+                        break;
+                    }
+                }
 
-                    for (const hl of result.highlights) {
+                // Fallback OCR si no encontró con text layer
+                try {
+                    const termsStr = encodeURIComponent(termsToHighlight.join(','));
+                    const resp = await fetch(`ocr_text_public.php?cliente=${clientCode}&doc=${docId}&page=${pageNum}&terms=${termsStr}`);
+                    const result = await resp.json();
+
+                    if (result.success && result.highlights && result.highlights.length > 0 && result.image_width > 0) {
+                        highlightFound = true;
+
+                        const canvas = wrapper.querySelector('canvas');
+                        if (!canvas) break;
+
+                        const scaleX = canvas.width / result.image_width;
+                        const scaleY = canvas.height / result.image_height;
+
+                        const overlay = document.createElement('div');
+                        overlay.style.cssText = `
+                            position: absolute; top: 0; left: 0;
+                            width: ${canvas.width}px; height: ${canvas.height}px;
+                            pointer-events: none; z-index: 5;
+                        `;
+
+                        // Solo el primer highlight
+                        const hl = result.highlights[0];
                         const rect = document.createElement('div');
                         rect.style.cssText = `
                             position: absolute;
                             left: ${hl.x * scaleX}px; top: ${hl.y * scaleY}px;
                             width: ${hl.w * scaleX}px; height: ${hl.h * scaleY}px;
-                            background: rgba(22, 101, 52, 0.35);
+                            background: rgba(22, 101, 52, 0.45);
                             mix-blend-mode: multiply;
                             border-radius: 2px;
+                            box-shadow: 0 0 8px rgba(22, 101, 52, 0.6);
                         `;
                         overlay.appendChild(rect);
-                    }
-                    wrapper.appendChild(overlay);
+                        wrapper.appendChild(overlay);
 
-                    // Auto-scroll al primer OCR highlight
-                    if (!hasScrolledToMark) {
-                        hasScrolledToMark = true;
-                        setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+                        setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+                        break;
                     }
+                } catch (e) {
+                    console.warn(`OCR fallback error pág ${pageNum}:`, e);
                 }
-            } catch (e) {
-                console.warn(`OCR fallback error en página ${pageNum}:`, e);
             }
+
+            if (highlightFound) {
+                btn.innerHTML = '✅ Código encontrado';
+                btn.style.background = '#15803d';
+            } else {
+                btn.innerHTML = '❌ No encontrado';
+                btn.style.background = '#dc2626';
+            }
+
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Resaltar Código';
+                btn.style.background = '#16a34a';
+            }, 3000);
         }
 
-        // Iniciar carga
         loadPDF();
     </script>
 </body>
