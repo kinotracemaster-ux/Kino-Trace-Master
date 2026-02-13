@@ -97,15 +97,15 @@ while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
                 <!-- Client Logo + Title Hero -->
                 <div
                     style="text-align: center; margin-bottom: 1.5rem; padding: 1.5rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg);">
-                    <?php if ($dashboardLogo): ?>
-                        <img src="<?= htmlspecialchars($dashboardLogo) ?>"
-                            alt="<?= htmlspecialchars($dashboardClientTitle) ?>"
-                            style="max-height: 80px; max-width: 200px; object-fit: contain; margin-bottom: 0.75rem; border-radius: 8px;">
-                    <?php endif; ?>
                     <h2 style="font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin: 0;">
                         <?= htmlspecialchars($dashboardClientTitle) ?>
                     </h2>
                     <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0;">Gestor Documental</p>
+                    <?php if ($dashboardLogo): ?>
+                        <img src="<?= htmlspecialchars($dashboardLogo) ?>"
+                            alt="<?= htmlspecialchars($dashboardClientTitle) ?>"
+                            style="max-height: 80px; max-width: 200px; object-fit: contain; margin-top: 0.75rem; border-radius: 8px;">
+                    <?php endif; ?>
                 </div>
                 <?php if ($pendingIndex > 0): ?>
                     <!-- Indexing Notification Banner -->
