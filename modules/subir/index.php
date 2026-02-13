@@ -904,7 +904,7 @@ También puedes escribirlos manualmente (uno por línea)"><?= $isEditMode ? html
                     <div class="form-group">
                         <label>Proveedor</label>
                         <input type="text" name="proveedor" placeholder="Nombre del proveedor"
-                            value="<?= $isEditMode ? htmlspecialchars($editDoc['proveedor']) : '' ?>">
+                            value="<?= $isEditMode ? htmlspecialchars($editDoc['proveedor'] ?? '') : '' ?>">
                     </div>
                 </div>
 
