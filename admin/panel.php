@@ -114,7 +114,8 @@ try {
                         $stmtDoc = $newDb->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo, original_path) VALUES (?, ?, ?, ?, ?)");
 
                         foreach ($docMatches[1] as $block) {
-                            preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                            // Regex that handles parentheses inside single-quoted strings
+                            preg_match_all("/\((\d+\s*,\s*'(?:[^'\\\\]|\\\\.)*'\s*,\s*'(?:[^'\\\\]|\\\\.)*'\s*,\s*'(?:[^'\\\\]|\\\\.)*')\)/", $block, $rows);
                             foreach ($rows[1] as $row) {
                                 $vals = str_getcsv($row, ',', "'");
                                 if (count($vals) < 4) continue;
@@ -138,7 +139,7 @@ try {
                         $stmtCode = $newDb->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
 
                         foreach ($codeMatches[1] as $block) {
-                            preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                            preg_match_all("/\((\d+\s*,\s*\d+\s*,\s*'(?:[^'\\\\]|\\\\.)*')\)/", $block, $rows);
                             foreach ($rows[1] as $row) {
                                 $vals = str_getcsv($row, ',', "'");
                                 if (count($vals) < 3) continue;
@@ -261,7 +262,8 @@ try {
                 $stmtDoc = $db->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo, original_path) VALUES (?, ?, ?, ?, ?)");
 
                 foreach ($docMatches[1] as $block) {
-                    preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                    // Regex that handles parentheses inside single-quoted strings
+                    preg_match_all("/\((\d+\s*,\s*'(?:[^'\\\\]|\\\\.)*'\s*,\s*'(?:[^'\\\\]|\\\\.)*'\s*,\s*'(?:[^'\\\\]|\\\\.)*')\)/", $block, $rows);
                     foreach ($rows[1] as $row) {
                         $vals = str_getcsv($row, ',', "'");
                         if (count($vals) < 4)
@@ -288,7 +290,7 @@ try {
                 $stmtCode = $db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
 
                 foreach ($codeMatches[1] as $block) {
-                    preg_match_all("/\(([^)]+)\)/", $block, $rows);
+                    preg_match_all("/\((\d+\s*,\s*\d+\s*,\s*'(?:[^'\\\\]|\\\\.)*')\)/", $block, $rows);
                     foreach ($rows[1] as $row) {
                         $vals = str_getcsv($row, ',', "'");
                         if (count($vals) < 3)
