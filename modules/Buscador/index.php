@@ -521,8 +521,11 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
             <div class="search-section">
                 <h3>Búsqueda por Código</h3>
                 <div class="search-form">
-                    <input type="text" class="search-input" id="codigoInput" placeholder="Código a buscar"
-                        autocomplete="off">
+                    <div style="position: relative; flex: 1; min-width: 250px; max-width: 400px;">
+                        <input type="text" class="search-input" id="codigoInput" placeholder="Código a buscar"
+                            autocomplete="off" style="width: 100%;">
+                        <div id="suggestionsDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:white; border:1px solid #e0e0e0; border-top:none; border-radius:0 0 8px 8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:50; max-height:200px; overflow-y:auto;"></div>
+                    </div>
                     <button class="btn-buscar" onclick="buscarCodigo()">Buscar</button>
                     <button class="btn-limpiar" onclick="limpiar()">Limpiar</button>
                 </div>
@@ -587,16 +590,62 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
     <?php endif; ?>
 
     <script>
-        const apiUrl = '../../api.php';
+        const apiUrl = 'api_public.php';
         const clientCode = '<?= $clientCode ?>';
         const codigoInput = document.getElementById('codigoInput');
         const loadingArea = document.getElementById('loadingArea');
         const resultsContainer = document.getElementById('resultsContainer');
         const resultsList = document.getElementById('resultsList');
+        const suggestionsDropdown = document.getElementById('suggestionsDropdown');
+
+        let debounceTimer;
+
+        // Sugerencias mientras escribe
+        codigoInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            const term = e.target.value.trim();
+
+            if (term.length < 2) {
+                suggestionsDropdown.style.display = 'none';
+                return;
+            }
+
+            debounceTimer = setTimeout(async () => {
+                try {
+                    const response = await fetch(`${apiUrl}?cliente=${clientCode}&action=suggest&term=${encodeURIComponent(term)}`);
+                    const suggestions = await response.json();
+
+                    if (suggestions.length > 0) {
+                        suggestionsDropdown.innerHTML = suggestions.map(s =>
+                            `<div style="padding:10px 14px; cursor:pointer; font-size:14px; border-bottom:1px solid #f0f0f0; transition:background 0.15s;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='white'" onclick="selectSuggestion('${s}')">${s}</div>`
+                        ).join('');
+                        suggestionsDropdown.style.display = 'block';
+                    } else {
+                        suggestionsDropdown.style.display = 'none';
+                    }
+                } catch (e) {
+                    suggestionsDropdown.style.display = 'none';
+                }
+            }, 250);
+        });
+
+        function selectSuggestion(code) {
+            codigoInput.value = code;
+            suggestionsDropdown.style.display = 'none';
+            buscarCodigo();
+        }
+
+        // Cerrar sugerencias al hacer clic fuera
+        document.addEventListener('click', (e) => {
+            if (!codigoInput.contains(e.target) && !suggestionsDropdown.contains(e.target)) {
+                suggestionsDropdown.style.display = 'none';
+            }
+        });
 
         // Buscar al presionar Enter
         codigoInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
+                suggestionsDropdown.style.display = 'none';
                 buscarCodigo();
             }
         });
@@ -609,15 +658,14 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                 return;
             }
 
-            // Actualizar input a mayúsculas
             codigoInput.value = codigo;
+            suggestionsDropdown.style.display = 'none';
 
-            // Mostrar loading
             loadingArea.classList.remove('hidden');
             resultsContainer.classList.add('hidden');
 
             try {
-                const response = await fetch(`${apiUrl}?action=search_by_code&code=${encodeURIComponent(codigo)}`);
+                const response = await fetch(`${apiUrl}?cliente=${clientCode}&action=search_by_code&code=${encodeURIComponent(codigo)}`);
                 const result = await response.json();
 
                 loadingArea.classList.add('hidden');
@@ -633,7 +681,6 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                     return;
                 }
 
-                // Mostrar resultados
                 resultsContainer.classList.remove('hidden');
                 resultsList.innerHTML = result.documents.map(doc => `
                     <div class="result-item">
@@ -662,10 +709,10 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
             codigoInput.value = '';
             resultsContainer.classList.add('hidden');
             resultsList.innerHTML = '';
+            suggestionsDropdown.style.display = 'none';
             codigoInput.focus();
         }
 
-        // Focus automático al cargar
         codigoInput.focus();
     </script>
 </body>
