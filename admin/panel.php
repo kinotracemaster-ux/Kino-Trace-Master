@@ -240,8 +240,17 @@ try {
                 $stmt->execute([$titulo, $email, $colorP, $colorS, $code]);
 
                 $logoMsg = '';
-                // Process logo upload if provided
-                if (!empty($_FILES['logo_file']['tmp_name']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
+                // Handle logo removal
+                if (!empty($_POST['remove_logo'])) {
+                    $logoDir = CLIENTS_DIR . "/{$code}/";
+                    foreach (['png', 'jpg', 'jpeg', 'gif'] as $ext) {
+                        $old = $logoDir . 'logo.' . $ext;
+                        if (file_exists($old)) unlink($old);
+                    }
+                    $logoMsg = ' + Logo eliminado.';
+                }
+                // Process logo upload if provided (takes priority over remove)
+                elseif (!empty($_FILES['logo_file']['tmp_name']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
                     $logoExt = strtolower(pathinfo($_FILES['logo_file']['name'], PATHINFO_EXTENSION));
                     if (in_array($logoExt, ['png', 'jpg', 'jpeg', 'gif'])) {
                         $logoDir = CLIENTS_DIR . "/{$code}/";
@@ -994,7 +1003,17 @@ $clientCodes = array_column($clients, 'codigo');
                 <div class="form-group">
                     <label class="form-label">🖼️ Logo del Cliente</label>
                     <div id="currentLogoPreview" style="margin-bottom: 0.5rem;"></div>
-                    <input type="file" class="form-input" name="logo_file" accept=".png,.jpg,.jpeg,.gif"
+                    <input type="hidden" name="remove_logo" id="removeLogo" value="">
+                    <div id="logoRemoveBtn" style="display: none; margin-bottom: 0.5rem;">
+                        <button type="button" class="btn btn-danger btn-xs" onclick="markRemoveLogo()">
+                            🗑️ Quitar Logo
+                        </button>
+                    </div>
+                    <div id="logoRemovedMsg" style="display: none; margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(239, 68, 68, 0.1); border-radius: 6px; font-size: 0.85rem; color: var(--accent-danger);">
+                        ⚠️ El logo se eliminará al guardar.
+                        <button type="button" class="btn btn-secondary btn-xs" style="margin-left: 0.5rem;" onclick="cancelRemoveLogo()">Cancelar</button>
+                    </div>
+                    <input type="file" class="form-input" name="logo_file" id="editLogoFile" accept=".png,.jpg,.jpeg,.gif"
                         style="padding: 0.5rem;">
                     <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
                         Dejar vacío para mantener el logo actual
@@ -1039,7 +1058,64 @@ $clientCodes = array_column($clients, 'codigo');
             document.getElementById('editEmail').value = email || '';
             document.getElementById('editColorP').value = colorP || '#3b82f6';
             document.getElementById('editColorS').value = colorS || '#64748b';
+            
+            // Reset logo state
+            document.getElementById('removeLogo').value = '';
+            document.getElementById('logoRemovedMsg').style.display = 'none';
+            const editLogoFile = document.getElementById('editLogoFile');
+            if (editLogoFile) editLogoFile.style.display = '';
+            
+            // Detect and show current logo
+            const preview = document.getElementById('currentLogoPreview');
+            const removeBtn = document.getElementById('logoRemoveBtn');
+            preview.innerHTML = '';
+            removeBtn.style.display = 'none';
+            
+            const extensions = ['png', 'jpg', 'jpeg', 'gif'];
+            let found = false;
+            let checksLeft = extensions.length;
+            
+            extensions.forEach(ext => {
+                if (found) return;
+                const img = new Image();
+                const src = '../clients/' + code + '/logo.' + ext + '?t=' + Date.now();
+                img.onload = function() {
+                    if (found) return;
+                    found = true;
+                    preview.innerHTML = '<img src="' + src + '" style="max-height: 60px; max-width: 180px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-color);">';
+                    removeBtn.style.display = 'block';
+                };
+                img.onerror = function() {
+                    checksLeft--;
+                    if (checksLeft === 0 && !found) {
+                        preview.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted);">Sin logo</span>';
+                    }
+                };
+                img.src = src;
+            });
+            
             document.getElementById('editModal').classList.add('active');
+        }
+        
+        function markRemoveLogo() {
+            document.getElementById('removeLogo').value = '1';
+            document.getElementById('currentLogoPreview').innerHTML = '';
+            document.getElementById('logoRemoveBtn').style.display = 'none';
+            document.getElementById('logoRemovedMsg').style.display = 'block';
+            document.getElementById('editLogoFile').style.display = 'none';
+        }
+        
+        function cancelRemoveLogo() {
+            document.getElementById('removeLogo').value = '';
+            document.getElementById('logoRemovedMsg').style.display = 'none';
+            document.getElementById('editLogoFile').style.display = '';
+            // Re-trigger modal to reload preview
+            const code = document.getElementById('editClientCode').value;
+            const titulo = document.getElementById('editTitulo').value;
+            const email = document.getElementById('editEmail').value;
+            const colorP = document.getElementById('editColorP').value;
+            const colorS = document.getElementById('editColorS').value;
+            openEditModal(code, titulo, email, colorP, colorS);
         }
 
         function openPasswordModal(code) {
