@@ -32,6 +32,24 @@ $stats = get_search_stats($db);
 $currentSection = 'voraz';
 $baseUrl = './';
 $pageTitle = 'Gestor de Documentos';
+
+// Get client name/title and detect logo
+$clientDisplayTitle = '';
+$clientLogoUrl = '';
+if (isset($centralDb)) {
+    $infoStmt = $centralDb->prepare('SELECT nombre, titulo FROM control_clientes WHERE codigo = ? LIMIT 1');
+    $infoStmt->execute([$code]);
+    $clientRow = $infoStmt->fetch(PDO::FETCH_ASSOC);
+    if ($clientRow) {
+        $clientDisplayTitle = $clientRow['titulo'] ?: $clientRow['nombre'];
+    }
+}
+foreach (['png', 'jpg', 'jpeg', 'gif'] as $ext) {
+    if (file_exists(__DIR__ . '/clients/' . $code . '/logo.' . $ext)) {
+        $clientLogoUrl = 'clients/' . $code . '/logo.' . $ext;
+        break;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -363,6 +381,20 @@ $pageTitle = 'Gestor de Documentos';
             <?php include __DIR__ . '/includes/header.php'; ?>
 
             <div class="page-content">
+                <!-- Client Logo + Title Hero -->
+                <?php if ($clientDisplayTitle || $clientLogoUrl): ?>
+                    <div style="text-align: center; margin-bottom: 1.5rem; padding: 1.5rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg);">
+                        <h2 style="font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin: 0;">
+                            <?= htmlspecialchars($clientDisplayTitle) ?>
+                        </h2>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0;">Gestor Documental</p>
+                        <?php if ($clientLogoUrl): ?>
+                                <img src="<?= htmlspecialchars($clientLogoUrl) ?>" alt="<?= htmlspecialchars($clientDisplayTitle) ?>"
+                                    style="max-height: 80px; max-width: 200px; object-fit: contain; margin-top: 0.75rem; border-radius: 8px;">
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+
                 <!-- Stats Bar -->
                 <div class="stats-grid" style="margin-bottom: 1.5rem;">
                     <div class="stat-card">
