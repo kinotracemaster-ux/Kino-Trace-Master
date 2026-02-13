@@ -23,6 +23,17 @@ if (!isset($_SESSION['client_code']) || empty($_SESSION['is_admin'])) {
 
 $message = '';
 $error = '';
+
+// AJAX: devolver datos de página pública en JSON
+if (isset($_GET['get_public_page'])) {
+    header('Content-Type: application/json');
+    $ppCode = sanitize_code($_GET['get_public_page']);
+    $stmt = $centralDb->prepare('SELECT * FROM pagina_publica WHERE codigo = ? LIMIT 1');
+    $stmt->execute([$ppCode]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    echo json_encode($row ?: new stdClass());
+    exit;
+}
 $createdClientCode = '';
 
 try {
@@ -404,6 +415,33 @@ try {
                 $message = "🔍 Diagnóstico de '{$diagCode}': {$totalDocs} documentos totales, {$withPdf} con PDF, " . count($orphanDocs) . " sin PDF.";
             }
         }
+
+        // GUARDAR PÁGINA PÚBLICA
+        elseif ($action === 'update_public_page') {
+            $code = sanitize_code($_POST['pp_code'] ?? '');
+            if ($code !== '') {
+                $stmt = $centralDb->prepare(
+                    "INSERT INTO pagina_publica (codigo, intro_titulo, intro_texto, instrucciones, footer_texto, footer_ubicacion, footer_telefono, footer_url, aviso_legal)
+                     VALUES (:c, :it, :ix, :ins, :ft, :fu, :ftel, :furl, :al)
+                     ON CONFLICT(codigo) DO UPDATE SET
+                       intro_titulo=:it, intro_texto=:ix, instrucciones=:ins,
+                       footer_texto=:ft, footer_ubicacion=:fu, footer_telefono=:ftel,
+                       footer_url=:furl, aviso_legal=:al"
+                );
+                $stmt->execute([
+                    ':c'    => $code,
+                    ':it'   => $_POST['pp_intro_titulo'] ?? '',
+                    ':ix'   => $_POST['pp_intro_texto'] ?? '',
+                    ':ins'  => $_POST['pp_instrucciones'] ?? '',
+                    ':ft'   => $_POST['pp_footer_texto'] ?? '',
+                    ':fu'   => $_POST['pp_footer_ubicacion'] ?? '',
+                    ':ftel' => $_POST['pp_footer_telefono'] ?? '',
+                    ':furl' => $_POST['pp_footer_url'] ?? '',
+                    ':al'   => $_POST['pp_aviso_legal'] ?? '',
+                ]);
+                $message = "✅ Página pública de '{$code}' actualizada.";
+            }
+        }
     }
 } catch (Exception $ex) {
     $error = '❌ Error: ' . $ex->getMessage();
@@ -768,6 +806,10 @@ $clientCodes = array_column($clients, 'codigo');
                                 Clave
                             </button>
                             <?php if ($cli['codigo'] !== 'admin'): ?>
+                                <button class="btn btn-secondary btn-xs" title="Editar página pública"
+                                    onclick="openPublicPageModal('<?= htmlspecialchars($cli['codigo']) ?>')">
+                                    🌐 Pág. Pública
+                                </button>
                                 <form method="post">
                                     <input type="hidden" name="action" value="toggle">
                                     <input type="hidden" name="toggle_code" value="<?= htmlspecialchars($cli['codigo']) ?>">
@@ -1206,6 +1248,96 @@ $clientCodes = array_column($clients, 'codigo');
 
             btn.disabled = false;
             btn.textContent = '📦 Subir y Enlazar Lote';
+        }
+    </script>
+
+    <!-- Modal Página Pública -->
+    <div class="modal-overlay" id="publicPageModal" style="display:none;">
+        <div class="modal" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+            <h3 style="margin-bottom: 1rem;">🌐 Página Pública</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;" id="ppLinkInfo"></p>
+            <form method="post" id="publicPageForm">
+                <input type="hidden" name="action" value="update_public_page">
+                <input type="hidden" name="pp_code" id="ppCode">
+
+                <div class="form-group">
+                    <label>Título introductorio</label>
+                    <input type="text" name="pp_intro_titulo" id="ppIntroTitulo" class="form-control" placeholder="Estimados clientes y autoridades competentes:">
+                </div>
+
+                <div class="form-group">
+                    <label>Texto introductorio</label>
+                    <textarea name="pp_intro_texto" id="ppIntroTexto" class="form-control" rows="2" placeholder="Hemos desarrollado esta aplicación para facilitar..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Instrucciones (una por línea)</label>
+                    <textarea name="pp_instrucciones" id="ppInstrucciones" class="form-control" rows="4" placeholder="Busque el código del producto...&#10;Ingrese el código en MAYÚSCULAS...&#10;La aplicación arrojará los documentos...&#10;Haga clic en VER PDF para visualizar..."></textarea>
+                </div>
+
+                <hr style="margin: 1rem 0;">
+                <h4 style="font-size: 0.9rem; margin-bottom: 0.5rem;">Footer</h4>
+
+                <div class="form-group">
+                    <label>Texto principal del footer</label>
+                    <input type="text" name="pp_footer_texto" id="ppFooterTexto" class="form-control" placeholder="KINO COMPANY S.A.S importador directo de...">
+                </div>
+                <div class="form-group">
+                    <label>Ubicación</label>
+                    <input type="text" name="pp_footer_ubicacion" id="ppFooterUbicacion" class="form-control" placeholder="Medellín – Bogotá – Panamá">
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" name="pp_footer_telefono" id="ppFooterTelefono" class="form-control" placeholder="+57 318 5640716">
+                </div>
+                <div class="form-group">
+                    <label>URL / Sitio web</label>
+                    <input type="text" name="pp_footer_url" id="ppFooterUrl" class="form-control" placeholder="https://ejemplo.com">
+                </div>
+
+                <hr style="margin: 1rem 0;">
+                <div class="form-group">
+                    <label>Aviso Legal</label>
+                    <textarea name="pp_aviso_legal" id="ppAvisoLegal" class="form-control" rows="3" placeholder="Los documentos disponibles en esta plataforma son propiedad exclusiva de..."></textarea>
+                </div>
+
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                    <button type="submit" class="btn btn-primary" style="flex:1;">💾 Guardar</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('publicPageModal')" style="flex:1;">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        async function openPublicPageModal(code) {
+            document.getElementById('ppCode').value = code;
+            const baseUrl = window.location.origin + window.location.pathname.replace('/admin/panel.php', '');
+            document.getElementById('ppLinkInfo').innerHTML =
+                '🔗 Enlace público: <a href="' + baseUrl + '/modules/Buscador/?cliente=' + code + '" target="_blank" style="color:var(--accent-primary);">' + baseUrl + '/modules/Buscador/?cliente=' + code + '</a>';
+
+            // Reset fields
+            ['ppIntroTitulo','ppIntroTexto','ppInstrucciones','ppFooterTexto','ppFooterUbicacion','ppFooterTelefono','ppFooterUrl','ppAvisoLegal'].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+
+            // Load existing data via AJAX
+            try {
+                const resp = await fetch('panel.php?get_public_page=' + encodeURIComponent(code));
+                const data = await resp.json();
+                if (data && data.codigo) {
+                    document.getElementById('ppIntroTitulo').value = data.intro_titulo || '';
+                    document.getElementById('ppIntroTexto').value = data.intro_texto || '';
+                    document.getElementById('ppInstrucciones').value = data.instrucciones || '';
+                    document.getElementById('ppFooterTexto').value = data.footer_texto || '';
+                    document.getElementById('ppFooterUbicacion').value = data.footer_ubicacion || '';
+                    document.getElementById('ppFooterTelefono').value = data.footer_telefono || '';
+                    document.getElementById('ppFooterUrl').value = data.footer_url || '';
+                    document.getElementById('ppAvisoLegal').value = data.aviso_legal || '';
+                }
+            } catch (e) { /* no data yet, that's fine */ }
+
+            document.getElementById('publicPageModal').style.display = 'flex';
         }
     </script>
 </body>

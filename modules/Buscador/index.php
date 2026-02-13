@@ -29,6 +29,24 @@ if (!is_dir($clientDir)) {
 }
 
 $db = open_client_db($clientCode);
+
+// Cargar contenido personalizado de página pública
+$ppData = [];
+if (isset($centralDb)) {
+    $ppStmt = $centralDb->prepare('SELECT * FROM pagina_publica WHERE codigo = ? LIMIT 1');
+    $ppStmt->execute([$clientCode]);
+    $ppData = $ppStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+}
+
+// Defaults
+$ppIntroTitulo = $ppData['intro_titulo'] ?? '';
+$ppIntroTexto = $ppData['intro_texto'] ?? '';
+$ppInstrucciones = $ppData['instrucciones'] ?? '';
+$ppFooterTexto = $ppData['footer_texto'] ?? '';
+$ppFooterUbicacion = $ppData['footer_ubicacion'] ?? '';
+$ppFooterTelefono = $ppData['footer_telefono'] ?? '';
+$ppFooterUrl = $ppData['footer_url'] ?? '';
+$ppAvisoLegal = $ppData['aviso_legal'] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -477,23 +495,27 @@ $db = open_client_db($clientCode);
             </div>
 
             <!-- Texto introductorio -->
-            <h2 class="intro-title">Estimados clientes y autoridades competentes:</h2>
-            <p class="intro-text">
-                Hemos desarrollado esta aplicación para facilitar la consulta de las declaraciones de importación de
-                nuestros productos.
-            </p>
+            <?php if ($ppIntroTitulo): ?>
+                <h2 class="intro-title"><?= htmlspecialchars($ppIntroTitulo) ?></h2>
+            <?php endif; ?>
+            <?php if ($ppIntroTexto): ?>
+                <p class="intro-text"><?= htmlspecialchars($ppIntroTexto) ?></p>
+            <?php endif; ?>
 
             <!-- Modo de uso -->
-            <div class="modo-uso">
-                <h4>Modo de uso:</h4>
-                <ul>
-                    <li>Busque el código del producto en el empaque, tablero o en la tapa del reloj.</li>
-                    <li>Ingrese el código del producto en <span class="highlight">MAYÚSCULAS</span>.</li>
-                    <li>La aplicación arrojará los documentos asociados a dicho código.</li>
-                    <li>Haga clic en <span class="link-red">"VER PDF"</span> para visualizar, compartir o imprimir el
-                        documento.</li>
-                </ul>
-            </div>
+            <?php if ($ppInstrucciones): ?>
+                <div class="modo-uso">
+                    <h4>Modo de uso:</h4>
+                    <ul>
+                        <?php foreach (explode("\n", $ppInstrucciones) as $linea): ?>
+                            <?php $linea = trim($linea);
+                            if ($linea): ?>
+                                <li><?= htmlspecialchars($linea) ?></li>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+            <?php endif; ?>
 
             <!-- Sección de búsqueda -->
             <div class="search-section">
@@ -521,17 +543,48 @@ $db = open_client_db($clientCode);
     </div>
 
     <!-- Footer -->
-    <footer class="buscador-footer">
-        <p class="footer-text"><?= htmlspecialchars($clientName) ?> importador directo de relojería y otros productos.
-        </p>
-        <p class="footer-text">Estamos ubicados en Medellín – Bogotá – Panamá.</p>
-        <p class="footer-contact">Línea de Atención: +57 318 5640716</p>
-        <a href="https://kinocompanysas.kyte.site/es" target="_blank"
-            class="footer-link">https://kinocompanysas.kyte.site/es</a>
-        <div class="footer-legal">
-            <a href="#">Aviso Legal</a>
+    <?php if ($ppFooterTexto || $ppFooterUbicacion || $ppFooterTelefono || $ppFooterUrl || $ppAvisoLegal): ?>
+        <footer class="buscador-footer">
+            <?php if ($ppFooterTexto): ?>
+                <p class="footer-text"><?= htmlspecialchars($ppFooterTexto) ?></p>
+            <?php endif; ?>
+            <?php if ($ppFooterUbicacion): ?>
+                <p class="footer-text">Estamos ubicados en <?= htmlspecialchars($ppFooterUbicacion) ?>.</p>
+            <?php endif; ?>
+            <?php if ($ppFooterTelefono): ?>
+                <p class="footer-contact">Línea de Atención: <?= htmlspecialchars($ppFooterTelefono) ?></p>
+            <?php endif; ?>
+            <?php if ($ppFooterUrl): ?>
+                <a href="<?= htmlspecialchars($ppFooterUrl) ?>" target="_blank"
+                    class="footer-link"><?= htmlspecialchars($ppFooterUrl) ?></a>
+            <?php endif; ?>
+            <?php if ($ppAvisoLegal): ?>
+                <div class="footer-legal">
+                    <a href="#" onclick="document.getElementById('avisoLegalModal').style.display='flex'; return false;">Aviso
+                        Legal</a>
+                </div>
+            <?php endif; ?>
+        </footer>
+    <?php endif; ?>
+
+    <!-- Modal Aviso Legal -->
+    <?php if ($ppAvisoLegal): ?>
+        <div id="avisoLegalModal"
+            style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:999; justify-content:center; align-items:center;"
+            onclick="if(event.target===this)this.style.display='none';">
+            <div style="background:white; border-radius:12px; padding:30px; max-width:500px; width:90%; position:relative;">
+                <h3 style="margin-bottom:15px;">Aviso Legal</h3>
+                <button onclick="this.parentElement.parentElement.style.display='none'"
+                    style="position:absolute;top:12px;right:15px;background:none;border:none;font-size:20px;cursor:pointer;">&times;</button>
+                <?php foreach (explode("\n", $ppAvisoLegal) as $parrafo): ?>
+                    <?php $parrafo = trim($parrafo);
+                    if ($parrafo): ?>
+                        <p style="color:#555; line-height:1.6; margin-bottom:10px;"><?= htmlspecialchars($parrafo) ?></p>
+                    <?php endif; ?>
+                <?php endforeach; ?>
+            </div>
         </div>
-    </footer>
+    <?php endif; ?>
 
     <script>
         const apiUrl = '../../api.php';

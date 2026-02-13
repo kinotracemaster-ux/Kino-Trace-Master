@@ -95,6 +95,21 @@ try {
         } catch (PDOException $e) { /* columna ya existe */
         }
     }
+
+    // Migración: tabla para contenido de página pública por cliente
+    $centralDb->exec(
+        "CREATE TABLE IF NOT EXISTS pagina_publica (
+            codigo TEXT PRIMARY KEY,
+            intro_titulo TEXT,
+            intro_texto TEXT,
+            instrucciones TEXT,
+            footer_texto TEXT,
+            footer_ubicacion TEXT,
+            footer_telefono TEXT,
+            footer_url TEXT,
+            aviso_legal TEXT
+        )"
+    );
 } catch (PDOException $e) {
     // Si la conexión falla, detener la ejecución con un mensaje claro
     die('❌ Error conectando a la base central: ' . $e->getMessage());
