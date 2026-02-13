@@ -60,7 +60,8 @@ function verificar_congruencia($db, $rutaSql)
             if (preg_match('/INSERT\s+(?:OR\s+\w+\s+)?INTO\s+[`"]?(\w+)[`"]?\s*\(([^)]+)\)/i', $line, $matches)) {
                 $tabla = $matches[1];
                 $columnas_sql = array_map(function ($c) {
-                    return trim($c, " `\"'"); }, explode(',', $matches[2]));
+                    return trim($c, " `\"'");
+                }, explode(',', $matches[2]));
 
                 // A. ¿La tabla existe?
                 if (!isset($estructura_bd[$tabla])) {
@@ -80,6 +81,75 @@ function verificar_congruencia($db, $rutaSql)
 
     // Eliminar duplicados en el reporte
     return array_unique($problemas);
+}
+
+/**
+ * Convierte un SQL dump de MySQL/MariaDB (phpMyAdmin) al formato SQLite del sistema.
+ * Mapea: documents → documentos, codes → codigos
+ * Columnas: name→numero, date→fecha, path→ruta_archivo, document_id→documento_id, code→codigo
+ */
+function convertirMySQLaSQLite($sql)
+{
+    $lines = explode("\n", $sql);
+    $cleaned = [];
+    $skipBlock = false;
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+
+        // Skip empty lines and comments
+        if ($trimmed === '' || strpos($trimmed, '--') === 0 || strpos($trimmed, '/*') === 0)
+            continue;
+
+        // Skip MySQL admin commands
+        if (preg_match('/^(SET |START TRANSACTION|COMMIT;?$)/', $trimmed))
+            continue;
+
+        // Skip CREATE TABLE blocks entirely (SQLite already has the schema)
+        if (preg_match('/^CREATE TABLE/i', $trimmed)) {
+            $skipBlock = true;
+            continue;
+        }
+        if ($skipBlock) {
+            if (strpos($trimmed, ';') !== false) {
+                $skipBlock = false;
+            }
+            continue;
+        }
+
+        // Skip ALTER TABLE blocks (indexes, auto_increment, foreign keys)
+        if (preg_match('/^ALTER TABLE/i', $trimmed)) {
+            $skipBlock = true;
+            continue;
+        }
+
+        $cleaned[] = $line;
+    }
+
+    $sql = implode("\n", $cleaned);
+
+    // Remove backticks
+    $sql = str_replace('`', '', $sql);
+
+    // Rename tables in INSERT statements
+    $sql = str_ireplace('INSERT INTO documents', 'INSERT INTO documentos', $sql);
+    $sql = str_ireplace('INSERT INTO codes', 'INSERT INTO codigos', $sql);
+
+    // Remap columns: documents(id, name, date, path) → documentos(id, numero, fecha, ruta_archivo)
+    $sql = preg_replace(
+        '/INSERT (OR IGNORE )?INTO documentos\s*\(\s*id\s*,\s*name\s*,\s*date\s*,\s*path\s*\)/i',
+        'INSERT $1INTO documentos (id, numero, fecha, ruta_archivo)',
+        $sql
+    );
+
+    // Remap columns: codes(id, document_id, code) → codigos(id, documento_id, codigo)
+    $sql = preg_replace(
+        '/INSERT (OR IGNORE )?INTO codigos\s*\(\s*id\s*,\s*document_id\s*,\s*code\s*\)/i',
+        'INSERT $1INTO codigos (id, documento_id, codigo)',
+        $sql
+    );
+
+    return $sql;
 }
 
 // --- LÓGICA PRINCIPAL ---
@@ -110,6 +180,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sqlTemp = $_FILES['sql_file']['tmp_name'];
             $zipTemp = $_FILES['zip_file']['tmp_name'];
             $modo = $_POST['mode'] ?? 'merge'; // 'merge' (fusionar) o 'replace' (reemplazar)
+
+            // NUEVO: Detectar MySQL y convertir ANTES de la verificación de congruencia
+            $sqlRaw = file_get_contents($sqlTemp);
+            if (strpos($sqlRaw, 'ENGINE=InnoDB') !== false || strpos($sqlRaw, 'ENGINE=MyISAM') !== false || strpos($sqlRaw, 'phpMyAdmin SQL Dump') !== false) {
+                $sqlRaw = convertirMySQLaSQLite($sqlRaw);
+                file_put_contents($sqlTemp, $sqlRaw);
+                $logs[] = "🔄 SQL MySQL detectado — convertido automáticamente a formato SQLite.";
+            }
+            unset($sqlRaw);
 
             // PASO 1: VERIFICAR CONGRUENCIA
             $incongruencias = verificar_congruencia($db, $sqlTemp);
