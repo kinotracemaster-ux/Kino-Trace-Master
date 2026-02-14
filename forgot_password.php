@@ -9,6 +9,7 @@ session_start();
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/autoload.php';
 require_once __DIR__ . '/helpers/mailer.php';
+require_once __DIR__ . '/helpers/subdomain.php'; // Para APP_BASE_DOMAIN
 
 $message = '';
 $error = '';
@@ -53,8 +54,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([$token, $expiry, $client['codigo']]);
 
                     // Construir URL de reset
-                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                    // FIX: Admin y Kino siempre deben usar el dominio principal
+                    // para evitar bloqueo 403 en subdominios de clientes.
                     $host = $_SERVER['HTTP_HOST'];
+                    if (in_array($client['codigo'], ['admin', 'kino'])) {
+                        $host = APP_BASE_DOMAIN;
+                    }
+
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
                     $basePath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
                     $resetLink = "{$protocol}://{$host}{$basePath}/reset_password.php?token={$token}";
 

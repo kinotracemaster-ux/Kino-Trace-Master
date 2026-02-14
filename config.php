@@ -15,6 +15,12 @@
 // Ruta base del proyecto
 define('BASE_DIR', __DIR__);
 define('APP_VERSION', substr(md5_file(__FILE__), 0, 8)); // Cache buster estable basado en contenido
+
+// Detectar HTTPS detrás de proxy (Railway/Cloudflare)
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+
 define('APP_BRANCH', getenv('APP_BRANCH') ?: 'main'); // Rama activa (para indicador visual)
 
 // Directorio donde se almacenan los datos de cada cliente
