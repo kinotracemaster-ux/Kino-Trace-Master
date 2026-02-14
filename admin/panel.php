@@ -15,6 +15,7 @@ session_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/tenant.php';
 require_once __DIR__ . '/../helpers/subdomain.php';
+require_once __DIR__ . '/../helpers/mailer.php';
 
 // Block admin access from client subdomains
 $sub = getSubdomain();
@@ -44,6 +45,44 @@ if (isset($_GET['get_public_page'])) {
     $stmt->execute([$ppCode]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     echo json_encode($row ?: new stdClass());
+    exit;
+}
+
+// AJAX: Enviar enlace de recuperación de contraseña al email del cliente
+if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'send_reset_email') {
+    header('Content-Type: application/json');
+    $code = sanitize_code($_POST['client_code'] ?? '');
+    if ($code === '') {
+        echo json_encode(['success' => false, 'error' => 'Código de cliente inválido.']);
+        exit;
+    }
+    $stmt = $centralDb->prepare('SELECT codigo, nombre, email FROM control_clientes WHERE codigo = ? AND activo = 1 LIMIT 1');
+    $stmt->execute([$code]);
+    $client = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$client || empty($client['email'])) {
+        echo json_encode(['success' => false, 'error' => 'El cliente no tiene correo registrado.']);
+        exit;
+    }
+    // Generar token
+    $token = bin2hex(random_bytes(32));
+    $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
+    $stmt = $centralDb->prepare('UPDATE control_clientes SET reset_token = ?, reset_token_expiry = ? WHERE codigo = ?');
+    $stmt->execute([$token, $expiry, $code]);
+    // Link siempre apunta al dominio principal
+    $baseDomain = defined('APP_BASE_DOMAIN') ? APP_BASE_DOMAIN : 'kino-trace.com';
+    $resetLink = "https://{$baseDomain}/reset_password.php?token={$token}";
+    // Enviar correo
+    $subject = 'Recuperar contraseña - KINO TRACE';
+    $body = "<p>Hola <b>" . htmlspecialchars($client['nombre']) . "</b>,</p>"
+          . "<p>Se ha solicitado un cambio de contraseña para su cuenta.</p>"
+          . "<p><a href='{$resetLink}' style='background:#3b82f6;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;'>Cambiar Contraseña</a></p>"
+          . "<p style='font-size:0.85em;color:#666;'>Este enlace expira en 1 hora. Si no solicitó este cambio, ignore este mensaje.</p>";
+    $result = send_mail($client['email'], $subject, $body);
+    if ($result === true) {
+        echo json_encode(['success' => true, 'message' => "Enlace enviado a {$client['email']}"]);
+    } else {
+        echo json_encode(['success' => false, 'error' => "Error al enviar: $result"]);
+    }
     exit;
 }
 $createdClientCode = '';
@@ -833,8 +872,14 @@ $clientCodes = array_column($clients, 'codigo');
                             </button>
                             <button class="btn btn-secondary btn-xs"
                                 onclick="openPasswordModal('<?= htmlspecialchars($cli['codigo']) ?>')">
-                                Clave
+                                🔑 Clave
                             </button>
+                            <?php if (!empty($cli['email'])): ?>
+                            <button class="btn btn-secondary btn-xs" id="resetBtn_<?= htmlspecialchars($cli['codigo']) ?>"
+                                onclick="sendResetEmail('<?= htmlspecialchars($cli['codigo']) ?>')">
+                                📧 Enviar Clave
+                            </button>
+                            <?php endif; ?>
                             <?php if ($cli['codigo'] !== 'admin'): ?>
                                 <button class="btn btn-secondary btn-xs" title="Editar subdominio"
                                     onclick="openSubdomainModal('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['subdominio'] ?? '') ?>')">
@@ -1332,6 +1377,36 @@ $clientCodes = array_column($clients, 'codigo');
 
             btn.disabled = false;
             btn.textContent = '📦 Subir y Enlazar Lote';
+        }
+        // Enviar enlace de recuperación por email
+        async function sendResetEmail(code) {
+            const btn = document.getElementById('resetBtn_' + code);
+            if (!btn) return;
+            const origText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Enviando...';
+
+            try {
+                const formData = new FormData();
+                formData.append('ajax_action', 'send_reset_email');
+                formData.append('client_code', code);
+
+                const resp = await fetch('panel.php', { method: 'POST', body: formData });
+                const data = await resp.json();
+
+                if (data.success) {
+                    btn.textContent = '✅ Enviado';
+                    btn.style.color = 'var(--accent-success)';
+                    setTimeout(() => { btn.textContent = origText; btn.style.color = ''; btn.disabled = false; }, 3000);
+                } else {
+                    btn.textContent = '❌ ' + (data.error || 'Error');
+                    btn.style.color = 'var(--accent-danger)';
+                    setTimeout(() => { btn.textContent = origText; btn.style.color = ''; btn.disabled = false; }, 4000);
+                }
+            } catch (err) {
+                btn.textContent = '❌ Error de red';
+                setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 3000);
+            }
         }
     </script>
 
