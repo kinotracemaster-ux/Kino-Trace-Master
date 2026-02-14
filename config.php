@@ -88,6 +88,7 @@ try {
         'email' => "ALTER TABLE control_clientes ADD COLUMN email TEXT",
         'reset_token' => "ALTER TABLE control_clientes ADD COLUMN reset_token TEXT",
         'reset_token_expiry' => "ALTER TABLE control_clientes ADD COLUMN reset_token_expiry TEXT",
+        'subdominio' => "ALTER TABLE control_clientes ADD COLUMN subdominio TEXT",
     ];
     foreach ($newColumns as $col => $sql) {
         try {

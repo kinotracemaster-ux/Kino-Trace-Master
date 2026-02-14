@@ -8,9 +8,13 @@
  */
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
+require_once __DIR__ . '/../../helpers/subdomain.php';
 
-// Obtener cliente desde parámetro (PÚBLICO - sin sesión)
+// Obtener cliente: primero por parámetro, luego por subdominio
 $clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
+if (empty($clientCode)) {
+    $clientCode = getClientFromSubdomain() ?? '';
+}
 if (empty($clientCode)) {
     die('<div style="text-align:center; padding:50px; font-family:Arial;">
         <h2>Error</h2>
@@ -524,7 +528,9 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                     <div style="position: relative; flex: 1; min-width: 250px; max-width: 400px;">
                         <input type="text" class="search-input" id="codigoInput" placeholder="Código a buscar"
                             autocomplete="off" style="width: 100%;">
-                        <div id="suggestionsDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:white; border:1px solid #e0e0e0; border-top:none; border-radius:0 0 8px 8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:50; max-height:200px; overflow-y:auto;"></div>
+                        <div id="suggestionsDropdown"
+                            style="display:none; position:absolute; top:100%; left:0; right:0; background:white; border:1px solid #e0e0e0; border-top:none; border-radius:0 0 8px 8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:50; max-height:200px; overflow-y:auto;">
+                        </div>
                     </div>
                     <button class="btn-buscar" onclick="buscarCodigo()">Buscar</button>
                     <button class="btn-limpiar" onclick="limpiar()">Limpiar</button>

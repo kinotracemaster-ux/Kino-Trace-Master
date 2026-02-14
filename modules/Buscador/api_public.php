@@ -18,8 +18,12 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
+require_once __DIR__ . '/../../helpers/subdomain.php';
 
 $clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
+if (empty($clientCode)) {
+    $clientCode = getClientFromSubdomain() ?? '';
+}
 if (empty($clientCode)) {
     echo json_encode(['error' => 'Cliente no especificado']);
     exit;

@@ -15,11 +15,15 @@ require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/pdf_extractor.php';
 require_once __DIR__ . '/../../helpers/cache_manager.php';
+require_once __DIR__ . '/../../helpers/subdomain.php';
 
 header('Content-Type: application/json');
 
-// Validar cliente por parámetro (público, sin sesión)
+// Validar cliente: primero por parámetro, luego por subdominio
 $clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
+if (empty($clientCode)) {
+    $clientCode = getClientFromSubdomain() ?? '';
+}
 if (empty($clientCode)) {
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => 'Cliente no especificado']);

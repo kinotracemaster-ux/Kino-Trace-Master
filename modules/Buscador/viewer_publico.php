@@ -9,9 +9,13 @@
 // NO requiere sesión de usuario - es público
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
+require_once __DIR__ . '/../../helpers/subdomain.php';
 
-// Obtener cliente desde parámetro
+// Obtener cliente: primero por parámetro, luego por subdominio
 $clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
+if (empty($clientCode)) {
+    $clientCode = getClientFromSubdomain() ?? '';
+}
 if (empty($clientCode)) {
     die('Cliente no especificado');
 }

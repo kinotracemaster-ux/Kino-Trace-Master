@@ -8,6 +8,26 @@
 session_start();
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers/tenant.php';
+require_once __DIR__ . '/helpers/subdomain.php';
+
+// Detect client from subdomain (e.g. losmonte.kino-trace.com)
+$detectedSub = getSubdomain();
+$subdomainClient = null;
+$subdomainClientName = '';
+
+if ($detectedSub === 'admin') {
+    // admin.kino-trace.com → show admin modal automatically
+    $showAdminModal = true;
+} elseif ($detectedSub) {
+    $subdomainClient = resolveClientCode($detectedSub);
+    if ($subdomainClient) {
+        // Get client name for display
+        $nameStmt = $centralDb->prepare('SELECT nombre, titulo FROM control_clientes WHERE codigo = ? LIMIT 1');
+        $nameStmt->execute([$subdomainClient]);
+        $nameRow = $nameStmt->fetch(PDO::FETCH_ASSOC);
+        $subdomainClientName = $nameRow['titulo'] ?: $nameRow['nombre'] ?? $subdomainClient;
+    }
+}
 
 // Admin secret password
 define('ADMIN_SECRET', getenv('ADMIN_SECRET') ?: '3312');
@@ -144,7 +164,13 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
             <div class="login-header">
                 <div class="login-logo">K</div>
                 <h1 class="login-title">KINO TRACE</h1>
-                <p class="login-subtitle">Gestión Documental</p>
+                <p class="login-subtitle">
+                    <?php if ($subdomainClientName): ?>
+                        <?= htmlspecialchars($subdomainClientName) ?>
+                    <?php else: ?>
+                        Gestión Documental
+                    <?php endif; ?>
+                </p>
             </div>
 
             <?php if ($error): ?>
@@ -155,7 +181,8 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
                 <div class="form-group">
                     <label class="form-label" for="codigo">Usuario</label>
                     <input type="text" name="codigo" id="codigo" class="form-input" required
-                        placeholder="Código o correo electrónico" autocomplete="username">
+                        placeholder="Código o correo electrónico" autocomplete="username"
+                        value="<?= htmlspecialchars($subdomainClient ?? '') ?>">
                 </div>
 
                 <div class="form-group">
@@ -237,8 +264,8 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
             }
         });
 
-        // Show modal if there was an error
-        <?php if ($adminError): ?>
+        // Show modal if there was an error or admin subdomain
+        <?php if ($adminError || !empty($showAdminModal)): ?>
             openAdminModal();
         <?php endif; ?>
     </script>
