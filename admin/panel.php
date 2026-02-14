@@ -454,6 +454,20 @@ try {
                 $message = "✅ Página pública de '{$code}' actualizada.";
             }
         }
+
+        // ACTUALIZAR SUBDOMINIO
+        elseif ($action === 'update_subdomain') {
+            $code = sanitize_code($_POST['sub_code'] ?? '');
+            $newSub = strtolower(trim($_POST['subdominio'] ?? ''));
+            // Sanitize: only allow alphanumeric and hyphens
+            $newSub = preg_replace('/[^a-z0-9\-]/', '', $newSub);
+            if ($code !== '' && $code !== 'admin') {
+                $stmt = $centralDb->prepare('UPDATE control_clientes SET subdominio = ? WHERE codigo = ?');
+                $stmt->execute([$newSub ?: null, $code]);
+                $subLabel = $newSub ?: $code;
+                $message = "✅ Subdominio de '{$code}' actualizado a '{$subLabel}.kino-trace.com'.";
+            }
+        }
     }
 } catch (Exception $ex) {
     $error = '❌ Error: ' . $ex->getMessage();
@@ -461,7 +475,7 @@ try {
 
 // Obtener lista de clientes con detalles
 $clients = $centralDb->query("
-    SELECT codigo, nombre, titulo, email, color_primario, color_secundario, activo, fecha_creacion 
+    SELECT codigo, nombre, titulo, email, color_primario, color_secundario, activo, fecha_creacion, subdominio 
     FROM control_clientes 
     ORDER BY nombre
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -798,6 +812,10 @@ $clientCodes = array_column($clients, 'codigo');
                         <?php if (!empty($cli['email'])): ?>
                             <div class="client-meta">📧 <?= htmlspecialchars($cli['email']) ?></div>
                         <?php endif; ?>
+                        <?php if ($cli['codigo'] !== 'admin'): ?>
+                            <?php $subLabel = $cli['subdominio'] ?: $cli['codigo']; ?>
+                            <div class="client-meta">🌐 <a href="//<?= htmlspecialchars($subLabel) ?>.kino-trace.com" target="_blank" style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel) ?>.kino-trace.com</a></div>
+                        <?php endif; ?>
 
                         <div class="client-colors">
                             <div class="color-swatch"
@@ -818,6 +836,10 @@ $clientCodes = array_column($clients, 'codigo');
                                 Clave
                             </button>
                             <?php if ($cli['codigo'] !== 'admin'): ?>
+                                <button class="btn btn-secondary btn-xs" title="Editar subdominio"
+                                    onclick="openSubdomainModal('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['subdominio'] ?? '') ?>')">
+                                    🔗 Subdominio
+                                </button>
                                 <button class="btn btn-secondary btn-xs" title="Editar página pública"
                                     onclick="openPublicPageModal('<?= htmlspecialchars($cli['codigo']) ?>')">
                                     🌐 Pág. Pública
@@ -1105,6 +1127,36 @@ $clientCodes = array_column($clients, 'codigo');
         </div>
     </div>
 
+    <!-- Subdomain Modal -->
+    <div id="subdomainModal" class="modal-overlay">
+        <div class="modal">
+            <h3>🔗 Editar Subdominio</h3>
+            <form method="post">
+                <input type="hidden" name="action" value="update_subdomain">
+                <input type="hidden" name="sub_code" id="subCode">
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label class="form-label">Cliente</label>
+                    <input type="text" id="subClientDisplay" class="form-input" disabled>
+                </div>
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label class="form-label">Subdominio personalizado</label>
+                    <div style="display: flex; align-items: center; gap: 0;">
+                        <input type="text" name="subdominio" id="subdomainInput" class="form-input"
+                            placeholder="mi-empresa" pattern="[a-z0-9\-]+"
+                            style="border-radius: var(--radius-sm) 0 0 var(--radius-sm); text-align: right;">
+                        <span style="background: var(--bg-primary); border: 1px solid var(--border-color); border-left: none; padding: 0.5rem 0.75rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">.kino-trace.com</span>
+                    </div>
+                    <small style="color: var(--text-muted); display: block; margin-top: 0.25rem;">Solo letras, números y guiones. Dejar vacío usa el código del cliente.</small>
+                </div>
+                <div id="subPreview" style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-secondary);"></div>
+                <div class="flex gap-2">
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('subdomainModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         function openEditModal(code, titulo, email, colorP, colorS) {
             document.getElementById('editClientCode').value = code;
@@ -1177,6 +1229,26 @@ $clientCodes = array_column($clients, 'codigo');
             document.getElementById('pwClientDisplay').value = code;
             document.getElementById('passwordModal').classList.add('active');
         }
+
+        function openSubdomainModal(code, currentSub) {
+            document.getElementById('subCode').value = code;
+            document.getElementById('subClientDisplay').value = code;
+            document.getElementById('subdomainInput').value = currentSub || '';
+            document.getElementById('subdomainInput').placeholder = code;
+            updateSubPreview();
+            document.getElementById('subdomainModal').classList.add('active');
+        }
+
+        function updateSubPreview() {
+            const input = document.getElementById('subdomainInput');
+            const code = document.getElementById('subCode').value;
+            const val = input.value.trim() || code;
+            document.getElementById('subPreview').innerHTML = '🌐 URL resultante: <strong>' + val + '.kino-trace.com</strong>';
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const subInput = document.getElementById('subdomainInput');
+            if (subInput) subInput.addEventListener('input', updateSubPreview);
+        });
 
         function closeModal(id) {
             document.getElementById(id).classList.remove('active');
