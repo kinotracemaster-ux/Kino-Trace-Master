@@ -155,6 +155,7 @@ function send_via_smtp(string $to, string $nombre, string $subject, string $html
             'socket' => ['bindto' => '0.0.0.0:0'],
             'ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true]
         ];
+        $mail->Timeout = 15; // Timeout corto para evitar error 524 de Cloudflare
         $mail->CharSet = 'UTF-8';
 
         $fromEmail = mail_env('SMTP_FROM') ?: mail_env('SMTP_USER');
