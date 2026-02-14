@@ -90,6 +90,45 @@ if (!function_exists('linkById')) {
     }
 }
 
+if (!function_exists('linkSiblings')) {
+    /**
+     * After linking one document, find all other pending documents whose
+     * original_path normalizes to the same base filename (stripping timestamp
+     * prefixes). This handles SQL imports where the same PDF was uploaded
+     * multiple times with different timestamps.
+     *
+     * @return int Number of siblings linked
+     */
+    function linkSiblings(PDO $db, $relativePath, $base, &$linkedDocIds, &$updatedDocs)
+    {
+        $kFile = normalizeKey($base);
+        if ($kFile === '')
+            return 0;
+
+        $siblingCount = 0;
+        $stmtPending = $db->query(
+            "SELECT id, original_path FROM documentos WHERE ruta_archivo = 'pending'"
+        );
+
+        while ($row = $stmtPending->fetch(PDO::FETCH_ASSOC)) {
+            $sid = (int) $row['id'];
+            if (isset($linkedDocIds[$sid]))
+                continue;
+
+            $kSib = normalizeKey($row['original_path']);
+            if ($kSib === $kFile) {
+                if (linkById($db, $sid, $relativePath, $base)) {
+                    $linkedDocIds[$sid] = true;
+                    $updatedDocs++;
+                    $siblingCount++;
+                    logMsg("  👥 Hermano vinculado: doc_id=$sid (mismo PDF base)", "success");
+                }
+            }
+        }
+        return $siblingCount;
+    }
+}
+
 if (!function_exists('processZipAndLink')) {
     /**
      * Process ZIP and link PDFs.
@@ -164,6 +203,8 @@ if (!function_exists('processZipAndLink')) {
 
                 if (isset($linkedDocIds[$id])) {
                     $duplicates[] = [$base, $id, "PATH"];
+                    // Even if this specific doc was already linked, try linking siblings
+                    linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
                     continue;
                 }
 
@@ -171,6 +212,8 @@ if (!function_exists('processZipAndLink')) {
                     $linkedDocIds[$id] = true;
                     $updatedDocs++;
                     logMsg("✅ Vinculado por PATH: $base (doc_id=$id)", "success");
+                    // Link sibling documents that share the same normalized base filename
+                    linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
                     continue;
                 }
             }
@@ -190,6 +233,8 @@ if (!function_exists('processZipAndLink')) {
                     $linkedDocIds[$id] = true;
                     $updatedDocs++;
                     logMsg("✅ Vinculado por NUMERO: $numero (doc_id=$id)", "success");
+                    // Link sibling documents
+                    linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
                     continue;
                 }
             }
@@ -202,6 +247,8 @@ if (!function_exists('processZipAndLink')) {
 
                 if (isset($linkedDocIds[$id])) {
                     $duplicates[] = [$base, $id, "NORM"];
+                    // Still try siblings
+                    linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
                     continue;
                 }
 
@@ -209,6 +256,8 @@ if (!function_exists('processZipAndLink')) {
                     $linkedDocIds[$id] = true;
                     $updatedDocs++;
                     logMsg("✅ Vinculado por NORMALIZACIÓN: $base (doc_id=$id)", "success");
+                    // Link sibling documents
+                    linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
                     continue;
                 }
             }
@@ -224,6 +273,8 @@ if (!function_exists('processZipAndLink')) {
                         $linkedDocIds[$id] = true;
                         $updatedDocs++;
                         logMsg("🔗 Auto-Vinculado (Self-Healing): $base (doc_id=$id)", "success");
+                        // Link siblings
+                        linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
                         continue;
                     }
                 } else {
