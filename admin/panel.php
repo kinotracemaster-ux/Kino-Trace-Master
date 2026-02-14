@@ -14,6 +14,18 @@
 session_start();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/tenant.php';
+require_once __DIR__ . '/../helpers/subdomain.php';
+
+// Block admin access from client subdomains
+$sub = getSubdomain();
+if ($sub !== null && $sub !== 'admin') {
+    header('HTTP/1.1 403 Forbidden');
+    die('<div style="text-align:center; padding:50px; font-family:Arial;">
+        <h2>⛔ Acceso Denegado</h2>
+        <p>El panel de administración no está disponible desde este subdominio.</p>
+        <a href="//kino-trace.com/admin/panel.php">Ir al panel admin</a>
+    </div>');
+}
 
 // Verificar que el usuario sea administrador
 if (!isset($_SESSION['client_code']) || empty($_SESSION['is_admin'])) {
