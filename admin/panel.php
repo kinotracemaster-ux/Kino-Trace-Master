@@ -348,49 +348,63 @@ try {
                 $db = open_client_db($code);
 
                 // Parse documents from INSERT INTO `documents`
-                // Line-by-line approach: each row is on its own line like:
-                // (id, 'name with (parens)', 'date', 'path.pdf'),
+                // Two-stage: first isolate the VALUES block, then parse rows line-by-line
+                preg_match_all(
+                    "/INSERT\s+INTO\s+`?documents`?.*?VALUES\s*(.+?)\s*;/si",
+                    $sqlContent,
+                    $docMatches
+                );
+
                 $idMap = []; // old_id => new_id
                 $docCount = 0;
                 $stmtDoc = $db->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo, original_path) VALUES (?, ?, ?, ?, ?)");
 
-                // Match each row line: starts with (number, then quoted strings
-                preg_match_all(
-                    "/^\s*\((\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
-                    $sqlContent,
-                    $docRows, PREG_SET_ORDER
-                );
+                foreach ($docMatches[1] as $block) {
+                    // Line-by-line regex: handles parentheses inside quoted strings
+                    preg_match_all(
+                        "/^\s*\((\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
+                        $block,
+                        $docRows, PREG_SET_ORDER
+                    );
 
-                foreach ($docRows as $m) {
-                    $oldId = (int) $m[1];
-                    $name  = stripslashes($m[2]);
-                    $date  = stripslashes($m[3]);
-                    $path  = stripslashes($m[4]);
+                    foreach ($docRows as $m) {
+                        $oldId = (int) $m[1];
+                        $name  = stripslashes($m[2]);
+                        $date  = stripslashes($m[3]);
+                        $path  = stripslashes($m[4]);
 
-                    $stmtDoc->execute(['importado_sql', $name, $date, 'pending', $path]);
-                    $idMap[$oldId] = (int) $db->lastInsertId();
-                    $docCount++;
+                        $stmtDoc->execute(['importado_sql', $name, $date, 'pending', $path]);
+                        $idMap[$oldId] = (int) $db->lastInsertId();
+                        $docCount++;
+                    }
                 }
 
                 // Parse codes from INSERT INTO `codes`
-                // Each row: (id, document_id, 'code'),
+                preg_match_all(
+                    "/INSERT\s+INTO\s+`?codes`?.*?VALUES\s*(.+?)\s*;/si",
+                    $sqlContent,
+                    $codeMatches
+                );
+
                 $codeCount = 0;
                 $stmtCode = $db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
 
-                preg_match_all(
-                    "/^\s*\(\d+\s*,\s*(\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
-                    $sqlContent,
-                    $codeRows, PREG_SET_ORDER
-                );
+                foreach ($codeMatches[1] as $block) {
+                    preg_match_all(
+                        "/^\s*\(\d+\s*,\s*(\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
+                        $block,
+                        $codeRows, PREG_SET_ORDER
+                    );
 
-                foreach ($codeRows as $m) {
-                    $oldDocId = (int) $m[1];
-                    $codeVal  = stripslashes($m[2]);
+                    foreach ($codeRows as $m) {
+                        $oldDocId = (int) $m[1];
+                        $codeVal  = stripslashes($m[2]);
 
-                    $newDocId = $idMap[$oldDocId] ?? null;
-                    if ($newDocId) {
-                        $stmtCode->execute([$newDocId, $codeVal]);
-                        $codeCount++;
+                        $newDocId = $idMap[$oldDocId] ?? null;
+                        if ($newDocId) {
+                            $stmtCode->execute([$newDocId, $codeVal]);
+                            $codeCount++;
+                        }
                     }
                 }
 
