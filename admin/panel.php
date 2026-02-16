@@ -516,6 +516,18 @@ try {
     $error = '❌ Error: ' . $ex->getMessage();
 }
 
+// Si es petición AJAX, devolver JSON y salir
+if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'
+    && $_SERVER['REQUEST_METHOD'] === 'POST' && ($action ?? '') !== '' && ($action ?? '') !== 'send_reset_email') {
+    header('Content-Type: application/json');
+    if ($error) {
+        echo json_encode(['success' => false, 'error' => $error]);
+    } else {
+        echo json_encode(['success' => true, 'message' => $message ?: '✅ Operación completada.', 'createdCode' => $createdClientCode]);
+    }
+    exit;
+}
+
 // Obtener lista de clientes con detalles
 $clients = $centralDb->query("
     SELECT codigo, nombre, titulo, email, color_primario, color_secundario, activo, fecha_creacion, subdominio, password_plain 
@@ -535,6 +547,43 @@ $clientCodes = array_column($clients, 'codigo');
     <title>Gestor de Clientes - Admin</title>
     <link rel="stylesheet" href="../assets/css/styles.css">
     <style>
+        /* ═══════ MODAL DE PROGRESO ═══════ */
+        .progress-overlay {
+            display: none; position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+            justify-content: center; align-items: center;
+        }
+        .progress-overlay.active { display: flex; }
+        .progress-box {
+            background: var(--bg-secondary, #1e293b); border-radius: 16px;
+            padding: 2rem 2.5rem; min-width: 360px; max-width: 480px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5); text-align: center;
+            animation: progressIn 0.3s ease;
+        }
+        @keyframes progressIn { from { transform: scale(0.9) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+        .progress-spinner {
+            width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.15);
+            border-top-color: var(--accent-primary, #3b82f6); border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin: 0 auto 1rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .progress-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; }
+        .progress-steps { font-size: 0.85rem; color: var(--text-muted, #94a3b8); min-height: 24px; margin-bottom: 1rem; }
+        .progress-bar-track {
+            width: 100%; height: 6px; background: rgba(255,255,255,0.1);
+            border-radius: 3px; overflow: hidden; margin-bottom: 1rem;
+        }
+        .progress-bar-fill {
+            height: 100%; background: linear-gradient(90deg, var(--accent-primary, #3b82f6), #818cf8);
+            border-radius: 3px; width: 0%; transition: width 0.5s ease;
+        }
+        .progress-result { font-size: 0.95rem; margin-top: 0.5rem; padding: 0.75rem; border-radius: 8px; }
+        .progress-result.success { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .progress-result.error { background: rgba(239,68,68,0.15); color: #f87171; }
+        .progress-close { margin-top: 1rem; padding: 0.5rem 2rem; border-radius: 8px;
+            background: var(--accent-primary, #3b82f6); color: #fff; border: none;
+            cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+        .progress-close:hover { filter: brightness(1.15); }
         .admin-layout {
             min-height: 100vh;
             background: var(--bg-primary);
@@ -1550,6 +1599,158 @@ $clientCodes = array_column($clients, 'codigo');
             document.getElementById('publicPageModal').style.display = 'flex';
         }
     </script>
+    <!-- ═══════ MODAL DE PROGRESO GLOBAL ═══════ -->
+    <div class="progress-overlay" id="progressOverlay">
+        <div class="progress-box">
+            <div class="progress-spinner" id="progressSpinner"></div>
+            <div class="progress-title" id="progressTitle">Procesando...</div>
+            <div class="progress-steps" id="progressSteps"></div>
+            <div class="progress-bar-track"><div class="progress-bar-fill" id="progressBar"></div></div>
+            <div class="progress-result" id="progressResult" style="display:none;"></div>
+            <button class="progress-close" id="progressClose" style="display:none;" onclick="closeProgress()">Cerrar</button>
+        </div>
+    </div>
+
+    <script>
+    // ═══════ SISTEMA DE PROGRESO ═══════
+    const progressMsgs = {
+        'create':           ['🚀 Creando estructura del cliente...', 'Generando base de datos...', 'Configurando colores y datos...', 'Procesando archivos adjuntos...', 'Finalizando...'],
+        'clone':            ['📋 Verificando cliente origen...', 'Copiando estructura...', 'Clonando base de datos...', 'Finalizando...'],
+        'change_password':  ['🔑 Actualizando contraseña...'],
+        'update_colors':    ['✏️ Actualizando configuración...', 'Procesando logo...'],
+        'import_sql':       ['📥 Leyendo archivo SQL...', 'Importando documentos...', 'Importando códigos...', 'Enlazando PDFs...'],
+        'toggle':           ['⏸️ Cambiando estado del cliente...'],
+        'delete':           ['🗑️ Eliminando archivos...', 'Eliminando registros...', 'Limpiando...'],
+        'diagnose_orphans': ['🔍 Analizando documentos...', 'Contando huérfanos...'],
+        'update_public_page':['🌐 Guardando página pública...'],
+        'update_subdomain': ['🌐 Actualizando subdominio...']
+    };
+
+    const progressTitles = {
+        'create': 'Creando Nuevo Cliente',
+        'clone': 'Clonando Cliente',
+        'change_password': 'Cambiando Contraseña',
+        'update_colors': 'Actualizando Cliente',
+        'import_sql': 'Importando Datos SQL',
+        'toggle': 'Cambiando Estado',
+        'delete': 'Eliminando Cliente',
+        'diagnose_orphans': 'Diagnosticando',
+        'update_public_page': 'Guardando Página Pública',
+        'update_subdomain': 'Actualizando Subdominio'
+    };
+
+    let progressInterval = null;
+
+    function showProgress(action) {
+        const overlay = document.getElementById('progressOverlay');
+        const spinner = document.getElementById('progressSpinner');
+        const title = document.getElementById('progressTitle');
+        const steps = document.getElementById('progressSteps');
+        const bar = document.getElementById('progressBar');
+        const result = document.getElementById('progressResult');
+        const closeBtn = document.getElementById('progressClose');
+
+        title.textContent = progressTitles[action] || 'Procesando...';
+        steps.textContent = '';
+        bar.style.width = '0%';
+        result.style.display = 'none';
+        result.className = 'progress-result';
+        closeBtn.style.display = 'none';
+        spinner.style.display = 'block';
+        overlay.classList.add('active');
+
+        // Animar pasos
+        const msgs = progressMsgs[action] || ['Procesando...'];
+        let step = 0;
+        steps.textContent = msgs[0];
+        bar.style.width = '10%';
+
+        progressInterval = setInterval(() => {
+            step++;
+            if (step < msgs.length) {
+                steps.textContent = msgs[step];
+                const pct = Math.min(10 + (step / msgs.length) * 70, 80);
+                bar.style.width = pct + '%';
+            }
+        }, 800);
+    }
+
+    function finishProgress(success, msg) {
+        clearInterval(progressInterval);
+        const spinner = document.getElementById('progressSpinner');
+        const bar = document.getElementById('progressBar');
+        const result = document.getElementById('progressResult');
+        const closeBtn = document.getElementById('progressClose');
+        const steps = document.getElementById('progressSteps');
+
+        spinner.style.display = 'none';
+        bar.style.width = '100%';
+        steps.textContent = '';
+        result.style.display = 'block';
+        result.className = 'progress-result ' + (success ? 'success' : 'error');
+        result.textContent = msg;
+        closeBtn.style.display = 'inline-block';
+    }
+
+    function closeProgress() {
+        document.getElementById('progressOverlay').classList.remove('active');
+        // Recargar para reflejar cambios
+        window.location.reload();
+    }
+
+    // Interceptar TODOS los formularios con method=post (excepto los que ya usan AJAX)
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('form[method="post"]').forEach(form => {
+            // Ignorar formularios que ya tienen manejo AJAX propio
+            if (form.id === 'batchZipForm') return;
+
+            form.addEventListener('submit', async (e) => {
+                const formData = new FormData(form);
+                const action = formData.get('action');
+                if (!action) return; // formularios sin action, dejar pasar normal
+
+                // Para delete, mantener confirmación
+                if (action === 'delete') {
+                    const code = formData.get('delete_code');
+                    if (!confirm('¿Eliminar cliente ' + code + ' y todos sus datos?')) {
+                        e.preventDefault();
+                        return;
+                    }
+                }
+
+                e.preventDefault();
+                showProgress(action);
+
+                try {
+                    const resp = await fetch('panel.php', {
+                        method: 'POST',
+                        body: formData,
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+
+                    const text = await resp.text();
+                    let data;
+                    try { data = JSON.parse(text); } catch(pe) {
+                        finishProgress(false, '❌ Respuesta inesperada del servidor');
+                        return;
+                    }
+
+                    if (data.success) {
+                        finishProgress(true, data.message);
+                    } else {
+                        finishProgress(false, data.error || '❌ Error desconocido');
+                    }
+                } catch(err) {
+                    finishProgress(false, '❌ Error de conexión: ' + err.message);
+                }
+            });
+        });
+
+        // Quitar el onsubmit de confirmación del delete (ya lo manejamos arriba)
+        document.querySelectorAll('form[onsubmit]').forEach(f => f.removeAttribute('onsubmit'));
+    });
+    </script>
+
 </body>
 
 </html>
