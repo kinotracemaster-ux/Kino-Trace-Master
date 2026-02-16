@@ -140,43 +140,27 @@ try {
                     // Copy KINO reference data if requested
                     if ($copyKinoData) {
                         try {
-                            $kinoDb = open_client_db('kino');
-                            $newDb = open_client_db($code);
+                            $kinoDbPath = CLIENTS_DIR . '/kino/kino.db';
+                            $newDbPath = CLIENTS_DIR . "/{$code}/{$code}.db";
 
-                            // Copy documentos (all columns except id)
-                            $cols = $kinoDb->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
-                            $colsNoid = array_filter($cols, fn($c) => $c !== 'id');
-                            $colList = implode(', ', $colsNoid);
-                            $placeholders = implode(', ', array_fill(0, count($colsNoid), '?'));
+                            if (!file_exists($kinoDbPath)) {
+                                $extraMsg .= " ⚠️ No se encontró la base de datos de KINO en: {$kinoDbPath}";
+                            } else {
+                                // Estrategia: copiar el archivo .db de kino directamente al nuevo cliente
+                                // Esto clona TODOS los datos exactamente (docs, códigos, configuración, etc.)
+                                copy($kinoDbPath, $newDbPath);
+                                chmod($newDbPath, 0666);
 
-                            $docs = $kinoDb->query("SELECT $colList FROM documentos")->fetchAll(PDO::FETCH_ASSOC);
-                            $docMapping = []; // numero => new_id
-                            $stmtDoc = $newDb->prepare("INSERT INTO documentos ($colList) VALUES ($placeholders)");
-                            foreach ($docs as $doc) {
-                                $stmtDoc->execute(array_values($doc));
-                                $docMapping[$doc['numero']] = $newDb->lastInsertId();
+                                // Verificar que se copió correctamente
+                                $newDb = new PDO('sqlite:' . $newDbPath);
+                                $newDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                                $docCount = (int) $newDb->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
+                                $codeCount = (int) $newDb->query("SELECT COUNT(*) FROM codigos")->fetchColumn();
+
+                                $extraMsg .= " + Base de datos KINO clonada ({$docCount} documentos, {$codeCount} códigos).";
                             }
-
-                            // Copy codigos
-                            $codes = $kinoDb->query('SELECT c.codigo, c.descripcion, c.cantidad, c.valor_unitario, d.numero FROM codigos c JOIN documentos d ON c.documento_id = d.id')->fetchAll(PDO::FETCH_ASSOC);
-                            $stmtCode = $newDb->prepare('INSERT INTO codigos (documento_id, codigo, descripcion, cantidad, valor_unitario) VALUES (?, ?, ?, ?, ?)');
-                            $copiedCodes = 0;
-                            foreach ($codes as $codeRow) {
-                                if (isset($docMapping[$codeRow['numero']])) {
-                                    $stmtCode->execute([
-                                        $docMapping[$codeRow['numero']],
-                                        $codeRow['codigo'],
-                                        $codeRow['descripcion'] ?? null,
-                                        $codeRow['cantidad'] ?? null,
-                                        $codeRow['valor_unitario'] ?? null
-                                    ]);
-                                    $copiedCodes++;
-                                }
-                            }
-
-                            $extraMsg .= " + Datos de KINO copiados (" . count($docs) . " docs, {$copiedCodes} códigos).";
                         } catch (Exception $e) {
-                            $extraMsg .= " ⚠️ Error copiando datos de KINO: " . $e->getMessage();
+                            $extraMsg .= " ⚠️ Error clonando datos de KINO: " . $e->getMessage();
                         }
                     }
 
