@@ -203,7 +203,7 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
                 </a>
             </div>
 
-            <?php if (!$subdomainClient || $subdomainClient === 'kino'): ?>
+            <?php if ($detectedSub === 'admin'): ?>
                 <div class="admin-link">
                     <button type="button" onclick="openAdminModal()">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24"
