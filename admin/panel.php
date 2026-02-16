@@ -1497,10 +1497,10 @@ $clientCodes = array_column($clients, 'codigo');
                         </summary>
                         <div style="max-height: 200px; overflow-y: auto; margin-top: 0.5rem; font-size: 0.8rem;">
                             <table style="width: 100%; border-collapse: collapse;">
-                                <tr style="background: #fef3c7;"><th style="padding: 4px 8px; text-align: left;">Nombre</th><th style="padding: 4px 8px;">Tipo</th><th style="padding: 4px 8px;">Códigos</th></tr>
+                                <tr style="background: #fef3c7;"><th style="padding: 4px 8px; text-align: left;">Nombre (numero)</th><th style="padding: 4px 8px; text-align: left;">Archivo esperado</th><th style="padding: 4px 8px;">Códigos</th></tr>
                                 ${result.orphan_docs.map(d => `<tr style="border-top: 1px solid #e5e7eb;">
                                     <td style="padding: 4px 8px;">${d.numero}</td>
-                                    <td style="padding: 4px 8px; text-align: center;">${d.tipo}</td>
+                                    <td style="padding: 4px 8px; font-family: monospace; font-size: 0.75rem; color: #6b7280;">${d.original_path || '—'}</td>
                                     <td style="padding: 4px 8px; text-align: center;">${d.codes}</td>
                                 </tr>`).join('')}
                             </table>

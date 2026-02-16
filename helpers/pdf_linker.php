@@ -38,6 +38,29 @@ if (!function_exists('normalizeKey')) {
     }
 }
 
+if (!function_exists('extractCoreName')) {
+    /**
+     * Extract the core document identity by stripping:
+     * - MOD/DS codes and their numbers (e.g. "MOD 5246 4632")
+     * - Trailing standalone numbers
+     * - Hyphens used as separators between code groups
+     * Example: "DECORACION HOGAR (FACT-32) MOD 5246 4632- MOD 5247" → "decoracion hogar (fact-32)"
+     */
+    function extractCoreName($s)
+    {
+        $s = normalizeKey($s);
+        // Remove MOD/DS blocks: "mod 1234 5678" or "ds 1234"
+        $s = preg_replace('/\b(mod|ds)\s+[\d\s\-]+/i', '', $s);
+        // Remove trailing hyphens and stray numbers
+        $s = preg_replace('/[\-]+\s*$/', '', $s);
+        $s = preg_replace('/\s+\d+\s*$/', '', $s);
+        // Clean up
+        $s = preg_replace('/\s+/', ' ', $s);
+        $s = trim($s);
+        return $s;
+    }
+}
+
 if (!function_exists('buildDocumentoIndex')) {
     function buildDocumentoIndex(PDO $db)
     {
@@ -46,6 +69,7 @@ if (!function_exists('buildDocumentoIndex')) {
         // - normalized numero
         // - normalized original_path (filename)
         // - normalized original_path without extension
+        // - core name (stripped MOD/DS codes)
         $idx = [];  // key => id
 
         $q = $db->query("SELECT id, numero, original_path, ruta_archivo FROM documentos");
@@ -56,6 +80,11 @@ if (!function_exists('buildDocumentoIndex')) {
                 $k = normalizeKey($row['numero']);
                 if ($k !== "")
                     $idx[$k] = $id;
+
+                // Also index by core name (without MOD/DS codes)
+                $kCore = extractCoreName($row['numero']);
+                if ($kCore !== '' && $kCore !== $k)
+                    $idx[$kCore] = $id;
             }
 
             if (!empty($row['original_path'])) {
@@ -67,6 +96,11 @@ if (!function_exists('buildDocumentoIndex')) {
                 $k2 = normalizeKey(basename($row['original_path']));
                 if ($k2 !== "")
                     $idx[$k2] = $id;
+
+                // Also index by core name of original_path
+                $k3 = extractCoreName($row['original_path']);
+                if ($k3 !== '' && $k3 !== $k1 && $k3 !== $k2)
+                    $idx[$k3] = $id;
             }
         }
         return $idx;
@@ -282,6 +316,55 @@ if (!function_exists('processZipAndLink')) {
                     continue;
                 }
             }
+
+            // ---------- MATCH STEP 5: Core name matching (strip MOD/DS codes) ----------
+            $coreFile = extractCoreName($base);
+            if ($coreFile !== '' && isset($idx[$coreFile])) {
+                $id = (int) $idx[$coreFile];
+
+                if (!isset($linkedDocIds[$id])) {
+                    if (linkById($db, $id, $relativePath, $base)) {
+                        $linkedDocIds[$id] = true;
+                        $updatedDocs++;
+                        logMsg("✅ Vinculado por CORE NAME: $base (doc_id=$id)", "success");
+                        linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
+                        continue;
+                    }
+                } else {
+                    $duplicates[] = [$base, $id, "CORE"];
+                    continue;
+                }
+            }
+
+            // ---------- MATCH STEP 6: Substring/contains matching ----------
+            // Check if any pending doc's numero is contained in the PDF name, or vice versa
+            $matchedBySubstring = false;
+            $stmtPendingSub = $db->query(
+                "SELECT id, numero FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = ''"
+            );
+            while ($rowSub = $stmtPendingSub->fetch(PDO::FETCH_ASSOC)) {
+                $sid = (int) $rowSub['id'];
+                if (isset($linkedDocIds[$sid]))
+                    continue;
+
+                $docNumNorm = normalizeKey($rowSub['numero']);
+                if ($docNumNorm === '' || mb_strlen($docNumNorm) < 5)
+                    continue; // too short = false positives
+
+                // Check: does the doc numero appear inside the PDF filename?
+                if (mb_strpos($kFile, $docNumNorm) !== false || mb_strpos($docNumNorm, $kFile) !== false) {
+                    if (linkById($db, $sid, $relativePath, $base)) {
+                        $linkedDocIds[$sid] = true;
+                        $updatedDocs++;
+                        logMsg("🔍 Vinculado por SUBSTRING: $base ↔ " . $rowSub['numero'] . " (doc_id=$sid)", "success");
+                        linkSiblings($db, $relativePath, $base, $linkedDocIds, $updatedDocs);
+                        $matchedBySubstring = true;
+                        break;
+                    }
+                }
+            }
+            if ($matchedBySubstring)
+                continue;
 
             // Auto-create (ONLY if truly new)
             // Deduplicate inside the same run by normalized key, not by raw filename

@@ -65,9 +65,9 @@ try {
     logMsg("───────────────────────────────", "info");
     logMsg("📊 Resultado: {$linked} PDFs enlazados, {$pendingAfter} aún pendientes", "success");
 
-    // Get orphan details: documents without PDF
+    // Get orphan details: documents without PDF (with original_path for diagnostics)
     $orphanDocs = [];
-    $stmtOrphan = $db->query("SELECT d.id, d.numero, d.tipo, 
+    $stmtOrphan = $db->query("SELECT d.id, d.numero, d.tipo, d.original_path,
                                 (SELECT COUNT(*) FROM codigos c WHERE c.documento_id = d.id) AS num_codes
                               FROM documentos d 
                               WHERE d.ruta_archivo = 'pending' OR d.ruta_archivo IS NULL OR d.ruta_archivo = ''
@@ -77,7 +77,8 @@ try {
             'id' => (int) $row['id'],
             'numero' => $row['numero'],
             'tipo' => $row['tipo'],
-            'codes' => (int) $row['num_codes']
+            'codes' => (int) $row['num_codes'],
+            'original_path' => $row['original_path'] ?? ''
         ];
     }
 
