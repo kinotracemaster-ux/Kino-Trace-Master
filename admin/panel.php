@@ -1389,10 +1389,11 @@ $clientCodes = array_column($clients, 'codigo');
                 return false;
             }
             // Paso 2: Escribir el código para confirmar
-            const typed = prompt('🔐 Para confirmar, escribe el código del cliente:\n\n"' + code + '"');
+            const typed = prompt('🔐 Para confirmar, escribe exactamente:  ' + code);
             if (typed === null) return false;
-            if (typed.trim().toLowerCase() !== code.toLowerCase()) {
-                alert('❌ El código no coincide. Eliminación cancelada.');
+            const clean = typed.trim().replace(/["']/g, '').toLowerCase();
+            if (clean !== code.trim().toLowerCase()) {
+                alert('❌ El código no coincide. Escribiste: "' + typed + '" pero se esperaba: "' + code + '".\n\nEliminación cancelada.');
                 return false;
             }
             return true;
