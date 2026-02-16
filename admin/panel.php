@@ -1388,12 +1388,11 @@ $clientCodes = array_column($clients, 'codigo');
             if (!confirm('⚠️ ATENCIÓN: Vas a eliminar el cliente "' + code + '".\n\nEsto borrará PERMANENTEMENTE:\n• Base de datos completa\n• Todos los PDFs y archivos\n• Todos los códigos y documentos\n• Página pública\n\n¿Deseas continuar?')) {
                 return false;
             }
-            // Paso 2: Escribir el código para confirmar
-            const typed = prompt('🔐 Para confirmar, escribe exactamente:  ' + code);
+            // Paso 2: Escribir ELIMINAR para confirmar
+            const typed = prompt('🔐 ÚLTIMA CONFIRMACIÓN\n\nPara eliminar "' + code + '" y todos sus datos,\nescribe la palabra:  ELIMINAR');
             if (typed === null) return false;
-            const clean = typed.trim().replace(/["']/g, '').toLowerCase();
-            if (clean !== code.trim().toLowerCase()) {
-                alert('❌ El código no coincide. Escribiste: "' + typed + '" pero se esperaba: "' + code + '".\n\nEliminación cancelada.');
+            if (typed.trim().toUpperCase() !== 'ELIMINAR') {
+                alert('❌ No escribiste ELIMINAR. Eliminación cancelada.');
                 return false;
             }
             return true;
