@@ -187,8 +187,13 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
 
                 <div class="form-group">
                     <label class="form-label" for="password">Contraseña</label>
-                    <input type="password" name="password" id="password" class="form-input" required
-                        placeholder="••••••••">
+                    <div style="position: relative;">
+                        <input type="password" name="password" id="password" class="form-input" required
+                            placeholder="••••••••" style="padding-right: 2.5rem;">
+                        <button type="button" onclick="toggleLoginPw()"
+                            style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 1.1rem; padding: 0.25rem;"
+                            title="Mostrar/ocultar contraseña">👁️</button>
+                    </div>
                 </div>
 
                 <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">
@@ -257,6 +262,11 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
 
         function closeAdminModal() {
             document.getElementById('adminModal').classList.remove('active');
+        }
+
+        function toggleLoginPw() {
+            const el = document.getElementById('password');
+            el.type = el.type === 'password' ? 'text' : 'password';
         }
 
         // Close on overlay click

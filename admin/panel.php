@@ -114,6 +114,8 @@ try {
                 } else {
                     $hash = password_hash($password, PASSWORD_DEFAULT);
                     create_client_structure($code, $name, $hash, $titulo, $colorP, $colorS, $email);
+                    // Guardar contraseña en texto plano para visibilidad del admin
+                    $centralDb->prepare('UPDATE control_clientes SET password_plain = ? WHERE codigo = ?')->execute([$password, $code]);
 
                     $extraMsg = '';
 
@@ -284,8 +286,8 @@ try {
                 $error = 'Debe especificar el cliente y la nueva contraseña.';
             } else {
                 $hash = password_hash($newPassword, PASSWORD_DEFAULT);
-                $stmt = $centralDb->prepare('UPDATE control_clientes SET password_hash = ? WHERE codigo = ?');
-                $stmt->execute([$hash, $code]);
+                $stmt = $centralDb->prepare('UPDATE control_clientes SET password_hash = ?, password_plain = ? WHERE codigo = ?');
+                $stmt->execute([$hash, $newPassword, $code]);
                 $message = "✅ Contraseña actualizada para '{$code}'.";
             }
         }
@@ -515,7 +517,7 @@ try {
 
 // Obtener lista de clientes con detalles
 $clients = $centralDb->query("
-    SELECT codigo, nombre, titulo, email, color_primario, color_secundario, activo, fecha_creacion, subdominio 
+    SELECT codigo, nombre, titulo, email, color_primario, color_secundario, activo, fecha_creacion, subdominio, password_plain 
     FROM control_clientes 
     ORDER BY nombre
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -857,6 +859,14 @@ $clientCodes = array_column($clients, 'codigo');
                             <div class="client-meta">🌐 <a href="//<?= htmlspecialchars($subLabel) ?>.kino-trace.com" target="_blank" style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel) ?>.kino-trace.com</a></div>
                         <?php endif; ?>
 
+                        <div class="client-meta" style="display: flex; align-items: center; gap: 0.5rem;">
+                            🔑 <code id="pw_<?= htmlspecialchars($cli['codigo']) ?>" style="letter-spacing: 1px;"><?= str_repeat('•', 6) ?></code>
+                            <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.65rem; line-height: 1;"
+                                onclick="togglePw('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['password_plain'] ?? '') ?>')">
+                                👁️
+                            </button>
+                        </div>
+
                         <div class="client-colors">
                             <div class="color-swatch"
                                 style="background: <?= htmlspecialchars($cli['color_primario'] ?: '#3b82f6') ?>"
@@ -872,7 +882,7 @@ $clientCodes = array_column($clients, 'codigo');
                                 Editar
                             </button>
                             <button class="btn btn-secondary btn-xs"
-                                onclick="openPasswordModal('<?= htmlspecialchars($cli['codigo']) ?>')">
+                                onclick="openPasswordModal('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['password_plain'] ?? '') ?>')">
                                 🔑 Clave
                             </button>
                             <?php if (!empty($cli['email'])): ?>
@@ -1161,8 +1171,18 @@ $clientCodes = array_column($clients, 'codigo');
                     <input type="text" class="form-input" id="pwClientDisplay" disabled>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Contraseña Actual</label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="password" class="form-input" id="pwCurrentDisplay" disabled style="flex:1; font-family: monospace; letter-spacing: 2px;">
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="toggleCurrentPw()" style="white-space: nowrap;">👁️ Ver</button>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Nueva Contraseña *</label>
-                    <input type="password" class="form-input" name="new_password" required>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="password" class="form-input" name="new_password" id="pwNewInput" required style="flex:1;">
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="toggleNewPw()" style="white-space: nowrap;">👁️ Ver</button>
+                    </div>
                 </div>
                 <div class="flex gap-2 mt-4">
                     <button type="submit" class="btn btn-primary">Cambiar Contraseña</button>
@@ -1270,10 +1290,39 @@ $clientCodes = array_column($clients, 'codigo');
             openEditModal(code, titulo, email, colorP, colorS);
         }
 
-        function openPasswordModal(code) {
+        function openPasswordModal(code, currentPw) {
             document.getElementById('pwClientCode').value = code;
             document.getElementById('pwClientDisplay').value = code;
+            document.getElementById('pwCurrentDisplay').value = currentPw || '(no registrada)';
+            document.getElementById('pwCurrentDisplay').type = 'password';
+            document.getElementById('pwCurrentDisplay').dataset.plain = currentPw || '';
+            if (document.getElementById('pwNewInput')) {
+                document.getElementById('pwNewInput').value = '';
+                document.getElementById('pwNewInput').type = 'password';
+            }
             document.getElementById('passwordModal').classList.add('active');
+        }
+
+        function toggleCurrentPw() {
+            const el = document.getElementById('pwCurrentDisplay');
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+
+        function toggleNewPw() {
+            const el = document.getElementById('pwNewInput');
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+
+        function togglePw(code, plain) {
+            const el = document.getElementById('pw_' + code);
+            if (!el) return;
+            if (el.dataset.visible === '1') {
+                el.textContent = '••••••';
+                el.dataset.visible = '0';
+            } else {
+                el.textContent = plain || '(no registrada)';
+                el.dataset.visible = '1';
+            }
         }
 
         function openSubdomainModal(code, currentSub) {

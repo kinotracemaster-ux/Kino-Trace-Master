@@ -95,6 +95,7 @@ try {
         'reset_token' => "ALTER TABLE control_clientes ADD COLUMN reset_token TEXT",
         'reset_token_expiry' => "ALTER TABLE control_clientes ADD COLUMN reset_token_expiry TEXT",
         'subdominio' => "ALTER TABLE control_clientes ADD COLUMN subdominio TEXT",
+        'password_plain' => "ALTER TABLE control_clientes ADD COLUMN password_plain TEXT",
     ];
     foreach ($newColumns as $col => $sql) {
         try {
