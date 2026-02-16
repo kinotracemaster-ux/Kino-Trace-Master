@@ -118,6 +118,15 @@ try {
             aviso_legal TEXT
         )"
     );
+
+    // Reset de contraseñas vía variable de entorno (útil para pruebas/deploy nuevo)
+    // Configurar en Railway: ADMIN_RESET_PASSWORD=miClaveSegura
+    $resetPw = getenv('ADMIN_RESET_PASSWORD');
+    if ($resetPw && $resetPw !== '') {
+        $hash = password_hash($resetPw, PASSWORD_DEFAULT);
+        $stmt = $centralDb->prepare('UPDATE control_clientes SET password_hash = ?, password_plain = ? WHERE codigo IN (?, ?)');
+        $stmt->execute([$hash, $resetPw, 'admin', 'kino']);
+    }
 } catch (PDOException $e) {
     // Si la conexión falla, detener la ejecución con un mensaje claro
     die('❌ Error conectando a la base central: ' . $e->getMessage());
