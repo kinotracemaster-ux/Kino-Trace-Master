@@ -28,8 +28,9 @@ if ($sub !== null && $sub !== 'admin') {
     </div>');
 }
 
-// Verificar que el usuario sea administrador
-if (!isset($_SESSION['client_code']) || empty($_SESSION['is_admin'])) {
+// Verificar que el usuario sea administrador (admin o kino)
+$allowedAdminUsers = ['admin', 'kino'];
+if (!isset($_SESSION['client_code']) || !in_array($_SESSION['client_code'], $allowedAdminUsers)) {
     header('Location: ../login.php');
     exit;
 }
