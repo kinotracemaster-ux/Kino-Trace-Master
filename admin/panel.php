@@ -971,7 +971,7 @@ $clientCodes = array_column($clients, 'codigo');
                                     <button type="submit" class="btn btn-secondary btn-xs" title="Ver documentos sin PDF">🔍 Huérfanos</button>
                                 </form>
                                 <form method="post"
-                                    onsubmit="return confirm('¿Eliminar cliente <?= htmlspecialchars($cli['codigo']) ?> y todos sus datos?');">
+                                    onsubmit="return confirmDeleteClient('<?= htmlspecialchars($cli['codigo']) ?>');">
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="delete_code" value="<?= htmlspecialchars($cli['codigo']) ?>">
                                     <button type="submit" class="btn btn-danger btn-xs">Eliminar</button>
@@ -1381,6 +1381,21 @@ $clientCodes = array_column($clients, 'codigo');
                 el.textContent = plain || '(no registrada)';
                 el.dataset.visible = '1';
             }
+        }
+
+        function confirmDeleteClient(code) {
+            // Paso 1: Confirmación general
+            if (!confirm('⚠️ ATENCIÓN: Vas a eliminar el cliente "' + code + '".\n\nEsto borrará PERMANENTEMENTE:\n• Base de datos completa\n• Todos los PDFs y archivos\n• Todos los códigos y documentos\n• Página pública\n\n¿Deseas continuar?')) {
+                return false;
+            }
+            // Paso 2: Escribir el código para confirmar
+            const typed = prompt('🔐 Para confirmar, escribe el código del cliente:\n\n"' + code + '"');
+            if (typed === null) return false;
+            if (typed.trim().toLowerCase() !== code.toLowerCase()) {
+                alert('❌ El código no coincide. Eliminación cancelada.');
+                return false;
+            }
+            return true;
         }
 
         function openSubdomainModal(code, currentSub) {
