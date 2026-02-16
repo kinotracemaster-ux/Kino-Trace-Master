@@ -1457,6 +1457,37 @@ $clientCodes = array_column($clients, 'codigo');
                     });
                 }
 
+                // Orphan documents (have codes but no PDF)
+                if (result.orphan_docs && result.orphan_docs.length > 0) {
+                    html += `<details style="margin-top: 0.75rem; border: 1px solid #fbbf24; border-radius: 6px; padding: 0.5rem;">
+                        <summary style="cursor: pointer; font-weight: 600; color: #b45309;">
+                            ⚠️ Documentos sin PDF (${result.orphan_docs.length})
+                        </summary>
+                        <div style="max-height: 200px; overflow-y: auto; margin-top: 0.5rem; font-size: 0.8rem;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr style="background: #fef3c7;"><th style="padding: 4px 8px; text-align: left;">Nombre</th><th style="padding: 4px 8px;">Tipo</th><th style="padding: 4px 8px;">Códigos</th></tr>
+                                ${result.orphan_docs.map(d => `<tr style="border-top: 1px solid #e5e7eb;">
+                                    <td style="padding: 4px 8px;">${d.numero}</td>
+                                    <td style="padding: 4px 8px; text-align: center;">${d.tipo}</td>
+                                    <td style="padding: 4px 8px; text-align: center;">${d.codes}</td>
+                                </tr>`).join('')}
+                            </table>
+                        </div>
+                    </details>`;
+                }
+
+                // Orphan PDFs (uploaded but no codes linked)
+                if (result.orphan_pdfs && result.orphan_pdfs.length > 0) {
+                    html += `<details style="margin-top: 0.5rem; border: 1px solid #ef4444; border-radius: 6px; padding: 0.5rem;">
+                        <summary style="cursor: pointer; font-weight: 600; color: #dc2626;">
+                            ❌ PDFs sin códigos vinculados (${result.orphan_pdfs.length})
+                        </summary>
+                        <div style="max-height: 200px; overflow-y: auto; margin-top: 0.5rem; font-size: 0.8rem;">
+                            ${result.orphan_pdfs.map(p => `<div style="padding: 3px 8px; border-bottom: 1px solid #fee2e2;">📄 ${p.numero}</div>`).join('')}
+                        </div>
+                    </details>`;
+                }
+
                 resultDiv.innerHTML = html;
 
                 // Reset file input for next batch

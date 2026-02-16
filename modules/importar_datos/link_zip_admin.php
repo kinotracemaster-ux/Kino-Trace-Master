@@ -65,8 +65,41 @@ try {
     logMsg("───────────────────────────────", "info");
     logMsg("📊 Resultado: {$linked} PDFs enlazados, {$pendingAfter} aún pendientes", "success");
 
+    // Get orphan details: documents without PDF
+    $orphanDocs = [];
+    $stmtOrphan = $db->query("SELECT d.id, d.numero, d.tipo, 
+                                (SELECT COUNT(*) FROM codigos c WHERE c.documento_id = d.id) AS num_codes
+                              FROM documentos d 
+                              WHERE d.ruta_archivo = 'pending' OR d.ruta_archivo IS NULL OR d.ruta_archivo = ''
+                              ORDER BY d.numero LIMIT 200");
+    while ($row = $stmtOrphan->fetch(PDO::FETCH_ASSOC)) {
+        $orphanDocs[] = [
+            'id' => (int) $row['id'],
+            'numero' => $row['numero'],
+            'tipo' => $row['tipo'],
+            'codes' => (int) $row['num_codes']
+        ];
+    }
+
+    // Get orphan PDFs: auto-created documents with 0 codes
+    $orphanPdfs = [];
+    $stmtOrphanPdf = $db->query("SELECT d.id, d.numero, d.original_path
+                                  FROM documentos d 
+                                  LEFT JOIN codigos c ON d.id = c.documento_id
+                                  WHERE d.tipo = 'generado_auto' AND c.id IS NULL
+                                  ORDER BY d.numero LIMIT 200");
+    while ($row = $stmtOrphanPdf->fetch(PDO::FETCH_ASSOC)) {
+        $orphanPdfs[] = [
+            'id' => (int) $row['id'],
+            'numero' => $row['numero'],
+            'path' => $row['original_path']
+        ];
+    }
+
     $response['success'] = true;
     $response['pending'] = (int) $pendingAfter;
+    $response['orphan_docs'] = $orphanDocs;
+    $response['orphan_pdfs'] = $orphanPdfs;
 
 } catch (Exception $e) {
     logMsg("ERROR: " . $e->getMessage(), "error");

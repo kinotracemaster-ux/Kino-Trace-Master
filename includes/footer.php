@@ -595,13 +595,16 @@
             user-select: none !important;
         }
 
-        /* Permitir selección SOLO en campos de formulario */
+        /* Permitir selección SOLO en campos de formulario y códigos */
         input,
         textarea,
         select,
         [contenteditable="true"],
         .allow-select,
-        .allow-select * {
+        .allow-select *,
+        .codes-list,
+        .codes-list *,
+        .code-tag {
             -webkit-user-select: text !important;
             -moz-user-select: text !important;
             -ms-user-select: text !important;
