@@ -139,28 +139,45 @@ try {
 
                     // Copy KINO reference data if requested
                     if ($copyKinoData) {
-                        $kinoDb = open_client_db('kino');
-                        $newDb = open_client_db($code);
+                        try {
+                            $kinoDb = open_client_db('kino');
+                            $newDb = open_client_db($code);
 
-                        // Copy documentos
-                        $docs = $kinoDb->query('SELECT tipo, numero, fecha, ruta_archivo FROM documentos')->fetchAll(PDO::FETCH_ASSOC);
-                        $docMapping = [];
-                        $stmtDoc = $newDb->prepare('INSERT INTO documentos (tipo, numero, fecha, ruta_archivo) VALUES (?, ?, ?, ?)');
-                        foreach ($docs as $doc) {
-                            $stmtDoc->execute([$doc['tipo'], $doc['numero'], $doc['fecha'], $doc['ruta_archivo']]);
-                            $docMapping[$doc['numero']] = $newDb->lastInsertId();
-                        }
+                            // Copy documentos (all columns except id)
+                            $cols = $kinoDb->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
+                            $colsNoid = array_filter($cols, fn($c) => $c !== 'id');
+                            $colList = implode(', ', $colsNoid);
+                            $placeholders = implode(', ', array_fill(0, count($colsNoid), '?'));
 
-                        // Copy codigos
-                        $codes = $kinoDb->query('SELECT c.codigo, d.numero FROM codigos c JOIN documentos d ON c.documento_id = d.id')->fetchAll(PDO::FETCH_ASSOC);
-                        $stmtCode = $newDb->prepare('INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)');
-                        foreach ($codes as $codeRow) {
-                            if (isset($docMapping[$codeRow['numero']])) {
-                                $stmtCode->execute([$docMapping[$codeRow['numero']], $codeRow['codigo']]);
+                            $docs = $kinoDb->query("SELECT $colList FROM documentos")->fetchAll(PDO::FETCH_ASSOC);
+                            $docMapping = []; // numero => new_id
+                            $stmtDoc = $newDb->prepare("INSERT INTO documentos ($colList) VALUES ($placeholders)");
+                            foreach ($docs as $doc) {
+                                $stmtDoc->execute(array_values($doc));
+                                $docMapping[$doc['numero']] = $newDb->lastInsertId();
                             }
-                        }
 
-                        $extraMsg = " + Datos de KINO copiados (" . count($docs) . " docs, " . count($codes) . " códigos).";
+                            // Copy codigos
+                            $codes = $kinoDb->query('SELECT c.codigo, c.descripcion, c.cantidad, c.valor_unitario, d.numero FROM codigos c JOIN documentos d ON c.documento_id = d.id')->fetchAll(PDO::FETCH_ASSOC);
+                            $stmtCode = $newDb->prepare('INSERT INTO codigos (documento_id, codigo, descripcion, cantidad, valor_unitario) VALUES (?, ?, ?, ?, ?)');
+                            $copiedCodes = 0;
+                            foreach ($codes as $codeRow) {
+                                if (isset($docMapping[$codeRow['numero']])) {
+                                    $stmtCode->execute([
+                                        $docMapping[$codeRow['numero']],
+                                        $codeRow['codigo'],
+                                        $codeRow['descripcion'] ?? null,
+                                        $codeRow['cantidad'] ?? null,
+                                        $codeRow['valor_unitario'] ?? null
+                                    ]);
+                                    $copiedCodes++;
+                                }
+                            }
+
+                            $extraMsg .= " + Datos de KINO copiados (" . count($docs) . " docs, {$copiedCodes} códigos).";
+                        } catch (Exception $e) {
+                            $extraMsg .= " ⚠️ Error copiando datos de KINO: " . $e->getMessage();
+                        }
                     }
 
                     // Process SQL file if uploaded (MySQL dump → KINO-TRACE SQLite)
