@@ -1763,10 +1763,10 @@ $clientCodes = array_column($clients, 'codigo');
                 const action = formData.get('action');
                 if (!action) return; // formularios sin action, dejar pasar normal
 
-                // Para delete, mantener confirmación
+                // Para delete, doble confirmación
                 if (action === 'delete') {
                     const code = formData.get('delete_code');
-                    if (!confirm('¿Eliminar cliente ' + code + ' y todos sus datos?')) {
+                    if (!confirmDeleteClient(code)) {
                         e.preventDefault();
                         return;
                     }
@@ -1799,9 +1799,6 @@ $clientCodes = array_column($clients, 'codigo');
                 }
             });
         });
-
-        // Quitar el onsubmit de confirmación del delete (ya lo manejamos arriba)
-        document.querySelectorAll('form[onsubmit]').forEach(f => f.removeAttribute('onsubmit'));
     });
     </script>
 
