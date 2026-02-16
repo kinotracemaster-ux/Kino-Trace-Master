@@ -180,15 +180,16 @@ try {
                         $stmtDoc = $newDb->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo, original_path) VALUES (?, ?, ?, ?, ?)");
 
                         foreach ($docMatches[1] as $block) {
-                            // Regex that handles parentheses inside single-quoted strings
-                            preg_match_all("/\((\d+\s*,\s*'(?:[^'\\\\]|\\\\.)*'\s*,\s*'(?:[^'\\\\]|\\\\.)*'\s*,\s*'(?:[^'\\\\]|\\\\.)*')\)/", $block, $rows);
-                            foreach ($rows[1] as $row) {
-                                $vals = str_getcsv($row, ',', "'");
-                                if (count($vals) < 4) continue;
-                                $oldId = (int)trim($vals[0]);
-                                $docName = trim($vals[1]);
-                                $docDate = trim($vals[2]);
-                                $docPath = trim($vals[3]);
+                            // Line-by-line regex: handles parentheses inside quoted strings
+                            preg_match_all(
+                                "/^\s*\((\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
+                                $block, $docRows, PREG_SET_ORDER
+                            );
+                            foreach ($docRows as $m) {
+                                $oldId = (int)$m[1];
+                                $docName = stripslashes($m[2]);
+                                $docDate = stripslashes($m[3]);
+                                $docPath = stripslashes($m[4]);
                                 $stmtDoc->execute(['importado_sql', $docName, $docDate, 'pending', $docPath]);
                                 $idMap[$oldId] = (int)$newDb->lastInsertId();
                                 $docCount++;
@@ -205,12 +206,13 @@ try {
                         $stmtCode = $newDb->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
 
                         foreach ($codeMatches[1] as $block) {
-                            preg_match_all("/\((\d+\s*,\s*\d+\s*,\s*'(?:[^'\\\\]|\\\\.)*')\)/", $block, $rows);
-                            foreach ($rows[1] as $row) {
-                                $vals = str_getcsv($row, ',', "'");
-                                if (count($vals) < 3) continue;
-                                $oldDocId = (int)trim($vals[1]);
-                                $codeVal = trim($vals[2]);
+                            preg_match_all(
+                                "/^\s*\(\d+\s*,\s*(\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
+                                $block, $codeRows, PREG_SET_ORDER
+                            );
+                            foreach ($codeRows as $m) {
+                                $oldDocId = (int)$m[1];
+                                $codeVal = stripslashes($m[2]);
                                 $newDocId = $idMap[$oldDocId] ?? null;
                                 if ($newDocId) {
                                     $stmtCode->execute([$newDocId, $codeVal]);
@@ -441,9 +443,10 @@ try {
         elseif ($action === 'delete') {
             $delCode = sanitize_code($_POST['delete_code'] ?? '');
             if ($delCode !== '' && $delCode !== 'admin') {
-                // Borrar registro
+                // Borrar registro de control_clientes y pagina_publica
                 $delStmt = $centralDb->prepare('DELETE FROM control_clientes WHERE codigo = ?');
                 $delStmt->execute([$delCode]);
+                $centralDb->prepare('DELETE FROM pagina_publica WHERE codigo = ?')->execute([$delCode]);
 
                 // Eliminar directorio
                 $dir = CLIENTS_DIR . DIRECTORY_SEPARATOR . $delCode;
