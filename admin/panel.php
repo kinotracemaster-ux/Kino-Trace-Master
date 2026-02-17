@@ -1800,12 +1800,20 @@ $clientCodes = array_column($clients, 'codigo');
             document.getElementById('ppLinkInfo').innerHTML =
                 '🔗 Enlace público: <a href="' + baseUrl + '/modules/Buscador/?cliente=' + code + '" target="_blank" style="color:var(--accent-primary);">' + baseUrl + '/modules/Buscador/?cliente=' + code + '</a>';
 
-            // Reset fields
-            ['ppIntroTitulo', 'ppIntroTexto', 'ppInstrucciones', 'ppFooterTexto', 'ppFooterUbicacion', 'ppFooterTelefono', 'ppFooterUrl', 'ppAvisoLegal'].forEach(id => {
-                document.getElementById(id).value = '';
-            });
+            // Default example texts
+            const defaults = {
+                ppIntroTitulo: 'Estimados clientes y autoridades competentes:',
+                ppIntroTexto: 'Hemos desarrollado esta aplicación para facilitar la consulta y verificación de documentos asociados a los productos que importamos y distribuimos.',
+                ppInstrucciones: 'Busque el código del producto en la etiqueta o empaque.\nIngrese el código en el campo de búsqueda en MAYÚSCULAS.\nLa aplicación arrojará los documentos vinculados a ese código.\nHaga clic en VER PDF para visualizar el documento.',
+                ppFooterTexto: 'KINO COMPANY S.A.S importador directo de productos de alta calidad.',
+                ppFooterUbicacion: 'Medellín – Bogotá – Panamá',
+                ppFooterTelefono: '+57 318 5640716',
+                ppFooterUrl: 'https://ejemplo.com',
+                ppAvisoLegal: 'Los documentos disponibles en esta plataforma son propiedad exclusiva de la empresa y se proporcionan únicamente con fines informativos y de verificación.'
+            };
 
-            // Load existing data via AJAX
+            // Load existing data via AJAX, fallback to defaults
+            let loaded = false;
             try {
                 const resp = await fetch('panel.php?get_public_page=' + encodeURIComponent(code));
                 const data = await resp.json();
@@ -1818,8 +1826,16 @@ $clientCodes = array_column($clients, 'codigo');
                     document.getElementById('ppFooterTelefono').value = data.footer_telefono || '';
                     document.getElementById('ppFooterUrl').value = data.footer_url || '';
                     document.getElementById('ppAvisoLegal').value = data.aviso_legal || '';
+                    loaded = true;
                 }
-            } catch (e) { /* no data yet, that's fine */ }
+            } catch (e) { /* no data yet */ }
+
+            // If no saved data, fill with example defaults
+            if (!loaded) {
+                Object.keys(defaults).forEach(id => {
+                    document.getElementById(id).value = defaults[id];
+                });
+            }
 
             document.getElementById('publicPageModal').style.display = 'flex';
         }
