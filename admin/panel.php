@@ -75,9 +75,9 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'send_reset_email'
     // Enviar correo
     $subject = 'Recuperar contraseña - KINO TRACE';
     $body = "<p>Hola <b>" . htmlspecialchars($client['nombre']) . "</b>,</p>"
-          . "<p>Se ha solicitado un cambio de contraseña para su cuenta.</p>"
-          . "<p><a href='{$resetLink}' style='background:#3b82f6;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;'>Cambiar Contraseña</a></p>"
-          . "<p style='font-size:0.85em;color:#666;'>Este enlace expira en 1 hora. Si no solicitó este cambio, ignore este mensaje.</p>";
+        . "<p>Se ha solicitado un cambio de contraseña para su cuenta.</p>"
+        . "<p><a href='{$resetLink}' style='background:#3b82f6;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;display:inline-block;'>Cambiar Contraseña</a></p>"
+        . "<p style='font-size:0.85em;color:#666;'>Este enlace expira en 1 hora. Si no solicitó este cambio, ignore este mensaje.</p>";
     $result = send_mail($client['email'], $subject, $body);
     if ($result === true) {
         echo json_encode(['success' => true, 'message' => "Enlace enviado a {$client['email']}"]);
@@ -172,7 +172,8 @@ try {
                         // Parse documents
                         preg_match_all(
                             "/INSERT\s+INTO\s+`?documents`?.*?VALUES\s*(.+?)\s*;/si",
-                            $sqlContent, $docMatches
+                            $sqlContent,
+                            $docMatches
                         );
 
                         $idMap = [];
@@ -183,15 +184,17 @@ try {
                             // Line-by-line regex: handles parentheses inside quoted strings
                             preg_match_all(
                                 "/^\s*\((\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
-                                $block, $docRows, PREG_SET_ORDER
+                                $block,
+                                $docRows,
+                                PREG_SET_ORDER
                             );
                             foreach ($docRows as $m) {
-                                $oldId = (int)$m[1];
+                                $oldId = (int) $m[1];
                                 $docName = stripslashes($m[2]);
                                 $docDate = stripslashes($m[3]);
                                 $docPath = stripslashes($m[4]);
                                 $stmtDoc->execute(['importado_sql', $docName, $docDate, 'pending', $docPath]);
-                                $idMap[$oldId] = (int)$newDb->lastInsertId();
+                                $idMap[$oldId] = (int) $newDb->lastInsertId();
                                 $docCount++;
                             }
                         }
@@ -199,7 +202,8 @@ try {
                         // Parse codes
                         preg_match_all(
                             "/INSERT\s+INTO\s+`?codes`?.*?VALUES\s*(.+?)\s*;/si",
-                            $sqlContent, $codeMatches
+                            $sqlContent,
+                            $codeMatches
                         );
 
                         $codeCount = 0;
@@ -208,10 +212,12 @@ try {
                         foreach ($codeMatches[1] as $block) {
                             preg_match_all(
                                 "/^\s*\(\d+\s*,\s*(\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
-                                $block, $codeRows, PREG_SET_ORDER
+                                $block,
+                                $codeRows,
+                                PREG_SET_ORDER
                             );
                             foreach ($codeRows as $m) {
-                                $oldDocId = (int)$m[1];
+                                $oldDocId = (int) $m[1];
                                 $codeVal = stripslashes($m[2]);
                                 $newDocId = $idMap[$oldDocId] ?? null;
                                 if ($newDocId) {
@@ -228,28 +234,28 @@ try {
                     if (!empty($_FILES['zip_file']['tmp_name']) && $_FILES['zip_file']['error'] === UPLOAD_ERR_OK) {
                         require_once __DIR__ . '/../helpers/pdf_linker.php';
                         $newDb = $newDb ?? open_client_db($code);
-                        
+
                         // Debug: verify docs exist before linking
                         $pendingCount = $newDb->query("SELECT COUNT(*) FROM documentos WHERE ruta_archivo = 'pending'")->fetchColumn();
                         $totalDocs = $newDb->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
-                        
+
                         $uploadDir = CLIENTS_DIR . "/{$code}/uploads/sql_import/";
                         $zipResult = processZipAndLink($newDb, $_FILES['zip_file']['tmp_name'], $uploadDir, 'sql_import/');
                         $linked = $zipResult['updated'] ?? 0;
                         $created = $zipResult['created'] ?? 0;
                         $dupes = $zipResult['duplicates'] ?? 0;
                         $unmatched = $zipResult['unmatched'] ?? 0;
-                        
+
                         // Check how many still pending after linking
                         $stillPending = $newDb->query("SELECT COUNT(*) FROM documentos WHERE ruta_archivo = 'pending'")->fetchColumn();
-                        
+
                         // Get orphan document names for display
                         $orphanDocs = [];
                         if ($stillPending > 0) {
                             $orphanStmt = $newDb->query("SELECT id, numero, original_path FROM documentos WHERE ruta_archivo = 'pending' ORDER BY numero");
                             $orphanDocs = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
                         }
-                        
+
                         $extraMsg .= " + ZIP: {$linked} vinculados, {$created} creados, {$dupes} duplicados, {$unmatched} sin procesar.";
                         if ($stillPending > 0) {
                             $extraMsg .= " ⚠️ {$stillPending} documentos sin PDF.";
@@ -257,7 +263,7 @@ try {
                     }
 
                     $message = "✅ Cliente '{$name}' creado correctamente." . $extraMsg;
-                    
+
                     // Store created client code for batch ZIP UI
                     $createdClientCode = $code;
                 }
@@ -313,7 +319,8 @@ try {
                     $logoDir = CLIENTS_DIR . "/{$code}/";
                     foreach (['png', 'jpg', 'jpeg', 'gif'] as $ext) {
                         $old = $logoDir . 'logo.' . $ext;
-                        if (file_exists($old)) unlink($old);
+                        if (file_exists($old))
+                            unlink($old);
                     }
                     $logoMsg = ' + Logo eliminado.';
                 }
@@ -366,14 +373,15 @@ try {
                     preg_match_all(
                         "/^\s*\((\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
                         $block,
-                        $docRows, PREG_SET_ORDER
+                        $docRows,
+                        PREG_SET_ORDER
                     );
 
                     foreach ($docRows as $m) {
                         $oldId = (int) $m[1];
-                        $name  = stripslashes($m[2]);
-                        $date  = stripslashes($m[3]);
-                        $path  = stripslashes($m[4]);
+                        $name = stripslashes($m[2]);
+                        $date = stripslashes($m[3]);
+                        $path = stripslashes($m[4]);
 
                         $stmtDoc->execute(['importado_sql', $name, $date, 'pending', $path]);
                         $idMap[$oldId] = (int) $db->lastInsertId();
@@ -395,12 +403,13 @@ try {
                     preg_match_all(
                         "/^\s*\(\d+\s*,\s*(\d+)\s*,\s*'((?:[^'\\\\]|\\\\.)*)'\s*\)/m",
                         $block,
-                        $codeRows, PREG_SET_ORDER
+                        $codeRows,
+                        PREG_SET_ORDER
                     );
 
                     foreach ($codeRows as $m) {
                         $oldDocId = (int) $m[1];
-                        $codeVal  = stripslashes($m[2]);
+                        $codeVal = stripslashes($m[2]);
 
                         $newDocId = $idMap[$oldDocId] ?? null;
                         if ($newDocId) {
@@ -471,11 +480,25 @@ try {
             $diagCode = sanitize_code($_POST['diag_code'] ?? '');
             if ($diagCode !== '') {
                 $diagDb = open_client_db($diagCode);
-                $totalDocs = $diagDb->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
-                $orphanStmt = $diagDb->query("SELECT id, numero, original_path FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = '' ORDER BY numero");
+                $totalDocs = (int) $diagDb->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
+                $orphanStmt = $diagDb->query(
+                    "SELECT d.id, d.numero, d.tipo, d.original_path,
+                            (SELECT COUNT(*) FROM codigos c WHERE c.documento_id = d.id) AS num_codes
+                     FROM documentos d
+                     WHERE d.ruta_archivo = 'pending' OR d.ruta_archivo IS NULL OR d.ruta_archivo = ''
+                     ORDER BY d.numero"
+                );
                 $orphanDocs = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
                 $withPdf = $totalDocs - count($orphanDocs);
                 $message = "🔍 Diagnóstico de '{$diagCode}': {$totalDocs} documentos totales, {$withPdf} con PDF, " . count($orphanDocs) . " sin PDF.";
+                // Store for JSON response
+                $diagOrphanData = [
+                    'client_code' => $diagCode,
+                    'total_docs' => $totalDocs,
+                    'with_pdf' => $withPdf,
+                    'orphan_count' => count($orphanDocs),
+                    'orphan_docs' => $orphanDocs
+                ];
             }
         }
 
@@ -492,15 +515,15 @@ try {
                        footer_url=:furl, aviso_legal=:al"
                 );
                 $stmt->execute([
-                    ':c'    => $code,
-                    ':it'   => $_POST['pp_intro_titulo'] ?? '',
-                    ':ix'   => $_POST['pp_intro_texto'] ?? '',
-                    ':ins'  => $_POST['pp_instrucciones'] ?? '',
-                    ':ft'   => $_POST['pp_footer_texto'] ?? '',
-                    ':fu'   => $_POST['pp_footer_ubicacion'] ?? '',
+                    ':c' => $code,
+                    ':it' => $_POST['pp_intro_titulo'] ?? '',
+                    ':ix' => $_POST['pp_intro_texto'] ?? '',
+                    ':ins' => $_POST['pp_instrucciones'] ?? '',
+                    ':ft' => $_POST['pp_footer_texto'] ?? '',
+                    ':fu' => $_POST['pp_footer_ubicacion'] ?? '',
                     ':ftel' => $_POST['pp_footer_telefono'] ?? '',
                     ':furl' => $_POST['pp_footer_url'] ?? '',
-                    ':al'   => $_POST['pp_aviso_legal'] ?? '',
+                    ':al' => $_POST['pp_aviso_legal'] ?? '',
                 ]);
                 $message = "✅ Página pública de '{$code}' actualizada.";
             }
@@ -525,13 +548,20 @@ try {
 }
 
 // Si es petición AJAX, devolver JSON y salir
-if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'
-    && $_SERVER['REQUEST_METHOD'] === 'POST' && ($action ?? '') !== '' && ($action ?? '') !== 'send_reset_email') {
+if (
+    !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest'
+    && $_SERVER['REQUEST_METHOD'] === 'POST' && ($action ?? '') !== '' && ($action ?? '') !== 'send_reset_email'
+) {
     header('Content-Type: application/json');
     if ($error) {
         echo json_encode(['success' => false, 'error' => $error]);
     } else {
-        echo json_encode(['success' => true, 'message' => $message ?: '✅ Operación completada.', 'createdCode' => $createdClientCode]);
+        $jsonResp = ['success' => true, 'message' => $message ?: '✅ Operación completada.', 'createdCode' => $createdClientCode];
+        // Include orphan diagnostics data if available
+        if (!empty($diagOrphanData)) {
+            $jsonResp['orphan_data'] = $diagOrphanData;
+        }
+        echo json_encode($jsonResp);
     }
     exit;
 }
@@ -557,41 +587,122 @@ $clientCodes = array_column($clients, 'codigo');
     <style>
         /* ═══════ MODAL DE PROGRESO ═══════ */
         .progress-overlay {
-            display: none; position: fixed; inset: 0; z-index: 9999;
-            background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
-            justify-content: center; align-items: center;
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            justify-content: center;
+            align-items: center;
         }
-        .progress-overlay.active { display: flex; }
+
+        .progress-overlay.active {
+            display: flex;
+        }
+
         .progress-box {
-            background: var(--bg-secondary, #1e293b); border-radius: 16px;
-            padding: 2rem 2.5rem; min-width: 360px; max-width: 480px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.5); text-align: center;
+            background: var(--bg-secondary, #1e293b);
+            border-radius: 16px;
+            padding: 2rem 2.5rem;
+            min-width: 360px;
+            max-width: 480px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+            text-align: center;
             animation: progressIn 0.3s ease;
         }
-        @keyframes progressIn { from { transform: scale(0.9) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+
+        @keyframes progressIn {
+            from {
+                transform: scale(0.9) translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1) translateY(0);
+                opacity: 1;
+            }
+        }
+
         .progress-spinner {
-            width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.15);
-            border-top-color: var(--accent-primary, #3b82f6); border-radius: 50%;
-            animation: spin 0.8s linear infinite; margin: 0 auto 1rem;
+            width: 48px;
+            height: 48px;
+            border: 4px solid rgba(255, 255, 255, 0.15);
+            border-top-color: var(--accent-primary, #3b82f6);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .progress-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; }
-        .progress-steps { font-size: 0.85rem; color: var(--text-muted, #94a3b8); min-height: 24px; margin-bottom: 1rem; }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .progress-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+
+        .progress-steps {
+            font-size: 0.85rem;
+            color: var(--text-muted, #94a3b8);
+            min-height: 24px;
+            margin-bottom: 1rem;
+        }
+
         .progress-bar-track {
-            width: 100%; height: 6px; background: rgba(255,255,255,0.1);
-            border-radius: 3px; overflow: hidden; margin-bottom: 1rem;
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 1rem;
         }
+
         .progress-bar-fill {
-            height: 100%; background: linear-gradient(90deg, var(--accent-primary, #3b82f6), #818cf8);
-            border-radius: 3px; width: 0%; transition: width 0.5s ease;
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-primary, #3b82f6), #818cf8);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.5s ease;
         }
-        .progress-result { font-size: 0.95rem; margin-top: 0.5rem; padding: 0.75rem; border-radius: 8px; }
-        .progress-result.success { background: rgba(34,197,94,0.15); color: #4ade80; }
-        .progress-result.error { background: rgba(239,68,68,0.15); color: #f87171; }
-        .progress-close { margin-top: 1rem; padding: 0.5rem 2rem; border-radius: 8px;
-            background: var(--accent-primary, #3b82f6); color: #fff; border: none;
-            cursor: pointer; font-size: 0.9rem; font-weight: 500; }
-        .progress-close:hover { filter: brightness(1.15); }
+
+        .progress-result {
+            font-size: 0.95rem;
+            margin-top: 0.5rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+        }
+
+        .progress-result.success {
+            background: rgba(34, 197, 94, 0.15);
+            color: #4ade80;
+        }
+
+        .progress-result.error {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+        }
+
+        .progress-close {
+            margin-top: 1rem;
+            padding: 0.5rem 2rem;
+            border-radius: 8px;
+            background: var(--accent-primary, #3b82f6);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .progress-close:hover {
+            filter: brightness(1.15);
+        }
+
         .admin-layout {
             min-height: 100vh;
             background: var(--bg-primary);
@@ -856,32 +967,51 @@ $clientCodes = array_column($clients, 'codigo');
             <?php if ($message): ?>
                 <div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
                 <?php if (!empty($orphanDocs)): ?>
-                    <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-                        <details>
-                            <summary style="cursor: pointer; font-weight: 600; color: #856404;">
-                                ⚠️ <?= count($orphanDocs) ?> documentos sin PDF vinculado (click para ver lista)
-                            </summary>
-                            <div style="max-height: 300px; overflow-y: auto; margin-top: 0.5rem;">
-                                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-                                    <thead>
-                                        <tr style="background: #ffeeba; position: sticky; top: 0;">
-                                            <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd;">ID</th>
-                                            <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd;">Nombre (numero)</th>
-                                            <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd;">Archivo esperado (original_path)</th>
+                    <div
+                        style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h3
+                                style="margin: 0; font-size: 1rem; color: #fbbf24; display: flex; align-items: center; gap: 0.5rem;">
+                                ⚠️ <?= count($orphanDocs) ?> documentos sin PDF vinculado
+                            </h3>
+                            <span
+                                style="font-size: 0.75rem; color: var(--text-muted); background: rgba(255,255,255,0.05); padding: 0.25rem 0.75rem; border-radius: 20px;">Creación
+                                de cliente</span>
+                        </div>
+                        <div
+                            style="max-height: 500px; overflow-y: auto; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                <thead>
+                                    <tr style="background: rgba(251, 191, 36, 0.15); position: sticky; top: 0; z-index: 1;">
+                                        <th
+                                            style="padding: 8px 12px; text-align: left; border-bottom: 1px solid rgba(251, 191, 36, 0.2); font-weight: 600; color: #fbbf24;">
+                                            ID</th>
+                                        <th
+                                            style="padding: 8px 12px; text-align: left; border-bottom: 1px solid rgba(251, 191, 36, 0.2); font-weight: 600; color: #fbbf24;">
+                                            Nombre</th>
+                                        <th
+                                            style="padding: 8px 12px; text-align: left; border-bottom: 1px solid rgba(251, 191, 36, 0.2); font-weight: 600; color: #fbbf24;">
+                                            Archivo esperado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($orphanDocs as $orphan): ?>
+                                        <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.15s;"
+                                            onmouseover="this.style.background='rgba(255,255,255,0.03)'"
+                                            onmouseout="this.style.background='transparent'">
+                                            <td
+                                                style="padding: 8px 12px; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.8rem;">
+                                                <?= $orphan['id'] ?></td>
+                                            <td style="padding: 8px 12px; font-weight: 500;">
+                                                <?= htmlspecialchars($orphan['numero']) ?></td>
+                                            <td
+                                                style="padding: 8px 12px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-secondary);">
+                                                <?= htmlspecialchars($orphan['original_path'] ?? '') ?></td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($orphanDocs as $orphan): ?>
-                                            <tr>
-                                                <td style="padding: 4px 8px; border-bottom: 1px solid #eee;"><?= $orphan['id'] ?></td>
-                                                <td style="padding: 4px 8px; border-bottom: 1px solid #eee;"><?= htmlspecialchars($orphan['numero']) ?></td>
-                                                <td style="padding: 4px 8px; border-bottom: 1px solid #eee; font-family: monospace; font-size: 0.8rem;"><?= htmlspecialchars($orphan['original_path']) ?></td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </details>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 <?php endif; ?>
             <?php endif; ?>
@@ -914,12 +1044,17 @@ $clientCodes = array_column($clients, 'codigo');
                         <?php endif; ?>
                         <?php if ($cli['codigo'] !== 'admin'): ?>
                             <?php $subLabel = $cli['subdominio'] ?: $cli['codigo']; ?>
-                            <div class="client-meta">🌐 <a href="//<?= htmlspecialchars($subLabel) ?>.kino-trace.com" target="_blank" style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel) ?>.kino-trace.com</a></div>
+                            <div class="client-meta">🌐 <a href="//<?= htmlspecialchars($subLabel) ?>.kino-trace.com"
+                                    target="_blank"
+                                    style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel) ?>.kino-trace.com</a>
+                            </div>
                         <?php endif; ?>
 
                         <div class="client-meta" style="display: flex; align-items: center; gap: 0.5rem;">
-                            🔑 <code id="pw_<?= htmlspecialchars($cli['codigo']) ?>" style="letter-spacing: 1px;"><?= str_repeat('•', 6) ?></code>
-                            <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.65rem; line-height: 1;"
+                            🔑 <code id="pw_<?= htmlspecialchars($cli['codigo']) ?>"
+                                style="letter-spacing: 1px;"><?= str_repeat('•', 6) ?></code>
+                            <button type="button" class="btn btn-secondary"
+                                style="padding: 2px 6px; font-size: 0.65rem; line-height: 1;"
                                 onclick="togglePw('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['password_plain'] ?? '') ?>')">
                                 👁️
                             </button>
@@ -944,10 +1079,10 @@ $clientCodes = array_column($clients, 'codigo');
                                 🔑 Clave
                             </button>
                             <?php if (!empty($cli['email'])): ?>
-                            <button class="btn btn-secondary btn-xs" id="resetBtn_<?= htmlspecialchars($cli['codigo']) ?>"
-                                onclick="sendResetEmail('<?= htmlspecialchars($cli['codigo']) ?>')">
-                                📧 Enviar Clave
-                            </button>
+                                <button class="btn btn-secondary btn-xs" id="resetBtn_<?= htmlspecialchars($cli['codigo']) ?>"
+                                    onclick="sendResetEmail('<?= htmlspecialchars($cli['codigo']) ?>')">
+                                    📧 Enviar Clave
+                                </button>
                             <?php endif; ?>
                             <?php if ($cli['codigo'] !== 'admin'): ?>
                                 <button class="btn btn-secondary btn-xs" title="Editar subdominio"
@@ -965,11 +1100,10 @@ $clientCodes = array_column($clients, 'codigo');
                                         <?= $cli['activo'] ? 'Pause' : 'Activar' ?>
                                     </button>
                                 </form>
-                                <form method="post">
-                                    <input type="hidden" name="action" value="diagnose_orphans">
-                                    <input type="hidden" name="diag_code" value="<?= htmlspecialchars($cli['codigo']) ?>">
-                                    <button type="submit" class="btn btn-secondary btn-xs" title="Ver documentos sin PDF">🔍 Huérfanos</button>
-                                </form>
+                                <button class="btn btn-secondary btn-xs" title="Ver documentos sin PDF"
+                                    onclick="diagnoseOrphans('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['nombre']) ?>')">
+                                    🔍 Huérfanos
+                                </button>
                                 <form method="post"
                                     onsubmit="return confirmDeleteClient('<?= htmlspecialchars($cli['codigo']) ?>');">
                                     <input type="hidden" name="action" value="delete">
@@ -1038,7 +1172,8 @@ $clientCodes = array_column($clients, 'codigo');
                         </div>
 
                         <!-- ── Opciones adicionales ── -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem;">
+                        <div
+                            style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem;">
                             <div class="form-group">
                                 <label class="form-label">🖼️ Logo (PNG/JPG)</label>
                                 <input type="file" class="form-input" name="logo_file" accept=".png,.jpg,.jpeg,.gif"
@@ -1073,7 +1208,8 @@ $clientCodes = array_column($clients, 'codigo');
                             </label>
                         </div>
 
-                        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.75rem; font-size: 1rem; padding: 0.75rem;">
+                        <button type="submit" class="btn btn-primary"
+                            style="width: 100%; margin-top: 0.75rem; font-size: 1rem; padding: 0.75rem;">
                             🚀 Crear Cliente
                         </button>
                     </form>
@@ -1090,7 +1226,8 @@ $clientCodes = array_column($clients, 'codigo');
                         📦 Enlazar PDFs por Lotes
                     </h3>
                     <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
-                        Sube ZIPs con PDFs para enlazar a documentos ya importados. Puedes repetir varias veces (~400MB por lote).
+                        Sube ZIPs con PDFs para enlazar a documentos ya importados. Puedes repetir varias veces (~400MB
+                        por lote).
                     </p>
                     <form id="batchZipForm" enctype="multipart/form-data">
                         <div class="form-group">
@@ -1098,8 +1235,7 @@ $clientCodes = array_column($clients, 'codigo');
                             <select class="form-select" name="client_code" id="batchClient" required>
                                 <option value="">Seleccione cliente...</option>
                                 <?php foreach ($clientCodes as $c): ?>
-                                    <option value="<?= htmlspecialchars($c) ?>"
-                                        <?= (!empty($createdClientCode) && $c === $createdClientCode) ? 'selected' : '' ?>>
+                                    <option value="<?= htmlspecialchars($c) ?>" <?= (!empty($createdClientCode) && $c === $createdClientCode) ? 'selected' : '' ?>>
                                         <?= htmlspecialchars($c) ?>
                                     </option>
                                 <?php endforeach; ?>
@@ -1199,12 +1335,14 @@ $clientCodes = array_column($clients, 'codigo');
                             🗑️ Quitar Logo
                         </button>
                     </div>
-                    <div id="logoRemovedMsg" style="display: none; margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(239, 68, 68, 0.1); border-radius: 6px; font-size: 0.85rem; color: var(--accent-danger);">
+                    <div id="logoRemovedMsg"
+                        style="display: none; margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(239, 68, 68, 0.1); border-radius: 6px; font-size: 0.85rem; color: var(--accent-danger);">
                         ⚠️ El logo se eliminará al guardar.
-                        <button type="button" class="btn btn-secondary btn-xs" style="margin-left: 0.5rem;" onclick="cancelRemoveLogo()">Cancelar</button>
+                        <button type="button" class="btn btn-secondary btn-xs" style="margin-left: 0.5rem;"
+                            onclick="cancelRemoveLogo()">Cancelar</button>
                     </div>
-                    <input type="file" class="form-input" name="logo_file" id="editLogoFile" accept=".png,.jpg,.jpeg,.gif"
-                        style="padding: 0.5rem;">
+                    <input type="file" class="form-input" name="logo_file" id="editLogoFile"
+                        accept=".png,.jpg,.jpeg,.gif" style="padding: 0.5rem;">
                     <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
                         Dejar vacío para mantener el logo actual
                     </p>
@@ -1231,15 +1369,19 @@ $clientCodes = array_column($clients, 'codigo');
                 <div class="form-group">
                     <label class="form-label">Contraseña Actual</label>
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <input type="password" class="form-input" id="pwCurrentDisplay" disabled style="flex:1; font-family: monospace; letter-spacing: 2px;">
-                        <button type="button" class="btn btn-secondary btn-xs" onclick="toggleCurrentPw()" style="white-space: nowrap;">👁️ Ver</button>
+                        <input type="password" class="form-input" id="pwCurrentDisplay" disabled
+                            style="flex:1; font-family: monospace; letter-spacing: 2px;">
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="toggleCurrentPw()"
+                            style="white-space: nowrap;">👁️ Ver</button>
                     </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Nueva Contraseña *</label>
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <input type="password" class="form-input" name="new_password" id="pwNewInput" required style="flex:1;">
-                        <button type="button" class="btn btn-secondary btn-xs" onclick="toggleNewPw()" style="white-space: nowrap;">👁️ Ver</button>
+                        <input type="password" class="form-input" name="new_password" id="pwNewInput" required
+                            style="flex:1;">
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="toggleNewPw()"
+                            style="white-space: nowrap;">👁️ Ver</button>
                     </div>
                 </div>
                 <div class="flex gap-2 mt-4">
@@ -1268,14 +1410,18 @@ $clientCodes = array_column($clients, 'codigo');
                         <input type="text" name="subdominio" id="subdomainInput" class="form-input"
                             placeholder="mi-empresa" pattern="[a-z0-9\-]+"
                             style="border-radius: var(--radius-sm) 0 0 var(--radius-sm); text-align: right;">
-                        <span style="background: var(--bg-primary); border: 1px solid var(--border-color); border-left: none; padding: 0.5rem 0.75rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">.kino-trace.com</span>
+                        <span
+                            style="background: var(--bg-primary); border: 1px solid var(--border-color); border-left: none; padding: 0.5rem 0.75rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">.kino-trace.com</span>
                     </div>
-                    <small style="color: var(--text-muted); display: block; margin-top: 0.25rem;">Solo letras, números y guiones. Dejar vacío usa el código del cliente.</small>
+                    <small style="color: var(--text-muted); display: block; margin-top: 0.25rem;">Solo letras, números y
+                        guiones. Dejar vacío usa el código del cliente.</small>
                 </div>
-                <div id="subPreview" style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-secondary);"></div>
+                <div id="subPreview" style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-secondary);">
+                </div>
                 <div class="flex gap-2">
                     <button type="submit" class="btn btn-primary">Guardar</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('subdomainModal')">Cancelar</button>
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeModal('subdomainModal')">Cancelar</button>
                 </div>
             </form>
         </div>
@@ -1288,34 +1434,34 @@ $clientCodes = array_column($clients, 'codigo');
             document.getElementById('editEmail').value = email || '';
             document.getElementById('editColorP').value = colorP || '#3b82f6';
             document.getElementById('editColorS').value = colorS || '#64748b';
-            
+
             // Reset logo state
             document.getElementById('removeLogo').value = '';
             document.getElementById('logoRemovedMsg').style.display = 'none';
             const editLogoFile = document.getElementById('editLogoFile');
             if (editLogoFile) editLogoFile.style.display = '';
-            
+
             // Detect and show current logo
             const preview = document.getElementById('currentLogoPreview');
             const removeBtn = document.getElementById('logoRemoveBtn');
             preview.innerHTML = '';
             removeBtn.style.display = 'none';
-            
+
             const extensions = ['png', 'jpg', 'jpeg', 'gif'];
             let found = false;
             let checksLeft = extensions.length;
-            
+
             extensions.forEach(ext => {
                 if (found) return;
                 const img = new Image();
                 const src = '../clients/' + code + '/logo.' + ext + '?t=' + Date.now();
-                img.onload = function() {
+                img.onload = function () {
                     if (found) return;
                     found = true;
                     preview.innerHTML = '<img src="' + src + '" style="max-height: 60px; max-width: 180px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-color);">';
                     removeBtn.style.display = 'block';
                 };
-                img.onerror = function() {
+                img.onerror = function () {
                     checksLeft--;
                     if (checksLeft === 0 && !found) {
                         preview.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted);">Sin logo</span>';
@@ -1323,10 +1469,10 @@ $clientCodes = array_column($clients, 'codigo');
                 };
                 img.src = src;
             });
-            
+
             document.getElementById('editModal').classList.add('active');
         }
-        
+
         function markRemoveLogo() {
             document.getElementById('removeLogo').value = '1';
             document.getElementById('currentLogoPreview').innerHTML = '';
@@ -1334,7 +1480,7 @@ $clientCodes = array_column($clients, 'codigo');
             document.getElementById('logoRemovedMsg').style.display = 'block';
             document.getElementById('editLogoFile').style.display = 'none';
         }
-        
+
         function cancelRemoveLogo() {
             document.getElementById('removeLogo').value = '';
             document.getElementById('logoRemovedMsg').style.display = 'none';
@@ -1483,41 +1629,54 @@ $clientCodes = array_column($clients, 'codigo');
                     html += `<div style="color: var(--accent-danger);">❌ ${result.error || 'Error desconocido'}</div>`;
                 }
 
-                if (result.logs) {
-                    result.logs.slice(-5).forEach(l => {
-                        html += `<div style="font-size: 0.75rem; color: var(--text-muted);">${l.msg}</div>`;
+                // Show all logs in scrollable container
+                if (result.logs && result.logs.length > 0) {
+                    html += `<div style="margin-top: 0.75rem; max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 0.5rem 0.75rem; border: 1px solid var(--border-color);">`;
+                    result.logs.forEach(l => {
+                        const color = l.type === 'success' ? '#4ade80' : l.type === 'warn' || l.type === 'warning' ? '#fbbf24' : l.type === 'error' ? '#f87171' : 'var(--text-muted)';
+                        html += `<div style="font-size: 0.75rem; color: ${color}; padding: 2px 0; font-family: var(--font-mono);">${l.msg}</div>`;
                     });
+                    html += `</div>`;
                 }
 
-                // Orphan documents (have codes but no PDF)
+                // Orphan documents (have codes but no PDF) — open by default
                 if (result.orphan_docs && result.orphan_docs.length > 0) {
-                    html += `<details style="margin-top: 0.75rem; border: 1px solid #fbbf24; border-radius: 6px; padding: 0.5rem;">
-                        <summary style="cursor: pointer; font-weight: 600; color: #b45309;">
-                            ⚠️ Documentos sin PDF (${result.orphan_docs.length})
-                        </summary>
-                        <div style="max-height: 200px; overflow-y: auto; margin-top: 0.5rem; font-size: 0.8rem;">
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <tr style="background: #fef3c7;"><th style="padding: 4px 8px; text-align: left;">Nombre (numero)</th><th style="padding: 4px 8px; text-align: left;">Archivo esperado</th><th style="padding: 4px 8px;">Códigos</th></tr>
-                                ${result.orphan_docs.map(d => `<tr style="border-top: 1px solid #e5e7eb;">
-                                    <td style="padding: 4px 8px;">${d.numero}</td>
-                                    <td style="padding: 4px 8px; font-family: monospace; font-size: 0.75rem; color: #6b7280;">${d.original_path || '—'}</td>
-                                    <td style="padding: 4px 8px; text-align: center;">${d.codes}</td>
+                    html += `<div style="margin-top: 1rem; border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 10px; padding: 1rem; background: rgba(251, 191, 36, 0.05);">
+                        <div style="font-weight: 600; color: #fbbf24; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+                            <span>⚠️ ${result.orphan_docs.length} documentos sin PDF</span>
+                            <button onclick="this.closest('div').parentElement.querySelector('.orphan-table-wrap').style.display = this.closest('div').parentElement.querySelector('.orphan-table-wrap').style.display === 'none' ? 'block' : 'none'" style="background: none; border: 1px solid rgba(251,191,36,0.3); color: #fbbf24; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem;">Ocultar/Mostrar</button>
+                        </div>
+                        <div class="orphan-table-wrap" style="max-height: 400px; overflow-y: auto; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                                <thead><tr style="background: rgba(251, 191, 36, 0.15); position: sticky; top: 0;">
+                                    <th style="padding: 8px 10px; text-align: left; color: #fbbf24; font-weight: 600;">ID</th>
+                                    <th style="padding: 8px 10px; text-align: left; color: #fbbf24; font-weight: 600;">Nombre</th>
+                                    <th style="padding: 8px 10px; text-align: left; color: #fbbf24; font-weight: 600;">Tipo</th>
+                                    <th style="padding: 8px 10px; text-align: left; color: #fbbf24; font-weight: 600;">Archivo esperado</th>
+                                    <th style="padding: 8px 10px; text-align: center; color: #fbbf24; font-weight: 600;">Códigos</th>
+                                </tr></thead>
+                                <tbody>
+                                ${result.orphan_docs.map(d => `<tr style="border-bottom: 1px solid var(--border-color);">
+                                    <td style="padding: 6px 10px; color: var(--text-muted); font-family: var(--font-mono);">${d.id}</td>
+                                    <td style="padding: 6px 10px; font-weight: 500;">${d.numero}</td>
+                                    <td style="padding: 6px 10px; color: var(--text-secondary); font-size: 0.75rem;">${d.tipo || '—'}</td>
+                                    <td style="padding: 6px 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary);">${d.original_path || '—'}</td>
+                                    <td style="padding: 6px 10px; text-align: center; font-weight: 600;">${d.codes}</td>
                                 </tr>`).join('')}
+                                </tbody>
                             </table>
                         </div>
-                    </details>`;
+                    </div>`;
                 }
 
-                // Orphan PDFs (uploaded but no codes linked)
+                // Orphan PDFs (uploaded but no codes linked) — open by default
                 if (result.orphan_pdfs && result.orphan_pdfs.length > 0) {
-                    html += `<details style="margin-top: 0.5rem; border: 1px solid #ef4444; border-radius: 6px; padding: 0.5rem;">
-                        <summary style="cursor: pointer; font-weight: 600; color: #dc2626;">
-                            ❌ PDFs sin códigos vinculados (${result.orphan_pdfs.length})
-                        </summary>
-                        <div style="max-height: 200px; overflow-y: auto; margin-top: 0.5rem; font-size: 0.8rem;">
-                            ${result.orphan_pdfs.map(p => `<div style="padding: 3px 8px; border-bottom: 1px solid #fee2e2;">📄 ${p.numero}</div>`).join('')}
+                    html += `<div style="margin-top: 0.75rem; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 10px; padding: 1rem; background: rgba(239, 68, 68, 0.05);">
+                        <div style="font-weight: 600; color: #f87171; margin-bottom: 0.75rem;">❌ ${result.orphan_pdfs.length} PDFs sin códigos vinculados</div>
+                        <div style="max-height: 250px; overflow-y: auto; border-radius: 8px;">
+                            ${result.orphan_pdfs.map(p => `<div style="padding: 6px 10px; border-bottom: 1px solid rgba(239,68,68,0.1); font-size: 0.8rem; display: flex; gap: 0.5rem; align-items: center;"><span>📄</span> <span style="font-weight: 500;">${p.numero}</span> <span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.75rem;">${p.path || ''}</span></div>`).join('')}
                         </div>
-                    </details>`;
+                    </div>`;
                 }
 
                 resultDiv.innerHTML = html;
@@ -1575,17 +1734,20 @@ $clientCodes = array_column($clients, 'codigo');
 
                 <div class="form-group">
                     <label>Título introductorio</label>
-                    <input type="text" name="pp_intro_titulo" id="ppIntroTitulo" class="form-control" placeholder="Estimados clientes y autoridades competentes:">
+                    <input type="text" name="pp_intro_titulo" id="ppIntroTitulo" class="form-control"
+                        placeholder="Estimados clientes y autoridades competentes:">
                 </div>
 
                 <div class="form-group">
                     <label>Texto introductorio</label>
-                    <textarea name="pp_intro_texto" id="ppIntroTexto" class="form-control" rows="2" placeholder="Hemos desarrollado esta aplicación para facilitar..."></textarea>
+                    <textarea name="pp_intro_texto" id="ppIntroTexto" class="form-control" rows="2"
+                        placeholder="Hemos desarrollado esta aplicación para facilitar..."></textarea>
                 </div>
 
                 <div class="form-group">
                     <label>Instrucciones (una por línea)</label>
-                    <textarea name="pp_instrucciones" id="ppInstrucciones" class="form-control" rows="4" placeholder="Busque el código del producto...&#10;Ingrese el código en MAYÚSCULAS...&#10;La aplicación arrojará los documentos...&#10;Haga clic en VER PDF para visualizar..."></textarea>
+                    <textarea name="pp_instrucciones" id="ppInstrucciones" class="form-control" rows="4"
+                        placeholder="Busque el código del producto...&#10;Ingrese el código en MAYÚSCULAS...&#10;La aplicación arrojará los documentos...&#10;Haga clic en VER PDF para visualizar..."></textarea>
                 </div>
 
                 <hr style="margin: 1rem 0;">
@@ -1593,30 +1755,36 @@ $clientCodes = array_column($clients, 'codigo');
 
                 <div class="form-group">
                     <label>Texto principal del footer</label>
-                    <input type="text" name="pp_footer_texto" id="ppFooterTexto" class="form-control" placeholder="KINO COMPANY S.A.S importador directo de...">
+                    <input type="text" name="pp_footer_texto" id="ppFooterTexto" class="form-control"
+                        placeholder="KINO COMPANY S.A.S importador directo de...">
                 </div>
                 <div class="form-group">
                     <label>Ubicación</label>
-                    <input type="text" name="pp_footer_ubicacion" id="ppFooterUbicacion" class="form-control" placeholder="Medellín – Bogotá – Panamá">
+                    <input type="text" name="pp_footer_ubicacion" id="ppFooterUbicacion" class="form-control"
+                        placeholder="Medellín – Bogotá – Panamá">
                 </div>
                 <div class="form-group">
                     <label>Teléfono</label>
-                    <input type="text" name="pp_footer_telefono" id="ppFooterTelefono" class="form-control" placeholder="+57 318 5640716">
+                    <input type="text" name="pp_footer_telefono" id="ppFooterTelefono" class="form-control"
+                        placeholder="+57 318 5640716">
                 </div>
                 <div class="form-group">
                     <label>URL / Sitio web</label>
-                    <input type="text" name="pp_footer_url" id="ppFooterUrl" class="form-control" placeholder="https://ejemplo.com">
+                    <input type="text" name="pp_footer_url" id="ppFooterUrl" class="form-control"
+                        placeholder="https://ejemplo.com">
                 </div>
 
                 <hr style="margin: 1rem 0;">
                 <div class="form-group">
                     <label>Aviso Legal</label>
-                    <textarea name="pp_aviso_legal" id="ppAvisoLegal" class="form-control" rows="3" placeholder="Los documentos disponibles en esta plataforma son propiedad exclusiva de..."></textarea>
+                    <textarea name="pp_aviso_legal" id="ppAvisoLegal" class="form-control" rows="3"
+                        placeholder="Los documentos disponibles en esta plataforma son propiedad exclusiva de..."></textarea>
                 </div>
 
                 <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
                     <button type="submit" class="btn btn-primary" style="flex:1;">💾 Guardar</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('publicPageModal')" style="flex:1;">Cancelar</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('publicPageModal')"
+                        style="flex:1;">Cancelar</button>
                 </div>
             </form>
         </div>
@@ -1630,7 +1798,7 @@ $clientCodes = array_column($clients, 'codigo');
                 '🔗 Enlace público: <a href="' + baseUrl + '/modules/Buscador/?cliente=' + code + '" target="_blank" style="color:var(--accent-primary);">' + baseUrl + '/modules/Buscador/?cliente=' + code + '</a>';
 
             // Reset fields
-            ['ppIntroTitulo','ppIntroTexto','ppInstrucciones','ppFooterTexto','ppFooterUbicacion','ppFooterTelefono','ppFooterUrl','ppAvisoLegal'].forEach(id => {
+            ['ppIntroTitulo', 'ppIntroTexto', 'ppInstrucciones', 'ppFooterTexto', 'ppFooterUbicacion', 'ppFooterTelefono', 'ppFooterUrl', 'ppAvisoLegal'].forEach(id => {
                 document.getElementById(id).value = '';
             });
 
@@ -1659,147 +1827,308 @@ $clientCodes = array_column($clients, 'codigo');
             <div class="progress-spinner" id="progressSpinner"></div>
             <div class="progress-title" id="progressTitle">Procesando...</div>
             <div class="progress-steps" id="progressSteps"></div>
-            <div class="progress-bar-track"><div class="progress-bar-fill" id="progressBar"></div></div>
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" id="progressBar"></div>
+            </div>
             <div class="progress-result" id="progressResult" style="display:none;"></div>
-            <button class="progress-close" id="progressClose" style="display:none;" onclick="closeProgress()">Cerrar</button>
+            <button class="progress-close" id="progressClose" style="display:none;"
+                onclick="closeProgress()">Cerrar</button>
         </div>
     </div>
 
     <script>
-    // ═══════ SISTEMA DE PROGRESO ═══════
-    const progressMsgs = {
-        'create':           ['🚀 Creando estructura del cliente...', 'Generando base de datos...', 'Configurando colores y datos...', 'Procesando archivos adjuntos...', 'Finalizando...'],
-        'clone':            ['📋 Verificando cliente origen...', 'Copiando estructura...', 'Clonando base de datos...', 'Finalizando...'],
-        'change_password':  ['🔑 Actualizando contraseña...'],
-        'update_colors':    ['✏️ Actualizando configuración...', 'Procesando logo...'],
-        'import_sql':       ['📥 Leyendo archivo SQL...', 'Importando documentos...', 'Importando códigos...', 'Enlazando PDFs...'],
-        'toggle':           ['⏸️ Cambiando estado del cliente...'],
-        'delete':           ['🗑️ Eliminando archivos...', 'Eliminando registros...', 'Limpiando...'],
-        'diagnose_orphans': ['🔍 Analizando documentos...', 'Contando huérfanos...'],
-        'update_public_page':['🌐 Guardando página pública...'],
-        'update_subdomain': ['🌐 Actualizando subdominio...']
-    };
+        // ═══════ SISTEMA DE PROGRESO ═══════
+        const progressMsgs = {
+            'create': ['🚀 Creando estructura del cliente...', 'Generando base de datos...', 'Configurando colores y datos...', 'Procesando archivos adjuntos...', 'Finalizando...'],
+            'clone': ['📋 Verificando cliente origen...', 'Copiando estructura...', 'Clonando base de datos...', 'Finalizando...'],
+            'change_password': ['🔑 Actualizando contraseña...'],
+            'update_colors': ['✏️ Actualizando configuración...', 'Procesando logo...'],
+            'import_sql': ['📥 Leyendo archivo SQL...', 'Importando documentos...', 'Importando códigos...', 'Enlazando PDFs...'],
+            'toggle': ['⏸️ Cambiando estado del cliente...'],
+            'delete': ['🗑️ Eliminando archivos...', 'Eliminando registros...', 'Limpiando...'],
+            'diagnose_orphans': ['🔍 Analizando documentos...', 'Contando huérfanos...'],
+            'update_public_page': ['🌐 Guardando página pública...'],
+            'update_subdomain': ['🌐 Actualizando subdominio...']
+        };
 
-    const progressTitles = {
-        'create': 'Creando Nuevo Cliente',
-        'clone': 'Clonando Cliente',
-        'change_password': 'Cambiando Contraseña',
-        'update_colors': 'Actualizando Cliente',
-        'import_sql': 'Importando Datos SQL',
-        'toggle': 'Cambiando Estado',
-        'delete': 'Eliminando Cliente',
-        'diagnose_orphans': 'Diagnosticando',
-        'update_public_page': 'Guardando Página Pública',
-        'update_subdomain': 'Actualizando Subdominio'
-    };
+        const progressTitles = {
+            'create': 'Creando Nuevo Cliente',
+            'clone': 'Clonando Cliente',
+            'change_password': 'Cambiando Contraseña',
+            'update_colors': 'Actualizando Cliente',
+            'import_sql': 'Importando Datos SQL',
+            'toggle': 'Cambiando Estado',
+            'delete': 'Eliminando Cliente',
+            'diagnose_orphans': 'Diagnosticando',
+            'update_public_page': 'Guardando Página Pública',
+            'update_subdomain': 'Actualizando Subdominio'
+        };
 
-    let progressInterval = null;
+        let progressInterval = null;
 
-    function showProgress(action) {
-        const overlay = document.getElementById('progressOverlay');
-        const spinner = document.getElementById('progressSpinner');
-        const title = document.getElementById('progressTitle');
-        const steps = document.getElementById('progressSteps');
-        const bar = document.getElementById('progressBar');
-        const result = document.getElementById('progressResult');
-        const closeBtn = document.getElementById('progressClose');
+        function showProgress(action) {
+            const overlay = document.getElementById('progressOverlay');
+            const spinner = document.getElementById('progressSpinner');
+            const title = document.getElementById('progressTitle');
+            const steps = document.getElementById('progressSteps');
+            const bar = document.getElementById('progressBar');
+            const result = document.getElementById('progressResult');
+            const closeBtn = document.getElementById('progressClose');
 
-        title.textContent = progressTitles[action] || 'Procesando...';
-        steps.textContent = '';
-        bar.style.width = '0%';
-        result.style.display = 'none';
-        result.className = 'progress-result';
-        closeBtn.style.display = 'none';
-        spinner.style.display = 'block';
-        overlay.classList.add('active');
+            title.textContent = progressTitles[action] || 'Procesando...';
+            steps.textContent = '';
+            bar.style.width = '0%';
+            result.style.display = 'none';
+            result.className = 'progress-result';
+            closeBtn.style.display = 'none';
+            spinner.style.display = 'block';
+            overlay.classList.add('active');
 
-        // Animar pasos
-        const msgs = progressMsgs[action] || ['Procesando...'];
-        let step = 0;
-        steps.textContent = msgs[0];
-        bar.style.width = '10%';
+            // Animar pasos
+            const msgs = progressMsgs[action] || ['Procesando...'];
+            let step = 0;
+            steps.textContent = msgs[0];
+            bar.style.width = '10%';
 
-        progressInterval = setInterval(() => {
-            step++;
-            if (step < msgs.length) {
-                steps.textContent = msgs[step];
-                const pct = Math.min(10 + (step / msgs.length) * 70, 80);
-                bar.style.width = pct + '%';
-            }
-        }, 800);
-    }
-
-    function finishProgress(success, msg) {
-        clearInterval(progressInterval);
-        const spinner = document.getElementById('progressSpinner');
-        const bar = document.getElementById('progressBar');
-        const result = document.getElementById('progressResult');
-        const closeBtn = document.getElementById('progressClose');
-        const steps = document.getElementById('progressSteps');
-
-        spinner.style.display = 'none';
-        bar.style.width = '100%';
-        steps.textContent = '';
-        result.style.display = 'block';
-        result.className = 'progress-result ' + (success ? 'success' : 'error');
-        result.textContent = msg;
-        closeBtn.style.display = 'inline-block';
-    }
-
-    function closeProgress() {
-        document.getElementById('progressOverlay').classList.remove('active');
-        // Recargar para reflejar cambios
-        window.location.reload();
-    }
-
-    // Interceptar TODOS los formularios con method=post (excepto los que ya usan AJAX)
-    document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('form[method="post"]').forEach(form => {
-            // Ignorar formularios que ya tienen manejo AJAX propio
-            if (form.id === 'batchZipForm') return;
-
-            form.addEventListener('submit', async (e) => {
-                const formData = new FormData(form);
-                const action = formData.get('action');
-                if (!action) return; // formularios sin action, dejar pasar normal
-
-                // Para delete, doble confirmación
-                if (action === 'delete') {
-                    const code = formData.get('delete_code');
-                    if (!confirmDeleteClient(code)) {
-                        e.preventDefault();
-                        return;
-                    }
+            progressInterval = setInterval(() => {
+                step++;
+                if (step < msgs.length) {
+                    steps.textContent = msgs[step];
+                    const pct = Math.min(10 + (step / msgs.length) * 70, 80);
+                    bar.style.width = pct + '%';
                 }
+            }, 800);
+        }
 
-                e.preventDefault();
-                showProgress(action);
+        function finishProgress(success, msg) {
+            clearInterval(progressInterval);
+            const spinner = document.getElementById('progressSpinner');
+            const bar = document.getElementById('progressBar');
+            const result = document.getElementById('progressResult');
+            const closeBtn = document.getElementById('progressClose');
+            const steps = document.getElementById('progressSteps');
 
-                try {
-                    const resp = await fetch('panel.php', {
-                        method: 'POST',
-                        body: formData,
-                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                    });
+            spinner.style.display = 'none';
+            bar.style.width = '100%';
+            steps.textContent = '';
+            result.style.display = 'block';
+            result.className = 'progress-result ' + (success ? 'success' : 'error');
+            result.textContent = msg;
+            closeBtn.style.display = 'inline-block';
+        }
 
-                    const text = await resp.text();
-                    let data;
-                    try { data = JSON.parse(text); } catch(pe) {
-                        finishProgress(false, '❌ Respuesta inesperada del servidor');
-                        return;
+        function closeProgress() {
+            document.getElementById('progressOverlay').classList.remove('active');
+            // Recargar para reflejar cambios
+            window.location.reload();
+        }
+
+        // Interceptar TODOS los formularios con method=post (excepto los que ya usan AJAX)
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('form[method="post"]').forEach(form => {
+                // Ignorar formularios que ya tienen manejo AJAX propio
+                if (form.id === 'batchZipForm') return;
+
+                form.addEventListener('submit', async (e) => {
+                    const formData = new FormData(form);
+                    const action = formData.get('action');
+                    if (!action) return; // formularios sin action, dejar pasar normal
+
+                    // Para delete, doble confirmación
+                    if (action === 'delete') {
+                        const code = formData.get('delete_code');
+                        if (!confirmDeleteClient(code)) {
+                            e.preventDefault();
+                            return;
+                        }
                     }
 
-                    if (data.success) {
-                        finishProgress(true, data.message);
-                    } else {
-                        finishProgress(false, data.error || '❌ Error desconocido');
+                    e.preventDefault();
+                    showProgress(action);
+
+                    try {
+                        const resp = await fetch('panel.php', {
+                            method: 'POST',
+                            body: formData,
+                            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                        });
+
+                        const text = await resp.text();
+                        let data;
+                        try { data = JSON.parse(text); } catch (pe) {
+                            finishProgress(false, '❌ Respuesta inesperada del servidor');
+                            return;
+                        }
+
+                        if (data.success) {
+                            // If orphan diagnostics data is present, show the orphan modal
+                            if (data.orphan_data) {
+                                closeProgressNoReload();
+                                showOrphanModal(data.orphan_data);
+                            } else {
+                                finishProgress(true, data.message);
+                            }
+                        } else {
+                            finishProgress(false, data.error || '❌ Error desconocido');
+                        }
+                    } catch (err) {
+                        finishProgress(false, '❌ Error de conexión: ' + err.message);
                     }
-                } catch(err) {
-                    finishProgress(false, '❌ Error de conexión: ' + err.message);
-                }
+                });
             });
         });
-    });
+        // Close progress without reload
+        function closeProgressNoReload() {
+            clearInterval(progressInterval);
+            document.getElementById('progressOverlay').classList.remove('active');
+        }
+
+        // ═══════ DIAGNOSE ORPHANS — AJAX DIRECT ═══════
+        async function diagnoseOrphans(clientCode, clientName) {
+            showProgress('diagnose_orphans');
+            try {
+                const formData = new FormData();
+                formData.append('action', 'diagnose_orphans');
+                formData.append('diag_code', clientCode);
+                const resp = await fetch('panel.php', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                const data = await resp.json();
+                closeProgressNoReload();
+                if (data.success && data.orphan_data) {
+                    showOrphanModal(data.orphan_data, clientName);
+                } else if (data.success) {
+                    alert(data.message);
+                } else {
+                    alert(data.error || 'Error desconocido');
+                }
+            } catch (err) {
+                closeProgressNoReload();
+                alert('Error de conexión: ' + err.message);
+            }
+        }
+
+        // ═══════ ORPHAN MODAL ═══════
+        function showOrphanModal(data, clientName) {
+            // Remove existing modal if any
+            const existing = document.getElementById('orphanModal');
+            if (existing) existing.remove();
+
+            const orphans = data.orphan_docs || [];
+            const code = data.client_code || '';
+            const name = clientName || code;
+
+            const modal = document.createElement('div');
+            modal.id = 'orphanModal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:center;animation:fadeIn 0.2s ease;';
+
+            const statsHtml = `
+            <div style="display:flex;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;">
+                <div style="flex:1;min-width:120px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:0.75rem 1rem;text-align:center;">
+                    <div style="font-size:1.5rem;font-weight:700;color:#60a5fa;">${data.total_docs}</div>
+                    <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">Total documentos</div>
+                </div>
+                <div style="flex:1;min-width:120px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:0.75rem 1rem;text-align:center;">
+                    <div style="font-size:1.5rem;font-weight:700;color:#4ade80;">${data.with_pdf}</div>
+                    <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">Con PDF ✅</div>
+                </div>
+                <div style="flex:1;min-width:120px;background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.2);border-radius:10px;padding:0.75rem 1rem;text-align:center;">
+                    <div style="font-size:1.5rem;font-weight:700;color:#fbbf24;">${data.orphan_count}</div>
+                    <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">Sin PDF ⚠️</div>
+                </div>
+            </div>`;
+
+            let tableHtml = '';
+            if (orphans.length > 0) {
+                tableHtml = `
+            <div style="margin-bottom:0.75rem;">
+                <input type="text" id="orphanSearchInput" placeholder="🔍 Buscar por nombre, tipo o archivo..." 
+                    style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.3);color:var(--text-primary);font-size:0.85rem;outline:none;box-sizing:border-box;"
+                    oninput="filterOrphanTable(this.value)">
+            </div>
+            <div style="max-height:450px;overflow-y:auto;border-radius:10px;border:1px solid var(--border-color);">
+                <table id="orphanTable" style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead>
+                        <tr style="background:rgba(251,191,36,0.12);position:sticky;top:0;z-index:1;">
+                            <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:50px;">ID</th>
+                            <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);">Nombre del documento</th>
+                            <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:120px;">Tipo</th>
+                            <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);">Archivo esperado (nombre para enlazar)</th>
+                            <th style="padding:10px 12px;text-align:center;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:70px;">Códigos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${orphans.map((d, i) => `<tr class="orphan-row" style="border-bottom:1px solid var(--border-color);transition:background 0.15s;${i % 2 === 0 ? '' : 'background:rgba(255,255,255,0.02);'}" onmouseover="this.style.background='rgba(251,191,36,0.06)'" onmouseout="this.style.background='${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'}';">
+                            <td style="padding:8px 12px;color:var(--text-muted);font-family:var(--font-mono);font-size:0.75rem;">${d.id}</td>
+                            <td style="padding:8px 12px;font-weight:500;">${escHtml(d.numero || '')}</td>
+                            <td style="padding:8px 12px;font-size:0.75rem;"><span style="background:rgba(100,116,139,0.2);padding:2px 8px;border-radius:4px;color:var(--text-secondary);">${escHtml(d.tipo || '—')}</span></td>
+                            <td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">${escHtml(d.original_path || '—')}</td>
+                            <td style="padding:8px 12px;text-align:center;font-weight:600;color:${(d.num_codes || 0) > 0 ? '#4ade80' : '#f87171'};">${d.num_codes || 0}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div id="orphanCount" style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted);text-align:right;">Mostrando ${orphans.length} de ${orphans.length} documentos</div>`;
+            } else {
+                tableHtml = `<div style="text-align:center;padding:2rem;color:#4ade80;font-size:1.1rem;">🎉 ¡Todos los documentos tienen PDF vinculado!</div>`;
+            }
+
+            modal.innerHTML = `
+            <div style="background:var(--bg-secondary,#1e293b);border-radius:16px;padding:2rem;width:90%;max-width:900px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.6);animation:progressIn 0.3s ease;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
+                    <h2 style="margin:0;font-size:1.15rem;font-weight:700;display:flex;align-items:center;gap:0.5rem;">
+                        🔍 Documentos Huérfanos — <span style="color:var(--accent-primary);">${escHtml(name)}</span>
+                    </h2>
+                    <button onclick="document.getElementById('orphanModal').remove()" 
+                        style="background:rgba(255,255,255,0.1);border:none;color:var(--text-primary);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;transition:background 0.2s;"
+                        onmouseover="this.style.background='rgba(239,68,68,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">✕</button>
+                </div>
+                ${statsHtml}
+                ${tableHtml}
+                <div style="margin-top:1.25rem;text-align:right;">
+                    <button onclick="document.getElementById('orphanModal').remove()" 
+                        style="padding:0.6rem 2rem;border-radius:8px;background:var(--accent-primary,#3b82f6);color:#fff;border:none;cursor:pointer;font-size:0.9rem;font-weight:500;transition:filter 0.2s;"
+                        onmouseover="this.style.filter='brightness(1.15)'" onmouseout="this.style.filter='none'">Cerrar</button>
+                </div>
+            </div>`;
+
+            document.body.appendChild(modal);
+
+            // Close on clicking overlay
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.remove();
+            });
+
+            // Close on Escape key
+            const escHandler = (e) => {
+                if (e.key === 'Escape') { modal.remove(); document.removeEventListener('keydown', escHandler); }
+            };
+            document.addEventListener('keydown', escHandler);
+        }
+
+        // Filter orphan table rows by search query
+        function filterOrphanTable(query) {
+            const rows = document.querySelectorAll('#orphanTable .orphan-row');
+            const q = query.toLowerCase();
+            let visible = 0;
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                const show = text.includes(q);
+                row.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            const countEl = document.getElementById('orphanCount');
+            if (countEl) countEl.textContent = `Mostrando ${visible} de ${rows.length} documentos`;
+        }
+
+        // HTML escape helper
+        function escHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
     </script>
 
 </body>
