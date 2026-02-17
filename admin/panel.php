@@ -1001,12 +1001,15 @@ $clientCodes = array_column($clients, 'codigo');
                                             onmouseout="this.style.background='transparent'">
                                             <td
                                                 style="padding: 8px 12px; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.8rem;">
-                                                <?= $orphan['id'] ?></td>
+                                                <?= $orphan['id'] ?>
+                                            </td>
                                             <td style="padding: 8px 12px; font-weight: 500;">
-                                                <?= htmlspecialchars($orphan['numero']) ?></td>
+                                                <?= htmlspecialchars($orphan['numero']) ?>
+                                            </td>
                                             <td
                                                 style="padding: 8px 12px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-secondary);">
-                                                <?= htmlspecialchars($orphan['original_path'] ?? '') ?></td>
+                                                <?= htmlspecialchars($orphan['original_path'] ?? '') ?>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -1956,8 +1959,17 @@ $clientCodes = array_column($clients, 'codigo');
                         const text = await resp.text();
                         let data;
                         try { data = JSON.parse(text); } catch (pe) {
-                            finishProgress(false, '❌ Respuesta inesperada del servidor');
-                            return;
+                            // Try to extract JSON from mixed output (PHP warnings + JSON)
+                            const jsonMatch = text.match(/\{[\s\S]*\}$/);
+                            if (jsonMatch) {
+                                try { data = JSON.parse(jsonMatch[0]); } catch (pe2) {
+                                    finishProgress(false, '❌ Respuesta inesperada del servidor: ' + text.substring(0, 300));
+                                    return;
+                                }
+                            } else {
+                                finishProgress(false, '❌ Respuesta inesperada del servidor: ' + text.substring(0, 300));
+                                return;
+                            }
                         }
 
                         if (data.success) {
@@ -1969,7 +1981,7 @@ $clientCodes = array_column($clients, 'codigo');
                                 finishProgress(true, data.message);
                             }
                         } else {
-                            finishProgress(false, data.error || '❌ Error desconocido');
+                            finishProgress(false, data.error || data.message || '❌ Error: ' + text.substring(0, 300));
                         }
                     } catch (err) {
                         finishProgress(false, '❌ Error de conexión: ' + err.message);
