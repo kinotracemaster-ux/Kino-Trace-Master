@@ -5,7 +5,8 @@
  * Authentication page with modern minimalist design.
  * Includes hidden admin access with special password.
  */
-session_start();
+// SEGURIDAD: Iniciar sesión aislada por subdominio (via auth.php)
+require_once __DIR__ . '/helpers/auth.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers/tenant.php';
 require_once __DIR__ . '/helpers/subdomain.php';
@@ -284,8 +285,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
         });
 
         // Show modal if there was an error or admin subdomain
-        <?php if ($adminError || !empty($showAdminModal)): ?>
-            openAdminModal();
+        <?php if ($adminError || !empty($showAdminModal)): ?>         openAdminModal();
         <?php endif; ?>
     </script>
 </body>

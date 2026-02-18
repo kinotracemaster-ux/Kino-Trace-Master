@@ -5,7 +5,7 @@
  * Allows clients to request a password reset link via email.
  * Protegido con CSRF y rate limiting.
  */
-session_start();
+require_once __DIR__ . '/helpers/session_init.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/autoload.php';
 require_once __DIR__ . '/helpers/mailer.php';

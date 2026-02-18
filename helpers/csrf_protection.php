@@ -17,7 +17,7 @@ class CsrfProtection
     public static function generateToken(): string
     {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            require_once __DIR__ . '/session_init.php';
         }
 
         $token = bin2hex(random_bytes(self::TOKEN_LENGTH));
@@ -32,7 +32,7 @@ class CsrfProtection
     public static function getToken(): string
     {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            require_once __DIR__ . '/session_init.php';
         }
 
         if (!isset($_SESSION[self::TOKEN_NAME])) {
@@ -48,7 +48,7 @@ class CsrfProtection
     public static function validate(?string $token): bool
     {
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            require_once __DIR__ . '/session_init.php';
         }
 
         if (!isset($_SESSION[self::TOKEN_NAME])) {

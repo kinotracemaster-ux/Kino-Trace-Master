@@ -6,7 +6,7 @@
  * un registro en la tabla de vínculos calculando coincidencias y
  * discrepancias entre los códigos asociados a ambos documentos.
  */
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 

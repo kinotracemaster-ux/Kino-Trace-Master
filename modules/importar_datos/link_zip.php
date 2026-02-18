@@ -8,7 +8,7 @@
  */
 ob_start();
 header('Content-Type: application/json');
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 ini_set('display_errors', 0);
 ini_set('memory_limit', '512M');
 set_time_limit(300);

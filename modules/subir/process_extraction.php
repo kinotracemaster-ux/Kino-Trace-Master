@@ -20,7 +20,7 @@ require_once __DIR__ . '/../../helpers/pdf_extractor.php';
 
 // SEGURIDAD: Priorizar sesión sobre POST para evitar manipulación
 if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    require_once __DIR__ . '/../../helpers/session_init.php';
 }
 
 $docId = (int) ($_POST['doc_id'] ?? 0);

@@ -4,7 +4,7 @@
  *
  * Validates a reset token and allows the user to set a new password.
  */
-session_start();
+require_once __DIR__ . '/helpers/session_init.php';
 require_once __DIR__ . '/config.php';
 
 $message = '';

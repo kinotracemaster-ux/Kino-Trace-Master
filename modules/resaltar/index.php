@@ -5,7 +5,7 @@
  * Módulo unificado que utiliza la misma lógica que "Consultar"
  * para buscar términos en documentos y abrir el visor con resaltado.
  */
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 

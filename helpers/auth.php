@@ -2,12 +2,13 @@
 /**
  * helpers/auth.php
  * 
- * Simple authentication helper to standardize session checks.
+ * Authentication helper con aislamiento de sesiones por subdominio.
+ * Incluye session_init.php para sesión aislada por hostname.
  */
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+// Iniciar sesión aislada por subdominio
+require_once __DIR__ . '/session_init.php';
+
 
 /**
  * Check if the user is logged in as a client.

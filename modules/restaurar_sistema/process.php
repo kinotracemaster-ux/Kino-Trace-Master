@@ -7,7 +7,7 @@ ob_start();
  * Adaptada mínimamente para funcionar dentro de la estructura de API/JSON del sistema.
  */
 header('Content-Type: application/json');
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 set_time_limit(300);

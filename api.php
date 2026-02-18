@@ -15,7 +15,7 @@ use Kino\Api\SearchController;
 use Kino\Api\AiController;
 use Kino\Api\SystemController;
 
-session_start();
+require_once __DIR__ . '/helpers/session_init.php';
 
 // ✨ PREVENT HTML ERRORS IN JSON RESPONSE
 ini_set('display_errors', 0);

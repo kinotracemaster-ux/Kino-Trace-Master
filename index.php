@@ -8,7 +8,7 @@
  * - Consultar: List all documents
  * - Búsqueda por Código: Single code search
  */
-session_start();
+require_once __DIR__ . '/helpers/session_init.php';
 // Prevent browser caching
 header("Cache-Control: no-cache, no-store, must-revalidate"); // HTTP 1.1.
 header("Pragma: no-cache"); // HTTP 1.0.
