@@ -580,6 +580,19 @@
                 title: message
             });
         };
+        // === Pegado solo texto plano en todos los campos ===
+        document.addEventListener('paste', function (e) {
+            var tag = (e.target.tagName || '').toLowerCase();
+            var isEditable = e.target.isContentEditable;
+
+            if (tag === 'input' || tag === 'textarea' || isEditable) {
+                e.preventDefault();
+                var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+                if (text) {
+                    document.execCommand('insertText', false, text);
+                }
+            }
+        });
     });
 </script>
 
