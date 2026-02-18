@@ -20,8 +20,10 @@ class CsrfProtection
             require_once __DIR__ . '/session_init.php';
         }
 
+        session_reopen();
         $token = bin2hex(random_bytes(self::TOKEN_LENGTH));
         $_SESSION[self::TOKEN_NAME] = $token;
+        session_write_close();
 
         return $token;
     }

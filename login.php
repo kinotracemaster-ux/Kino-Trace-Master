@@ -40,12 +40,14 @@ $adminError = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret'])) {
     $secret = $_POST['admin_secret'] ?? '';
     if ($secret === ADMIN_SECRET) {
-        // Create admin session for panel access only
+        // Reabrir sesión para escritura
+        session_reopen();
         $_SESSION['client_code'] = 'admin';
         $_SESSION['is_admin'] = true;
         // SEGURIDAD: Fingerprint de sesión
         $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
         $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        session_write_close();
         header('Location: Admin-gestor/panel.php');
         exit;
     } else {
@@ -74,11 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
         if (!$row || !password_verify($password, $row['password_hash'])) {
             $error = 'Credenciales inválidas.';
         } else {
+            session_reopen();
             $_SESSION['client_code'] = $row['codigo'];
             $_SESSION['is_admin'] = ($row['codigo'] === 'admin');
             // SEGURIDAD: Fingerprint de sesión
             $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
             $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+            session_write_close();
             header('Location: index.php');
             exit;
         }

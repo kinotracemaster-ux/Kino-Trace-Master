@@ -36,5 +36,23 @@ session_set_cookie_params([
 
 session_start();
 
+// RENDIMIENTO: Liberar el bloqueo de sesión inmediatamente.
+// Esto permite que solicitudes concurrentes del mismo usuario
+// (múltiples pestañas, AJAX paralelo) NO se encolen esperando.
+// La sesión queda en modo LECTURA: $_SESSION es accesible pero read-only.
+session_write_close();
+
+/**
+ * Reabrir sesión para escritura.
+ * Usar SOLO en archivos que necesiten modificar $_SESSION (login, logout, etc.)
+ * Llamar justo antes de escribir y cerrar con session_write_close() al terminar.
+ */
+function session_reopen(): void
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+}
+
 // Limpiar variables temporales
 unset($_host, $_safeName, $_sessionName);
