@@ -20,7 +20,7 @@ require_once __DIR__ . '/../helpers/tenant.php';
 
 // Verify authentication
 if (!isset($_SESSION['client_code'])) {
-    header('Location: ../login.php');
+    header('Location: login.php');
     exit;
 }
 
