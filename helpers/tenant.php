@@ -498,3 +498,70 @@ function ensure_client_schema(PDO $db): void
         $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_destino ON vinculos(documento_destino_id)");
     }
 }
+
+/**
+ * Valida un código de cliente para endpoints PÚBLICOS (sin autenticación).
+ *
+ * 1. Sanitiza el código con sanitize_code().
+ * 2. Verifica que exista en control_clientes con activo = 1.
+ * 3. Si falla, retorna error JSON (para APIs) o muere con mensaje HTML.
+ *
+ * @param string $input Código de cliente recibido del usuario.
+ * @param bool $jsonMode Si true, responde con JSON; si false, con HTML.
+ * @return string Código sanitizado y validado.
+ */
+function validate_public_client(string $input, bool $jsonMode = false): string
+{
+    global $centralDb;
+
+    $code = sanitize_code(trim($input));
+
+    if (empty($code)) {
+        if ($jsonMode) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(400);
+            echo json_encode(['error' => 'Cliente no especificado']);
+            exit;
+        }
+        die('<div style="text-align:center; padding:50px; font-family:Arial;">
+            <h2>Error</h2>
+            <p>Debe especificar el cliente en la URL</p>
+        </div>');
+    }
+
+    // Validar contra base de datos central
+    if (isset($centralDb)) {
+        try {
+            $stmt = $centralDb->prepare('SELECT COUNT(*) FROM control_clientes WHERE codigo = ? AND activo = 1');
+            $stmt->execute([$code]);
+            $exists = (int) $stmt->fetchColumn() > 0;
+
+            if (!$exists) {
+                if ($jsonMode) {
+                    header('Content-Type: application/json; charset=utf-8');
+                    http_response_code(404);
+                    echo json_encode(['error' => 'Cliente no encontrado']);
+                    exit;
+                }
+                die('<div style="text-align:center; padding:50px; font-family:Arial;">
+                    <h2>Error</h2>
+                    <p>Cliente no encontrado</p>
+                </div>');
+            }
+        } catch (PDOException $e) {
+            // Si la BD falla, rechazar por seguridad
+            if ($jsonMode) {
+                header('Content-Type: application/json; charset=utf-8');
+                http_response_code(500);
+                echo json_encode(['error' => 'Error de validación']);
+                exit;
+            }
+            die('<div style="text-align:center; padding:50px; font-family:Arial;">
+                <h2>Error</h2>
+                <p>Error de validación del cliente</p>
+            </div>');
+        }
+    }
+
+    return $code;
+}

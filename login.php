@@ -42,6 +42,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret'])) {
         // Create admin session for panel access only
         $_SESSION['client_code'] = 'admin';
         $_SESSION['is_admin'] = true;
+        // SEGURIDAD: Fingerprint de sesión
+        $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
+        $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
         header('Location: admin/panel.php');
         exit;
     } else {
@@ -72,13 +75,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
         } else {
             $_SESSION['client_code'] = $row['codigo'];
             $_SESSION['is_admin'] = ($row['codigo'] === 'admin');
+            // SEGURIDAD: Fingerprint de sesión
+            $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
+            $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
             header('Location: index.php');
             exit;
         }
     }
 }
 
-$clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE activo = 1 ORDER BY nombre')->fetchAll(PDO::FETCH_ASSOC);
+// SEGURIDAD: Ya no se expone la lista completa de clientes
+// $clients se eliminó para evitar fuga de información
 ?>
 <!DOCTYPE html>
 <html lang="es">

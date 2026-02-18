@@ -16,27 +16,21 @@ require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/pdf_extractor.php';
 require_once __DIR__ . '/../../helpers/cache_manager.php';
 require_once __DIR__ . '/../../helpers/subdomain.php';
+require_once __DIR__ . '/../../autoload.php';
 
 header('Content-Type: application/json');
 
-// Validar cliente: primero por parámetro, luego por subdominio
-$clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
-if (empty($clientCode)) {
-    $clientCode = getClientFromSubdomain() ?? '';
-}
-if (empty($clientCode)) {
-    http_response_code(400);
-    echo json_encode(['success' => false, 'error' => 'Cliente no especificado']);
-    exit;
+// SEGURIDAD: Rate limiting en endpoint público
+if (class_exists('RateLimiter')) {
+    RateLimiter::middleware();
 }
 
-// Verificar que el cliente existe
-$clientDir = CLIENTS_DIR . "/{$clientCode}";
-if (!is_dir($clientDir)) {
-    http_response_code(404);
-    echo json_encode(['success' => false, 'error' => 'Cliente no encontrado']);
-    exit;
+// SEGURIDAD: Validar y sanitizar código de cliente
+$clientInput = isset($_GET['cliente']) ? $_GET['cliente'] : '';
+if (empty($clientInput)) {
+    $clientInput = getClientFromSubdomain() ?? '';
 }
+$clientCode = validate_public_client($clientInput, true);
 
 try {
     $documentId = isset($_GET['doc']) ? (int) $_GET['doc'] : 0;

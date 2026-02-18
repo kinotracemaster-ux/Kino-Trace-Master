@@ -10,27 +10,12 @@ require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/subdomain.php';
 
-// Obtener cliente: primero por parámetro, luego por subdominio
-$clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
-if (empty($clientCode)) {
-    $clientCode = getClientFromSubdomain() ?? '';
+// SEGURIDAD: Validar y sanitizar código de cliente
+$clientInput = isset($_GET['cliente']) ? $_GET['cliente'] : '';
+if (empty($clientInput)) {
+    $clientInput = getClientFromSubdomain() ?? '';
 }
-if (empty($clientCode)) {
-    die('<div style="text-align:center; padding:50px; font-family:Arial;">
-        <h2>Error</h2>
-        <p>Debe especificar el cliente en la URL</p>
-        <p>Ejemplo: ?cliente=KINO</p>
-    </div>');
-}
-
-// Verificar que el cliente existe
-$clientDir = CLIENTS_DIR . "/{$clientCode}";
-if (!is_dir($clientDir)) {
-    die('<div style="text-align:center; padding:50px; font-family:Arial;">
-        <h2>Error</h2>
-        <p>Cliente no encontrado</p>
-    </div>');
-}
+$clientCode = validate_public_client($clientInput, false);
 
 $db = open_client_db($clientCode);
 
