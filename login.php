@@ -46,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret'])) {
         // SEGURIDAD: Fingerprint de sesión
         $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
         $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        header('Location: admin/panel.php');
+        header('Location: Admin-gestor/panel.php');
         exit;
     } else {
         $adminError = 'Código incorrecto';

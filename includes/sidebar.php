@@ -169,7 +169,7 @@ $currentSection = $currentSection ?? 'voraz';
 
         <?php if (in_array($clientCode, ['kino', 'admin'])): ?>
             <!-- GESTOR DE CLIENTES - Solo para kino y admin -->
-            <a href="<?= $baseUrl ?? '' ?>admin/panel.php" class="nav-item"
+            <a href="<?= $baseUrl ?? '' ?>Admin-gestor/panel.php" class="nav-item"
                 style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                 <span class="nav-icon">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -634,7 +634,7 @@ $currentSection = $currentSection ?? 'voraz';
 
         backupSection.innerHTML = '<div class="loading"><div class="spinner"></div><p>Cargando backup...</p></div>';
 
-        fetch('admin/backup.php?partial=1')
+        fetch('Admin-gestor/backup.php?partial=1')
             .then(response => response.text())
             .then(html => {
                 backupSection.innerHTML = html;
@@ -645,7 +645,7 @@ $currentSection = $currentSection ?? 'voraz';
                     <div class="backup-hero">
                         <h1>💾 Respaldo de Datos</h1>
                         <p>Descarga una copia completa de seguridad.</p>
-                        <a href="admin/backup.php?download=1" class="btn btn-primary">
+                        <a href="Admin-gestor/backup.php?download=1" class="btn btn-primary">
                             Descargar Backup
                         </a>
                     </div>
