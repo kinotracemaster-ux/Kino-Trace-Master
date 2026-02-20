@@ -718,7 +718,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                             }
                         }
                     });
-                }, { root: null, rootMargin: '600px', threshold: 0.05 });
+                }, { root: null, rootMargin: '1200px', threshold: 0.05 });
 
                 document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
 
@@ -731,11 +731,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                 const p1 = document.getElementById('page-1');
                 if (p1) { renderPage(1, p1); p1.dataset.rendered = 'true'; }
 
-                // INICIAR RADAR (Búsqueda silenciosa) CON RETRASO
-                // Dar tiempo a que el navegador respire tras cargar el PDF y primera página
+                // INICIAR RADAR (Búsqueda silenciosa) CON RETRASO MÍNIMO
+                // 400ms: suficiente para que la 1ra página sea visible, luego escanear
                 setTimeout(() => {
                     scanAllPagesForSummary();
-                }, 1500);
+                }, 400);
 
             } catch (err) {
                 console.error("Error loadPDF:", err);
@@ -805,8 +805,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 statusDiv.innerHTML = html;
             }
 
-            // ESCANEO PROGRESIVO: Escanea y resalta en lotes paralelos (Velocidad x4)
-            console.log(`Iniciando escaneo de ${totalPages} páginas (Concurrencia: 4)...`);
+            // ESCANEO PROGRESIVO: Escanea y resalta en lotes paralelos (Velocidad x6)
+            console.log(`Iniciando escaneo de ${totalPages} páginas (Concurrencia: 6)...`);
 
             // Función individual para procesar una página
             const processPage = async (i) => {
@@ -868,8 +868,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             };
 
-            // Procesar en lotes de 4 (Parallel Batching - optimizado tras reducir carga OCR)
-            const BATCH_SIZE = 4;
+            // Procesar en lotes de 6 (Parallel Batching - máxima concurrencia sin saturar servidor)
+            const BATCH_SIZE = 6;
             for (let i = 1; i <= totalPages; i += BATCH_SIZE) {
                 const batch = [];
                 for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
@@ -879,8 +879,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 // Esperar a que todo el lote termine antes de lanzar el siguiente
                 await Promise.all(batch);
 
-                // Pausa breve para no bloquear UI
-                await new Promise(r => setTimeout(r, 50));
+                // Micro-pausa para no congelar UI
+                await new Promise(r => setTimeout(r, 10));
             }
 
             console.log(`✓ Escaneo completado. Total: ${totalPages} páginas, Coincidencias: ${pagesWithMatches.length}`);
