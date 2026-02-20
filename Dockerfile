@@ -16,10 +16,19 @@ RUN docker-php-ext-install pdo pdo_sqlite zip
 RUN echo "upload_max_filesize = 500M" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "post_max_size = 500M" >> /usr/local/etc/php/conf.d/uploads.ini \
     && echo "max_execution_time = 600" >> /usr/local/etc/php/conf.d/uploads.ini \
-    && echo "memory_limit = 512M" >> /usr/local/etc/php/conf.d/uploads.ini
+    && echo "memory_limit = 256M" >> /usr/local/etc/php/conf.d/uploads.ini
 
 # Habilitar mod_rewrite de Apache y FIX para MPM conflict
 RUN a2dismod mpm_event && a2enmod mpm_prefork && a2enmod rewrite
+
+# Limitar workers de Apache para no saturar Railway
+RUN echo "<IfModule mpm_prefork_module>\n\
+    StartServers 3\n\
+    MinSpareServers 2\n\
+    MaxSpareServers 5\n\
+    MaxRequestWorkers 25\n\
+    MaxConnectionsPerChild 200\n\
+    </IfModule>" >> /etc/apache2/apache2.conf
 
 # Copiar archivos de la aplicación
 COPY . /var/www/html/

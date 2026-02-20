@@ -682,6 +682,56 @@ $docIdForOcr = $documentId; // For OCR fallback
         // LOCK: Páginas actualmente en proceso de renderizado (evitar duplicados)
         const pagesBeingRendered = new Set();
 
+        // ============================================
+        // OPTIMIZACIÓN v2: Sistema centralizado de fetch OCR
+        // ============================================
+        const ocrFetchPromises = new Map(); // Promesas en curso (evita duplicados)
+        const ocrAbortController = new AbortController(); // Para cancelar al salir
+        let radarComplete = false; // Flag: radar terminó de escanear
+
+        // Única puerta de entrada para obtener datos OCR de una página
+        async function getOcrForPage(pageNum) {
+            // 1. Cache hit → retorno inmediato
+            if (ocrResultsCache.has(pageNum)) {
+                console.log(`OCR página ${pageNum}: cache hit`);
+                return ocrResultsCache.get(pageNum);
+            }
+            // 2. Fetch ya en curso → esperar la promesa existente
+            if (ocrFetchPromises.has(pageNum)) {
+                console.log(`OCR página ${pageNum}: esperando fetch en curso`);
+                return ocrFetchPromises.get(pageNum);
+            }
+            // 3. Nuevo fetch (con signal para poder abortar)
+            const allTerms = [...hits, ...context];
+            const termsStr = encodeURIComponent(allTerms.join(','));
+            const fileFallback = docIdForOcr === 0 && fileForOcr
+                ? `&file=${encodeURIComponent(fileForOcr)}` : '';
+            console.log(`OCR página ${pageNum}: nuevo fetch`);
+            const promise = fetch(
+                `ocr_text.php?doc=${docIdForOcr}&page=${pageNum}&terms=${termsStr}${fileFallback}`,
+                { signal: ocrAbortController.signal }
+            )
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) ocrResultsCache.set(pageNum, result);
+                    ocrFetchPromises.delete(pageNum);
+                    return result;
+                })
+                .catch(e => {
+                    ocrFetchPromises.delete(pageNum);
+                    if (e.name === 'AbortError') return null; // Silenciar abortos
+                    throw e;
+                });
+            ocrFetchPromises.set(pageNum, promise);
+            return promise;
+        }
+
+        // Cancelar TODAS las peticiones OCR al salir de la página
+        window.addEventListener('beforeunload', () => {
+            ocrAbortController.abort();
+        });
+        // ============================================
+
         // --- VORAZ NAV ---
         let vorazData = JSON.parse(sessionStorage.getItem('voraz_viewer_data') || 'null');
         let currentDocIndex = vorazData ? (vorazData.currentIndex || 0) : 0;
@@ -818,20 +868,9 @@ $docIdForOcr = $documentId; // For OCR fallback
             const processPage = async (i) => {
                 updateStatus(i);
                 try {
-                    let ocrResult;
-                    // OPTIMIZACIÓN: Usar cache si ya existe (ej: renderizado manual previo)
-                    if (ocrResultsCache.has(i)) {
-                        ocrResult = ocrResultsCache.get(i);
-                    } else {
-                        const termsStr = encodeURIComponent(termsToFind.join(','));
-                        const fileFallback = docIdForOcr === 0 && fileForOcr ? `&file=${encodeURIComponent(fileForOcr)}` : '';
-                        const ocrResp = await fetch(`ocr_text.php?doc=${docIdForOcr}&page=${i}&terms=${termsStr}${fileFallback}`);
-                        ocrResult = await ocrResp.json();
-
-                        if (ocrResult.success) {
-                            ocrResultsCache.set(i, ocrResult);
-                        }
-                    }
+                    // OPTIMIZACIÓN v2: Usar función centralizada (evita duplicados)
+                    const ocrResult = await getOcrForPage(i);
+                    if (!ocrResult) continue; // Abortado
 
                     // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
                     if (ocrResult.success && ocrResult.match_count > 0) {
@@ -893,6 +932,7 @@ $docIdForOcr = $documentId; // For OCR fallback
 
             // Resultado final
             updateStatus(totalPages, true);
+            radarComplete = true;
         }
 
         // --- RENDERIZADO VISUAL ---
@@ -985,21 +1025,9 @@ $docIdForOcr = $documentId; // For OCR fallback
         // OCR Highlight: dibuja rectángulos de resaltado usando datos OCR (cache o servidor)
         async function applyOcrHighlight(wrapper, textDiv, pageNum, allTerms) {
             try {
-                // OPTIMIZACIÓN: Usar cache si existe para evitar petición duplicada
-                let result;
-                if (ocrResultsCache.has(pageNum)) {
-                    result = ocrResultsCache.get(pageNum);
-                    console.log(`OCR página ${pageNum}: usando cache`);
-                } else {
-                    const termsStr = encodeURIComponent(allTerms.join(','));
-                    const fileFallback = docIdForOcr === 0 && fileForOcr ? `&file=${encodeURIComponent(fileForOcr)}` : '';
-                    const response = await fetch(`ocr_text.php?doc=${docIdForOcr}&page=${pageNum}&terms=${termsStr}${fileFallback}`);
-                    result = await response.json();
-                    // Guardar en cache
-                    if (result.success) {
-                        ocrResultsCache.set(pageNum, result);
-                    }
-                }
+                // OPTIMIZACIÓN v2: Usar función centralizada (evita duplicados y race conditions)
+                const result = await getOcrForPage(pageNum);
+                if (!result) return; // Abortado
 
                 if (result.success && result.matches && result.matches.length > 0) {
                     // Mostrar badge pequeño con resultado
@@ -1155,17 +1183,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                         ctx.fillStyle = '#558c2d'; // Verde amarillento
 
                         try {
-                            // M2: Usar cache del cliente si el radar ya escaneó esta página
-                            let ocrResult;
-                            if (ocrResultsCache.has(pageNum)) {
-                                ocrResult = ocrResultsCache.get(pageNum);
-                                console.log(`Print página ${pageNum}: usando cache (sin HTTP)`);
-                            } else {
-                                const docId = <?= $docIdForOcr ?>;
-                                const termsStr = encodeURIComponent(allTerms.join(','));
-                                const ocrResp = await fetch(`ocr_text.php?doc=${docId}&page=${pageNum}&terms=${termsStr}`);
-                                ocrResult = await ocrResp.json();
-                            }
+                            // OPTIMIZACIÓN v2: Usar función centralizada (reutiliza cache del radar)
+                            const ocrResult = await getOcrForPage(pageNum);
 
                             if (ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
                                 const scaleX = tempCanvas.width / ocrResult.image_width;

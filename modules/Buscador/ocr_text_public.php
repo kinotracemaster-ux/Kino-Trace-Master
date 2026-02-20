@@ -19,6 +19,10 @@ require_once __DIR__ . '/../../helpers/subdomain.php';
 
 header('Content-Type: application/json');
 
+// PROTECCIÓN: Rate limiter para endpoint público (más restrictivo)
+require_once __DIR__ . '/../../helpers/rate_limiter.php';
+RateLimiter::middleware();
+
 // Validar cliente: primero por parámetro, luego por subdominio
 $clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
 if (empty($clientCode)) {
@@ -50,8 +54,8 @@ try {
         exit;
     }
 
-    // Verificar cache
-    $cacheKey = "ocr_v4_doc{$documentId}_p{$pageNum}";
+    // Verificar cache (v5 = sincronizado con ocr_text.php privado)
+    $cacheKey = "ocr_v5_doc{$documentId}_p{$pageNum}";
     $cachedOcr = CacheManager::get($clientCode, $cacheKey);
 
     if ($cachedOcr && !empty($cachedOcr['words'])) {
@@ -101,7 +105,37 @@ try {
 
     // Ejecutar OCR
     if (function_exists('extract_with_ocr_coordinates')) {
-        $ocrResult = extract_with_ocr_coordinates($pdfPath, $pageNum);
+        // SEMÁFORO DE CONCURRENCIA: Máx 3 procesos OCR simultáneos
+        $lockDir = sys_get_temp_dir();
+        $lockAcquired = false;
+        $lockHandle = null;
+        for ($slot = 0; $slot < 3; $slot++) {
+            $lockFile = $lockDir . "/ocr_slot_{$slot}.lock";
+            $lockHandle = @fopen($lockFile, 'c');
+            if ($lockHandle && flock($lockHandle, LOCK_EX | LOCK_NB)) {
+                $lockAcquired = true;
+                break;
+            }
+            if ($lockHandle)
+                fclose($lockHandle);
+        }
+        if (!$lockAcquired) {
+            $lockFile = $lockDir . '/ocr_slot_0.lock';
+            $lockHandle = @fopen($lockFile, 'c');
+            if (!$lockHandle || !flock($lockHandle, LOCK_EX)) {
+                echo json_encode(['success' => false, 'error' => 'Servidor OCR ocupado']);
+                exit;
+            }
+            $lockAcquired = true;
+        }
+        try {
+            $ocrResult = extract_with_ocr_coordinates($pdfPath, $pageNum);
+        } finally {
+            if ($lockHandle) {
+                flock($lockHandle, LOCK_UN);
+                fclose($lockHandle);
+            }
+        }
 
         if ($ocrResult['success'] && !empty($ocrResult['words'])) {
             CacheManager::set($clientCode, $cacheKey, [

@@ -31,6 +31,10 @@ $clientCode = $_SESSION['client_code'];
 // LIBERAR LOCK DE SESIÓN: Permitir peticiones concurrentes (OCR paralelo)
 session_write_close();
 
+// PROTECCIÓN: Rate limiter para evitar abuso (100 req/min por IP)
+require_once __DIR__ . '/../../helpers/rate_limiter.php';
+RateLimiter::middleware();
+
 try {
     $documentId = isset($_GET['doc']) ? (int) $_GET['doc'] : 0;
     $filePath = isset($_GET['file']) ? $_GET['file'] : '';
@@ -117,7 +121,40 @@ try {
 
     // Usar nueva función con coordenadas
     if (function_exists('extract_with_ocr_coordinates')) {
-        $ocrResult = extract_with_ocr_coordinates($pdfPath, $pageNum);
+        // SEMÁFORO DE CONCURRENCIA: Máx 3 procesos OCR simultáneos
+        $lockDir = sys_get_temp_dir();
+        $lockAcquired = false;
+        $lockHandle = null;
+        for ($slot = 0; $slot < 3; $slot++) {
+            $lockFile = $lockDir . "/ocr_slot_{$slot}.lock";
+            $lockHandle = @fopen($lockFile, 'c');
+            if ($lockHandle && flock($lockHandle, LOCK_EX | LOCK_NB)) {
+                $lockAcquired = true;
+                break;
+            }
+            if ($lockHandle)
+                fclose($lockHandle);
+        }
+        // Si no hay slot libre, esperar uno (máx 30s)
+        if (!$lockAcquired) {
+            $lockFile = $lockDir . '/ocr_slot_0.lock';
+            $lockHandle = @fopen($lockFile, 'c');
+            if (!$lockHandle || !flock($lockHandle, LOCK_EX)) {
+                echo json_encode(['success' => false, 'error' => 'Servidor OCR ocupado, intenta en unos segundos']);
+                exit;
+            }
+            $lockAcquired = true;
+        }
+
+        try {
+            $ocrResult = extract_with_ocr_coordinates($pdfPath, $pageNum);
+        } finally {
+            // Liberar slot siempre
+            if ($lockHandle) {
+                flock($lockHandle, LOCK_UN);
+                fclose($lockHandle);
+            }
+        }
 
         // ============================================
         // OPTIMIZACIÓN: Guardar resultado en cache (7 días)
@@ -139,8 +176,13 @@ try {
 
 
     if (!$ocrResult['success'] || empty($ocrResult['words'])) {
-        // OCR falló o no hay palabras - intentar extracción simple
-        $text = $ocrResult['text'] ?? extract_text_from_pdf($pdfPath);
+        // Reutilizar texto que OCR ya extrajo (si existe), evitando doble extracción
+        $text = !empty($ocrResult['text']) ? $ocrResult['text'] : '';
+
+        // Solo intentar extracción completa si OCR no devolvió nada de texto
+        if (empty(trim($text))) {
+            $text = extract_text_from_pdf($pdfPath);
+        }
 
         if (empty(trim($text))) {
             echo json_encode([
