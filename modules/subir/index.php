@@ -6,7 +6,7 @@
  * personalizables (prefijo/terminador) como en la aplicación anterior.
  * soporta MODO EDICIÓN.
  */
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/pdf_extractor.php';
@@ -32,7 +32,9 @@ $error = '';
 // Leer mensaje de éxito de sesión (flash message)
 if (isset($_SESSION['upload_success'])) {
     $message = $_SESSION['upload_success'];
+    session_reopen();
     unset($_SESSION['upload_success']);
+    session_write_close();
 }
 
 // --- MODO EDICIÓN: Cargar datos si existe parámetro 'edit' ---
@@ -263,7 +265,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Guardar mensaje en sesión y redirigir (patrón POST-Redirect-GET)
             $successMsg = ($action === 'save' ? "✅ Documento creado" : "✅ Documento actualizado") . " exitosamente. Procesando códigos en segundo plano...";
+            session_reopen();
             $_SESSION['upload_success'] = $successMsg;
+            session_write_close();
 
             // Redirigir para limpiar estado del formulario
             if ($action === 'save') {

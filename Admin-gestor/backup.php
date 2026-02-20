@@ -14,13 +14,13 @@ set_time_limit(0);              // Evita el error "Maximum execution time exceed
 ini_set('memory_limit', '1024M'); // Aumenta RAM a 1GB para procesar ZIPs grandes
 ini_set('max_execution_time', 0); // Refuerzo para servidores estrictos
 
-session_start();
+require_once __DIR__ . '/../helpers/session_init.php';
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/tenant.php';
 
 // Verify authentication
 if (!isset($_SESSION['client_code'])) {
-    header('Location: ../login.php');
+    header('Location: login.php');
     exit;
 }
 
@@ -193,7 +193,7 @@ if (isset($_GET['partial']) && $_GET['partial'] === '1') {
             </div>
         </div>
 
-        <a href="admin/backup.php?download=1" class="backup-btn">
+        <a href="Admin-gestor/backup.php?download=1" class="backup-btn">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

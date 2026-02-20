@@ -18,24 +18,33 @@ require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/pdf_extractor.php';
 
-// Validar entrada
-$clientCode = $_POST['client_code'] ?? '';
-$docId = (int) ($_POST['doc_id'] ?? 0);
-$token = $_POST['token'] ?? '';
+// SEGURIDAD: Priorizar sesión sobre POST para evitar manipulación
+if (session_status() === PHP_SESSION_NONE) {
+    require_once __DIR__ . '/../../helpers/session_init.php';
+}
 
-// Token de seguridad simple (podría mejorarse)
-$internalToken = md5($clientCode . 'kino_async_' . date('Y-m-d'));
+$docId = (int) ($_POST['doc_id'] ?? 0);
+
+// Determinar client_code: primero desde sesión, luego POST con token obligatorio
+if (isset($_SESSION['client_code']) && !empty($_SESSION['client_code'])) {
+    $clientCode = $_SESSION['client_code'];
+} else {
+    // Fallback para llamadas asíncronas sin sesión: exigir token
+    $clientCode = $_POST['client_code'] ?? '';
+    $token = $_POST['token'] ?? '';
+    $internalToken = md5($clientCode . 'kino_async_' . date('Y-m-d'));
+
+    if (empty($clientCode) || $token !== $internalToken) {
+        die("Unauthorized Access");
+    }
+}
+
+// Sanitizar código
+$clientCode = preg_replace('/[^a-z0-9_]+/i', '', strtolower($clientCode));
 
 if (empty($clientCode) || $docId <= 0) {
     die("Invalid parameters");
 }
-
-/* 
-// Validación de token opcional para seguridad extra
-if ($token !== $internalToken) {
-    die("Unauthorized Access");
-} 
-*/
 
 try {
     // 1. Conectar a BD Cliente

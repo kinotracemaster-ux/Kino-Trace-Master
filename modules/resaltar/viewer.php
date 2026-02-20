@@ -8,7 +8,7 @@
  * - Editable Search List.
  */
 
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 
@@ -262,36 +262,30 @@ $docIdForOcr = $documentId; // For OCR fallback
             animation: highlightFadeIn 0.25s ease-out;
         }
 
-        /* Colores distintos por término (data-term-index) */
+        /* Colores distintos por término — OPTIMIZADO: mayor opacidad, sin bordes */
         .ocr-highlight[data-term-index="0"] {
-            background: linear-gradient(180deg, rgba(85, 140, 45, 0.40) 0%, rgba(85, 140, 45, 0.25) 100%) !important;
-            box-shadow: 0 0 0 1px rgba(85, 140, 45, 0.3);
+            background: linear-gradient(180deg, rgba(85, 140, 45, 0.55) 0%, rgba(85, 140, 45, 0.40) 100%) !important;
         }
 
         .ocr-highlight[data-term-index="1"] {
-            background: linear-gradient(180deg, rgba(33, 150, 243, 0.40) 0%, rgba(33, 150, 243, 0.25) 100%) !important;
-            box-shadow: 0 0 0 1px rgba(33, 150, 243, 0.3);
+            background: linear-gradient(180deg, rgba(33, 150, 243, 0.55) 0%, rgba(33, 150, 243, 0.40) 100%) !important;
         }
 
         .ocr-highlight[data-term-index="2"] {
-            background: linear-gradient(180deg, rgba(255, 152, 0, 0.40) 0%, rgba(255, 152, 0, 0.25) 100%) !important;
-            box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.3);
+            background: linear-gradient(180deg, rgba(255, 152, 0, 0.55) 0%, rgba(255, 152, 0, 0.40) 100%) !important;
         }
 
         .ocr-highlight[data-term-index="3"] {
-            background: linear-gradient(180deg, rgba(156, 39, 176, 0.40) 0%, rgba(156, 39, 176, 0.25) 100%) !important;
-            box-shadow: 0 0 0 1px rgba(156, 39, 176, 0.3);
+            background: linear-gradient(180deg, rgba(156, 39, 176, 0.55) 0%, rgba(156, 39, 176, 0.40) 100%) !important;
         }
 
         .ocr-highlight[data-term-index="4"] {
-            background: linear-gradient(180deg, rgba(244, 67, 54, 0.40) 0%, rgba(244, 67, 54, 0.25) 100%) !important;
-            box-shadow: 0 0 0 1px rgba(244, 67, 54, 0.3);
+            background: linear-gradient(180deg, rgba(244, 67, 54, 0.55) 0%, rgba(244, 67, 54, 0.40) 100%) !important;
         }
 
         /* Fallback para índice >= 5 */
         .ocr-highlight:not([data-term-index]) {
-            background: linear-gradient(180deg, rgba(85, 140, 45, 0.35) 0%, rgba(85, 140, 45, 0.20) 100%) !important;
-            box-shadow: 0 0 0 1px rgba(85, 140, 45, 0.25);
+            background: linear-gradient(180deg, rgba(85, 140, 45, 0.50) 0%, rgba(85, 140, 45, 0.35) 100%) !important;
         }
 
         @keyframes highlightFadeIn {
@@ -774,7 +768,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                             }
                         }
                     });
-                }, { root: null, rootMargin: '600px', threshold: 0.05 });
+                }, { root: null, rootMargin: '1200px', threshold: 0.05 });
 
                 document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
 
@@ -787,11 +781,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                 const p1 = document.getElementById('page-1');
                 if (p1) { renderPage(1, p1); p1.dataset.rendered = 'true'; }
 
-                // INICIAR RADAR (Búsqueda silenciosa) CON RETRASO
-                // Dar tiempo a que el navegador respire tras cargar el PDF y primera página
+                // INICIAR RADAR (Búsqueda silenciosa) CON RETRASO MÍNIMO
+                // 400ms: suficiente para que la 1ra página sea visible, luego escanear
                 setTimeout(() => {
                     scanAllPagesForSummary();
-                }, 1500);
+                }, 400);
 
             } catch (err) {
                 console.error("Error loadPDF:", err);
@@ -861,8 +855,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 statusDiv.innerHTML = html;
             }
 
-            // ESCANEO PROGRESIVO: Escanea y resalta en lotes paralelos (Velocidad x4)
-            console.log(`Iniciando escaneo de ${totalPages} páginas (Concurrencia: 4)...`);
+            // ESCANEO PROGRESIVO: Escanea y resalta en lotes paralelos (Velocidad x6)
+            console.log(`Iniciando escaneo de ${totalPages} páginas (Concurrencia: 6)...`);
 
             // Función individual para procesar una página
             const processPage = async (i) => {
@@ -913,8 +907,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             };
 
-            // Procesar en lotes de 4 (Parallel Batching - optimizado tras reducir carga OCR)
-            const BATCH_SIZE = 4;
+            // Procesar en lotes de 6 (Parallel Batching - máxima concurrencia sin saturar servidor)
+            const BATCH_SIZE = 6;
             for (let i = 1; i <= totalPages; i += BATCH_SIZE) {
                 const batch = [];
                 for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
@@ -924,8 +918,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 // Esperar a que todo el lote termine antes de lanzar el siguiente
                 await Promise.all(batch);
 
-                // Pausa breve para no bloquear UI
-                await new Promise(r => setTimeout(r, 50));
+                // Micro-pausa para no congelar UI
+                await new Promise(r => setTimeout(r, 10));
             }
 
             console.log(`✓ Escaneo completado. Total: ${totalPages} páginas, Coincidencias: ${pagesWithMatches.length}`);
@@ -1082,8 +1076,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                             for (let i = 0; i < highlights.length; i++) {
                                 const hl = highlights[i];
                                 // Padding dinámico proporcional al alto de la palabra
-                                const padX = hl.h * 0.05; // 5% del alto
-                                const padY = hl.h * 0.10; // 10% del alto
+                                const padX = Math.max(hl.h * 0.15, 2); // 15% del alto, mín 2px
+                                const padY = Math.max(hl.h * 0.20, 2); // 20% del alto, mín 2px
 
                                 const termIdx = termIndexMap.get((hl.term || '').toLowerCase()) ?? 0;
 
@@ -1101,13 +1095,17 @@ $docIdForOcr = $documentId; // For OCR fallback
                                 rect.title = hl.term;
                                 overlay.appendChild(rect);
 
-                                // Efecto progresivo: cada highlight aparece con delay escalonado
+                                // Efecto progresivo: aparición rápida (>30 = instantáneo)
                                 ((el, delay) => {
-                                    setTimeout(() => {
+                                    if (delay === 0) {
                                         el.style.opacity = '1';
-                                        el.style.animation = 'highlightFadeIn 0.3s ease-out';
-                                    }, delay);
-                                })(rect, i * 60); // 60ms entre cada highlight
+                                    } else {
+                                        setTimeout(() => {
+                                            el.style.opacity = '1';
+                                            el.style.animation = 'highlightFadeIn 0.2s ease-out';
+                                        }, delay);
+                                    }
+                                })(rect, highlights.length > 30 ? 0 : i * 15); // 15ms, instantáneo si >30
                             }
 
                             wrapper.appendChild(overlay);
@@ -1179,7 +1177,7 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                     // Dibujar resaltados OCR sobre el canvas de impresión
                     if (allTerms.length > 0) {
-                        ctx.globalAlpha = 0.3; // Más transparente para impresión
+                        ctx.globalAlpha = 0.45; // Opacidad óptima para impresión
                         ctx.fillStyle = '#558c2d'; // Verde amarillento
 
                         try {

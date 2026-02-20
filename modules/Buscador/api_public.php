@@ -19,22 +19,19 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/subdomain.php';
+require_once __DIR__ . '/../../autoload.php';
 
-$clientCode = isset($_GET['cliente']) ? trim($_GET['cliente']) : '';
-if (empty($clientCode)) {
-    $clientCode = getClientFromSubdomain() ?? '';
-}
-if (empty($clientCode)) {
-    echo json_encode(['error' => 'Cliente no especificado']);
-    exit;
+// SEGURIDAD: Rate limiting en endpoint público
+if (class_exists('RateLimiter')) {
+    RateLimiter::middleware();
 }
 
-// Verify client exists
-$clientDir = CLIENTS_DIR . "/{$clientCode}";
-if (!is_dir($clientDir)) {
-    echo json_encode(['error' => 'Cliente no encontrado']);
-    exit;
+// SEGURIDAD: Validar y sanitizar código de cliente
+$clientInput = isset($_GET['cliente']) ? $_GET['cliente'] : '';
+if (empty($clientInput)) {
+    $clientInput = getClientFromSubdomain() ?? '';
 }
+$clientCode = validate_public_client($clientInput, true);
 
 try {
     $db = open_client_db($clientCode);

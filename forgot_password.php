@@ -5,7 +5,7 @@
  * Allows clients to request a password reset link via email.
  * Protegido con CSRF y rate limiting.
  */
-session_start();
+require_once __DIR__ . '/helpers/session_init.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/autoload.php';
 require_once __DIR__ . '/helpers/mailer.php';
@@ -23,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Rate limiting: máximo 5 solicitudes por IP por hora
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
         $rlKey = 'forgot_pw_' . md5($ip);
+        session_reopen();
         if (!isset($_SESSION[$rlKey])) {
             $_SESSION[$rlKey] = ['count' => 0, 'reset_at' => time() + 3600];
         }
@@ -30,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$rlKey] = ['count' => 0, 'reset_at' => time() + 3600];
         }
         $_SESSION[$rlKey]['count']++;
+        session_write_close();
 
         if ($_SESSION[$rlKey]['count'] > 5) {
             $error = 'Demasiados intentos. Intente de nuevo en 1 hora.';

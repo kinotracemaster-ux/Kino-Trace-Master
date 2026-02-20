@@ -12,7 +12,7 @@
  * - Muestra reporte de sincronización
  */
 
-session_start();
+require_once __DIR__ . '/../../helpers/session_init.php';
 require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 
@@ -205,8 +205,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Guardar en sesión para la sincronización
+            session_reopen();
             $_SESSION['sync_results'] = $results;
             $_SESSION['sync_kino_data'] = $kinoData;
+            session_write_close();
         }
     }
 
@@ -321,7 +323,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
 
                 // Limpiar sesión
+                session_reopen();
                 unset($_SESSION['sync_results'], $_SESSION['sync_kino_data']);
+                session_write_close();
 
             } catch (Exception $e) {
                 $db->rollBack();

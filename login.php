@@ -5,7 +5,8 @@
  * Authentication page with modern minimalist design.
  * Includes hidden admin access with special password.
  */
-session_start();
+// SEGURIDAD: Iniciar sesión aislada por subdominio (via auth.php)
+require_once __DIR__ . '/helpers/auth.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers/tenant.php';
 require_once __DIR__ . '/helpers/subdomain.php';
@@ -39,10 +40,15 @@ $adminError = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret'])) {
     $secret = $_POST['admin_secret'] ?? '';
     if ($secret === ADMIN_SECRET) {
-        // Create admin session for panel access only
+        // Reabrir sesión para escritura
+        session_reopen();
         $_SESSION['client_code'] = 'admin';
         $_SESSION['is_admin'] = true;
-        header('Location: admin/panel.php');
+        // SEGURIDAD: Fingerprint de sesión
+        $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
+        $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        session_write_close();
+        header('Location: Admin-gestor/panel.php');
         exit;
     } else {
         $adminError = 'Código incorrecto';
@@ -70,15 +76,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
         if (!$row || !password_verify($password, $row['password_hash'])) {
             $error = 'Credenciales inválidas.';
         } else {
+            session_reopen();
             $_SESSION['client_code'] = $row['codigo'];
             $_SESSION['is_admin'] = ($row['codigo'] === 'admin');
+            // SEGURIDAD: Fingerprint de sesión
+            $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
+            $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
+            session_write_close();
             header('Location: index.php');
             exit;
         }
     }
 }
 
-$clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE activo = 1 ORDER BY nombre')->fetchAll(PDO::FETCH_ASSOC);
+// SEGURIDAD: Ya no se expone la lista completa de clientes
+// $clients se eliminó para evitar fuga de información
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -277,8 +289,7 @@ $clients = $centralDb->query('SELECT codigo, nombre FROM control_clientes WHERE 
         });
 
         // Show modal if there was an error or admin subdomain
-        <?php if ($adminError || !empty($showAdminModal)): ?>
-            openAdminModal();
+        <?php if ($adminError || !empty($showAdminModal)): ?>         openAdminModal();
         <?php endif; ?>
     </script>
 </body>

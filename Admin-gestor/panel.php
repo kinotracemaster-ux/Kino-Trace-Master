@@ -11,7 +11,7 @@
  * - Eliminar cliente
  */
 
-session_start();
+require_once __DIR__ . '/../helpers/session_init.php';
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/tenant.php';
 require_once __DIR__ . '/../helpers/subdomain.php';
@@ -24,14 +24,14 @@ if ($sub !== null && $sub !== 'admin') {
     die('<div style="text-align:center; padding:50px; font-family:Arial;">
         <h2>⛔ Acceso Denegado</h2>
         <p>El panel de administración no está disponible desde este subdominio.</p>
-        <a href="//kino-trace.com/admin/panel.php">Ir al panel admin</a>
+        <a href="//kino-trace.com/Admin-gestor/panel.php">Ir al panel admin</a>
     </div>');
 }
 
 // Verificar que el usuario sea administrador (admin o kino)
 $allowedAdminUsers = ['admin', 'kino'];
 if (!isset($_SESSION['client_code']) || !in_array($_SESSION['client_code'], $allowedAdminUsers)) {
-    header('Location: ../login.php');
+    header('Location: login.php');
     exit;
 }
 
@@ -1796,7 +1796,7 @@ $clientCodes = array_column($clients, 'codigo');
     <script>
         async function openPublicPageModal(code) {
             document.getElementById('ppCode').value = code;
-            const baseUrl = window.location.origin + window.location.pathname.replace('/admin/panel.php', '');
+            const baseUrl = window.location.origin + window.location.pathname.replace('/Admin-gestor/panel.php', '');
             document.getElementById('ppLinkInfo').innerHTML =
                 '🔗 Enlace público: <a href="' + baseUrl + '/modules/Buscador/?cliente=' + code + '" target="_blank" style="color:var(--accent-primary);">' + baseUrl + '/modules/Buscador/?cliente=' + code + '</a>';
 
