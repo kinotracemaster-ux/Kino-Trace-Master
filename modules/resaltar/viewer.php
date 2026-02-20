@@ -864,7 +864,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                 try {
                     // OPTIMIZACIÓN v2: Usar función centralizada (evita duplicados)
                     const ocrResult = await getOcrForPage(i);
-                    if (!ocrResult) continue; // Abortado
+                    if (!ocrResult) return; // Abortado (return, no continue — estamos en arrow function)
 
                     // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
                     if (ocrResult.success && ocrResult.match_count > 0) {
@@ -1184,7 +1184,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                             // OPTIMIZACIÓN v2: Usar función centralizada (reutiliza cache del radar)
                             const ocrResult = await getOcrForPage(pageNum);
 
-                            if (ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
+                            if (ocrResult && ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
                                 const scaleX = tempCanvas.width / ocrResult.image_width;
                                 const scaleY = tempCanvas.height / ocrResult.image_height;
 
