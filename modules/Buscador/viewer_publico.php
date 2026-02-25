@@ -191,7 +191,7 @@ if (!empty($searchTerm)) {
             overflow: hidden;
             opacity: 1;
             line-height: 1;
-            mix-blend-mode: multiply;
+            /* NO mix-blend-mode aquí — causaba overlay oscuro sobre todo el canvas */
         }
 
         .text-layer span {
@@ -201,14 +201,14 @@ if (!empty($searchTerm)) {
             cursor: text;
         }
 
-        /* Resaltado verde */
+        /* Resaltado verde — mix-blend-mode solo en el mark, no en el layer entero */
         .text-layer mark {
             padding: 0;
             margin: 0;
-            border-radius: 0;
+            border-radius: 2px;
             color: transparent;
             mix-blend-mode: multiply;
-            background-color: rgba(22, 101, 52, 0.55) !important;
+            background-color: rgba(22, 163, 74, 0.60) !important;
         }
 
         .page-number {
@@ -293,6 +293,16 @@ if (!empty($searchTerm)) {
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
+
+            .ocr-hl-overlay div {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+        }
+
+        @keyframes hlFadeIn {
+            from { opacity: 0; transform: scaleY(0.8); }
+            to   { opacity: 1; transform: scaleY(1); }
         }
     </style>
 </head>
@@ -381,8 +391,18 @@ if (!empty($searchTerm)) {
 
                 document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
 
+                // Renderizar primera página y luego resaltar automáticamente
                 const p1 = document.getElementById('pub-page-1');
-                if (p1) { renderPage(1, p1); p1.dataset.rendered = 'true'; }
+                if (p1) {
+                    await renderPage(1, p1);
+                    p1.dataset.rendered = 'true';
+                }
+
+                // AUTO-HIGHLIGHT: lanzar resaltado automáticamente si hay términos
+                if (termsToHighlight.length > 0) {
+                    // Pequeña pausa para asegurar que el text-layer esté listo
+                    setTimeout(() => highlightCode(), 600);
+                }
 
             } catch (err) {
                 console.error("Error:", err);
@@ -449,25 +469,23 @@ if (!empty($searchTerm)) {
             }
         }
 
-        // RESALTAR CÓDIGO: busca página por página, resalta solo el primero
+        // RESALTAR CÓDIGO: recorre TODAS las páginas resaltando en text-layer o con OCR
         async function highlightCode() {
             if (!pdfDoc || termsToHighlight.length === 0) return;
 
             const btn = document.getElementById('btnResaltar');
-            btn.disabled = true;
-            btn.innerHTML = '⏳ Buscando...';
+            if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Buscando...'; }
             highlightFound = false;
 
             const numPages = pdfDoc.numPages;
 
             for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-                if (highlightFound) break;
 
                 const wrapper = document.getElementById(`pub-page-${pageNum}`);
                 if (!wrapper) continue;
 
                 // Asegurar que la página esté renderizada
-                if (!wrapper.dataset.rendered || wrapper.dataset.rendered !== 'true') {
+                if (!wrapper.dataset.rendered || wrapper.dataset.rendered === 'placeholder') {
                     wrapper.dataset.rendered = 'true';
                     await renderPage(pageNum, wrapper);
                 }
@@ -477,7 +495,7 @@ if (!empty($searchTerm)) {
                     await new Promise(r => setTimeout(r, 100));
                 }
 
-                // Intentar Mark.js en text layer
+                // --- CAPA 1: Mark.js en text layer ---
                 const textLayer = wrapper.querySelector('.text-layer');
                 if (textLayer) {
                     const found = await new Promise(resolve => {
@@ -494,71 +512,91 @@ if (!empty($searchTerm)) {
                     });
 
                     if (found) {
+                        if (!highlightFound) {
+                            // Scroll solo a la primera página con resultado
+                            const firstMark = textLayer.querySelector('mark');
+                            setTimeout(() => firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+                        }
                         highlightFound = true;
-                        const firstMark = textLayer.querySelector('mark');
-                        setTimeout(() => firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
-                        break;
+                        // Sigue buscando en las siguientes páginas (NO break)
+                        continue;
                     }
                 }
 
-                // Fallback OCR si no encontró con text layer
+                // --- CAPA 2: Fallback OCR si no encontró con text layer ---
                 try {
                     const termsStr = encodeURIComponent(termsToHighlight.join(','));
                     const resp = await fetch(`ocr_text_public.php?cliente=${clientCode}&doc=${docId}&page=${pageNum}&terms=${termsStr}`);
                     const result = await resp.json();
 
                     if (result.success && result.highlights && result.highlights.length > 0 && result.image_width > 0) {
-                        highlightFound = true;
 
                         const canvas = wrapper.querySelector('canvas');
-                        if (!canvas) break;
+                        if (!canvas) continue;
 
                         const scaleX = canvas.width / result.image_width;
                         const scaleY = canvas.height / result.image_height;
 
+                        // Eliminar overlay previo si existe
+                        const oldOverlay = wrapper.querySelector('.ocr-hl-overlay');
+                        if (oldOverlay) oldOverlay.remove();
+
                         const overlay = document.createElement('div');
+                        overlay.className = 'ocr-hl-overlay';
                         overlay.style.cssText = `
                             position: absolute; top: 0; left: 0;
                             width: ${canvas.width}px; height: ${canvas.height}px;
                             pointer-events: none; z-index: 5;
                         `;
 
-                        // Solo el primer highlight
-                        const hl = result.highlights[0];
-                        const rect = document.createElement('div');
-                        rect.style.cssText = `
-                            position: absolute;
-                            left: ${hl.x * scaleX}px; top: ${hl.y * scaleY}px;
-                            width: ${hl.w * scaleX}px; height: ${hl.h * scaleY}px;
-                            background: rgba(22, 101, 52, 0.45);
-                            mix-blend-mode: multiply;
-                            border-radius: 2px;
-                            box-shadow: 0 0 8px rgba(22, 101, 52, 0.6);
-                        `;
-                        overlay.appendChild(rect);
+                        // CORREGIDO: Resaltar TODAS las ocurrencias (no solo la primera)
+                        result.highlights.forEach((hl, idx) => {
+                            const padX = Math.max(hl.h * 0.10, 2);
+                            const padY = Math.max(hl.h * 0.15, 2);
+                            const rect = document.createElement('div');
+                            rect.style.cssText = `
+                                position: absolute;
+                                left: ${(hl.x - padX) * scaleX}px;
+                                top: ${(hl.y - padY) * scaleY}px;
+                                width: ${(hl.w + padX * 2) * scaleX}px;
+                                height: ${(hl.h + padY * 2) * scaleY}px;
+                                background: rgba(22, 163, 74, 0.50);
+                                mix-blend-mode: multiply;
+                                border-radius: 3px;
+                                animation: hlFadeIn 0.2s ease-out ${idx * 30}ms both;
+                            `;
+                            overlay.appendChild(rect);
+                        });
+
                         wrapper.appendChild(overlay);
 
-                        setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
-                        break;
+                        if (!highlightFound) {
+                            // Scroll solo a la primera página con resultado OCR
+                            setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+                        }
+                        highlightFound = true;
+                        // Continúa buscando en páginas siguientes (NO break)
                     }
                 } catch (e) {
                     console.warn(`OCR fallback error pág ${pageNum}:`, e);
                 }
             }
 
-            if (highlightFound) {
-                btn.innerHTML = '✅ Código encontrado';
-                btn.style.background = '#15803d';
-            } else {
-                btn.innerHTML = '❌ No encontrado';
-                btn.style.background = '#dc2626';
-            }
+            if (btn) {
+                if (highlightFound) {
+                    btn.innerHTML = '✅ Encontrado';
+                    btn.style.background = '#15803d';
+                } else {
+                    btn.innerHTML = '❌ No encontrado';
+                    btn.style.background = '#dc2626';
+                }
 
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.innerHTML = '🔍 Resaltar Código';
-                btn.style.background = '#16a34a';
-            }, 3000);
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '🔍 Resaltar Código';
+                    btn.style.background = '#16a34a';
+                }, 3000);
+            }
         }
 
         loadPDF();
