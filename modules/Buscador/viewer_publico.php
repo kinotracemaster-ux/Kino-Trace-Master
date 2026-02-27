@@ -114,6 +114,7 @@ if (!empty($searchTerm)) {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f0f2f5;
             min-height: 100vh;
+            overflow-x: hidden;
         }
 
         /* ── Header ── */
@@ -247,6 +248,7 @@ if (!empty($searchTerm)) {
             max-width: 900px;
             margin: 20px auto;
             padding: 0 20px 40px;
+            overflow-x: hidden;
         }
 
         .pdf-container {
@@ -261,11 +263,15 @@ if (!empty($searchTerm)) {
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
             background: white;
             border-radius: 4px;
+            max-width: 100%;
+            overflow: hidden;
         }
 
         .pdf-page-wrapper canvas {
             display: block;
             border-radius: 4px;
+            max-width: 100%;
+            height: auto !important;
         }
 
         .text-layer {
@@ -370,12 +376,37 @@ if (!empty($searchTerm)) {
                 font-size: 14px;
             }
 
+            .public-header {
+                flex-wrap: wrap;
+                gap: 8px;
+                padding: 10px 12px;
+            }
+
+            .header-badge {
+                font-size: 11px;
+                padding: 3px 8px;
+            }
+
             .pdf-viewer {
-                padding: 0 10px 20px;
+                padding: 0 4px 20px;
+                margin: 10px auto;
             }
 
             #navBar {
-                gap: 8px;
+                gap: 6px;
+                font-size: 12px;
+                padding: 6px 8px;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .nav-btn {
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+
+            #navCounter {
+                min-width: 60px;
                 font-size: 13px;
             }
         }
@@ -503,7 +534,8 @@ if (!empty($searchTerm)) {
         const clientCode = '<?= addslashes($clientCode) ?>';
         const docId = <?= $documentId ?>;
         const container = document.getElementById('pdfContainer');
-        const scale = 1.5;
+        // El scale se calcula dinámicamente en renderPage según el ancho disponible
+        const BASE_SCALE = 1.5;
 
         let pdfDoc = null;
         let highlightDone = false;
@@ -641,9 +673,11 @@ if (!empty($searchTerm)) {
 
         function createPlaceholder(pageNum, total) {
             const outer = document.createElement('div');
+            // min-height adaptado al ancho de pantalla para evitar placeholders gigantes en móvil
+            const phHeight = Math.min(600, Math.round(window.innerWidth * 1.3));
             outer.innerHTML = `
                 <div id="pub-page-${pageNum}" class="pdf-page-wrapper" data-page-num="${pageNum}"
-                     style="min-height:600px; display:flex; align-items:center; justify-content:center; background:#fafafa;">
+                     style="min-height:${phHeight}px; width:100%; display:flex; align-items:center; justify-content:center; background:#fafafa;">
                     <span style="color:#999; font-size:14px;">Cargando página ${pageNum}...</span>
                 </div>
                 <div class="page-number">Página ${pageNum} de ${total}</div>
@@ -657,6 +691,15 @@ if (!empty($searchTerm)) {
 
             try {
                 const page = await pdfDoc.getPage(pageNum);
+
+                // Calcular scale dinámico: ajusta el PDF al ancho disponible del contenedor
+                const pdfViewer = document.querySelector('.pdf-viewer');
+                const containerWidth = pdfViewer ? pdfViewer.clientWidth - 8 : window.innerWidth - 8;
+                const defaultViewport = page.getViewport({ scale: 1 });
+                const fitScale = containerWidth / defaultViewport.width;
+                // Usar el menor entre BASE_SCALE y fitScale para no agrandar en desktop pero sí escalar en móvil
+                const scale = Math.min(BASE_SCALE, fitScale);
+
                 const viewport = page.getViewport({ scale });
 
                 wrapper.innerHTML = '';
