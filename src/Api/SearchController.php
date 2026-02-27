@@ -108,11 +108,34 @@ class SearchController extends BaseController
                 'proveedor' => $r['proveedor'],
                 'ruta_archivo' => $r['ruta_archivo'],
                 'snippet' => $snippet,
-                'occurrences' => $occurrences
+                'occurrences' => $occurrences,
+                'codes' => []
             ];
         }
 
         usort($results, fn($a, $b) => $b['occurrences'] - $a['occurrences']);
+
+        // Obtener los códigos de todos los documentos en una sola consulta
+        if (!empty($results)) {
+            $ids = array_column($results, 'id');
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $codeStmt = $this->db->prepare("
+                SELECT documento_id, codigo
+                FROM codigos
+                WHERE documento_id IN ($placeholders)
+                ORDER BY documento_id, codigo ASC
+            ");
+            $codeStmt->execute($ids);
+            $codesRaw = $codeStmt->fetchAll(PDO::FETCH_ASSOC);
+            $codesByDoc = [];
+            foreach ($codesRaw as $cr) {
+                $codesByDoc[(int) $cr['documento_id']][] = $cr['codigo'];
+            }
+            foreach ($results as &$res) {
+                $res['codes'] = $codesByDoc[$res['id']] ?? [];
+            }
+            unset($res);
+        }
 
         $this->jsonExit([
             'query' => $query,
