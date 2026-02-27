@@ -822,8 +822,13 @@ if (!empty($searchTerm)) {
                             const canvas = wrapper.querySelector('canvas');
                             if (!canvas) { setProgress(pageNum, numPages); continue; }
 
-                            const scaleX = canvas.width / result.image_width;
-                            const scaleY = canvas.height / result.image_height;
+                            // Usar tamaño CSS del canvas (no el físico ×DPR) para que
+                            // los overlays se posicionen correctamente en pantallas Retina
+                            const cssW = parseFloat(canvas.style.width) || canvas.width;
+                            const cssH = parseFloat(canvas.style.height) || canvas.height;
+
+                            const scaleX = cssW / result.image_width;
+                            const scaleY = cssH / result.image_height;
 
                             const oldOverlay = wrapper.querySelector('.ocr-hl-overlay');
                             if (oldOverlay) oldOverlay.remove();
@@ -832,7 +837,7 @@ if (!empty($searchTerm)) {
                             overlay.className = 'ocr-hl-overlay';
                             overlay.style.cssText = `
                                 position: absolute; top: 0; left: 0;
-                                width: ${canvas.width}px; height: ${canvas.height}px;
+                                width: ${cssW}px; height: ${cssH}px;
                                 pointer-events: none; z-index: 5;
                             `;
 
