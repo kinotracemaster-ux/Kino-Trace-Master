@@ -702,16 +702,32 @@ if (!empty($searchTerm)) {
 
                 const viewport = page.getViewport({ scale });
 
+                // ── Soporte para pantallas de alta densidad (Retina / AMOLED) ──
+                // Multiplicar la resolución del canvas por DPR para evitar borrosidad
+                const dpr = window.devicePixelRatio || 1;
+                const cssWidth = viewport.width;
+                const cssHeight = viewport.height;
+
                 wrapper.innerHTML = '';
-                wrapper.style.width = viewport.width + 'px';
-                wrapper.style.height = viewport.height + 'px';
+                wrapper.style.width = cssWidth + 'px';
+                wrapper.style.height = cssHeight + 'px';
                 wrapper.style.minHeight = 'auto';
                 wrapper.style.display = 'block';
 
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
+
+                // Tamaño real del canvas = CSS * DPR
+                canvas.width = Math.round(cssWidth * dpr);
+                canvas.height = Math.round(cssHeight * dpr);
+
+                // Mostrar al tamaño CSS (el navegador lo escala a pantalla completa sin borrosidad)
+                canvas.style.width = cssWidth + 'px';
+                canvas.style.height = cssHeight + 'px';
+
+                // Escalar el contexto para que pdf.js dibuje en alta resolución
+                ctx.scale(dpr, dpr);
+
                 wrapper.appendChild(canvas);
 
                 await page.render({ canvasContext: ctx, viewport }).promise;
@@ -720,8 +736,8 @@ if (!empty($searchTerm)) {
                 if (textContent.items && textContent.items.length > 0) {
                     const textDiv = document.createElement('div');
                     textDiv.className = 'text-layer';
-                    textDiv.style.width = viewport.width + 'px';
-                    textDiv.style.height = viewport.height + 'px';
+                    textDiv.style.width = cssWidth + 'px';
+                    textDiv.style.height = cssHeight + 'px';
                     wrapper.appendChild(textDiv);
 
                     await pdfjsLib.renderTextLayer({
