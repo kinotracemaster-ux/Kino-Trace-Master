@@ -1100,8 +1100,13 @@ Se extraerán solo los códigos de la izquierda."></textarea>
             }
 
             let html = '';
+            let cardIdx = 0;
             for (const doc of result.results) {
                 const pdfUrl = doc.ruta_archivo ? `modules/resaltar/download.php?doc=${doc.id}` : '';
+                const codes = doc.codes || [];
+                const codesId = `ft-codes-${doc.id}-${cardIdx}`;
+                const btnId = `ft-btn-${doc.id}-${cardIdx}`;
+                cardIdx++;
 
                 html += `
                     <div class="result-card">
@@ -1113,13 +1118,18 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                         <!-- Snippet oculto para usuario final 
                         ${doc.snippet ? `<div class="result-meta" style="margin-top: 0.5rem; font-style: italic; background: rgba(255,235,59,0.1); padding: 0.5rem; border-radius: 4px;">"${doc.snippet}"</div>` : ''}
                         -->
-                        <div class="result-actions" style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <div class="result-actions" style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
                             <a href="modules/resaltar/viewer.php?doc=${doc.id}&term=${encodeURIComponent(result.query)}" 
                                class="btn btn-primary btn-sm" target="_blank">
                                 👁️ Ver Documento
                             </a>
                             
                             ${pdfUrl ? `<a href="${pdfUrl}" target="_blank" class="btn btn-secondary btn-sm" style="white-space: nowrap;">📄 Original</a>` : ''}
+
+                            <button id="${btnId}" class="btn btn-secondary btn-sm"
+                                onclick="(function(btn,box){var open=box.style.display!=='none';box.style.display=open?'none':'block';btn.textContent=open?'🏷️ Códigos ▾':'🏷️ Ocultar ▴';btn.style.background=open?'':'#e5e7eb';})(document.getElementById('${btnId}'),document.getElementById('${codesId}'))">
+                                🏷️ Códigos ▾
+                            </button>
 
                             <button onclick="editDoc(${doc.id})" class="btn btn-sm" style="background: #f59e0b; color: white;" title="Editar">
                                 ✏️
@@ -1128,6 +1138,12 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                             <button onclick="deleteDoc(${doc.id})" class="btn btn-sm" style="background: #ef4444; color: white;" title="Eliminar">
                                 🗑️
                             </button>
+                        </div>
+                        <div id="${codesId}" style="display:none; margin-top:0.6rem; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px; padding:0.6rem 0.8rem; max-height:220px; overflow-y:auto;">
+                            ${codes.length > 0
+                        ? codes.map(c => `<div style="font-size:0.85rem; padding:2px 0; color:#374151; border-bottom:1px solid #f0f0f0;">${c}</div>`).join('')
+                        : '<span style="font-size:0.85rem; color:#9ca3af;">Sin códigos asignados</span>'
+                    }
                         </div>
                     </div>
                 `;
