@@ -239,27 +239,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // --- ASYNC TRIGGER ---
             // Lanzar proceso en segundo plano si hay un archivo PDF nuevo
             if ($fileUploaded && isset($ext) && strtolower($ext) === 'pdf') {
-                $url = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '/process_extraction.php';
+                try {
+                    $url = "http://" . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']) . '/process_extraction.php';
 
-                $postData = http_build_query([
-                    'client_code' => $code,
-                    'doc_id' => $docId,
-                    'token' => md5($code . 'kino_async_' . date('Y-m-d'))
-                ]);
+                    $postData = http_build_query([
+                        'client_code' => $code,
+                        'doc_id' => $docId,
+                        'token' => md5($code . 'kino_async_' . date('Y-m-d'))
+                    ]);
 
-                // Fire-and-forget request
-                $parts = parse_url($url);
-                $fp = fsockopen($parts['host'], isset($parts['port']) ? $parts['port'] : 80, $errno, $errstr, 30);
+                    // Fire-and-forget request (@ suprime warnings para no romper el redirect)
+                    $parts = parse_url($url);
+                    $fp = @fsockopen($parts['host'], isset($parts['port']) ? $parts['port'] : 80, $errno, $errstr, 5);
 
-                if ($fp) {
-                    $out = "POST " . $parts['path'] . " HTTP/1.1\r\n";
-                    $out .= "Host: " . $parts['host'] . "\r\n";
-                    $out .= "Content-Type: application/x-www-form-urlencoded\r\n";
-                    $out .= "Content-Length: " . strlen($postData) . "\r\n";
-                    $out .= "Connection: Close\r\n\r\n";
-                    $out .= $postData;
-                    fwrite($fp, $out);
-                    fclose($fp);
+                    if ($fp) {
+                        $out = "POST " . $parts['path'] . " HTTP/1.1\r\n";
+                        $out .= "Host: " . $parts['host'] . "\r\n";
+                        $out .= "Content-Type: application/x-www-form-urlencoded\r\n";
+                        $out .= "Content-Length: " . strlen($postData) . "\r\n";
+                        $out .= "Connection: Close\r\n\r\n";
+                        $out .= $postData;
+                        fwrite($fp, $out);
+                        fclose($fp);
+                    }
+                    // Si fsockopen falla silenciosamente, el documento ya está guardado
+                    // La extracción se puede ejecutar manualmente después
+                } catch (Exception $e) {
+                    // Ignorar errores de async trigger - el documento ya se guardó correctamente
+                    error_log("Kino-Trace async trigger failed: " . $e->getMessage());
                 }
             }
 
