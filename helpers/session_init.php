@@ -13,6 +13,13 @@ if (session_status() !== PHP_SESSION_NONE) {
     return; // Ya hay sesión activa
 }
 
+if (headers_sent()) {
+    // Algo (ej. un warning de PHP por límite de POST excedido) ya envió
+    // salida antes de este punto. Iniciar sesión ahora solo generaría un
+    // warning adicional que oculta el error real; lo omitimos.
+    return;
+}
+
 // Obtener hostname actual
 $_host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $_host = strtolower(explode(':', $_host)[0]); // Quitar puerto
