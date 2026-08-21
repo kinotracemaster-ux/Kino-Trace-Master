@@ -649,25 +649,9 @@ if (!empty($searchTerm)) {
                     p1.dataset.rendered = 'true';
                 }
 
-                // AUTO-HIGHLIGHT con retry inteligente
-                if (termsToHighlight.length > 0) {
-                    waitForTextLayerAndHighlight();
-                }
-
             } catch (err) {
                 console.error("Error:", err);
                 container.innerHTML = `<p style="color:red; padding:40px; text-align:center;">Error al cargar el documento: ${err.message}</p>`;
-            }
-        }
-
-        // Retry hasta que el text-layer de página 1 tenga spans (máx 4 intentos)
-        function waitForTextLayerAndHighlight(attempt = 0) {
-            const tl = document.querySelector('#pub-page-1 .text-layer');
-            const hasSpans = tl && tl.querySelectorAll('span').length > 0;
-            if (hasSpans || attempt >= 4) {
-                highlightCode();
-            } else {
-                setTimeout(() => waitForTextLayerAndHighlight(attempt + 1), 400 + attempt * 200);
             }
         }
 

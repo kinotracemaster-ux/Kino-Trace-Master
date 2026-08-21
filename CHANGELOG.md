@@ -2,6 +2,12 @@
 
 Registro breve de cambios recientes y contexto abierto, para que sesiones futuras de Claude Code no necesiten re-leer todo el `git log` ni re-derivar decisiones ya tomadas. Para arquitectura y comandos ver `CLAUDE.md`. Este archivo se actualiza incrementalmente al tope (más reciente primero); no reescribas entradas viejas, solo agregá arriba.
 
+## 2026-08-21 (2) — Quitar auto-resaltado en visor público
+
+- **Pedido**: en `modules/Buscador/viewer_publico.php` (visor del buscador público, independiente del resto de la app), al buscar un código el PDF se abría y resaltaba automáticamente el término. Se pidió que solo abra/ubique el PDF y que el resaltado sea manual, vía el botón "🔍 Resaltar" que ya existía en el header superior.
+- **Cambio**: eliminada la llamada automática `waitForTextLayerAndHighlight()` (y su función, que ya no tenía otros usos) dentro de `loadPDF()`. El resaltado (`highlightCode()`, capa text-layer + fallback OCR) ahora solo se dispara con el click del usuario en el botón, que ya estaba implementado.
+- **Alcance**: cambio acotado a ese único archivo. No toca `modules/resaltar/viewer.php` (visor autenticado de la app principal), que sigue con su propio comportamiento.
+
 ## Contexto abierto / pendiente
 
 - **Página Pública de "losmonta" (Los Montañeros S.A.S)**: se armó el texto (título, intro, instrucciones, footer, aviso legal) para pegar en el modal "Página Pública" del panel `Admin-gestor/panel.php` (tabla `pagina_publica`, campo `codigo='losmonta'`). Falta que el usuario confirme la dirección exacta (el HTML fuente tenía "Estamos Cr 53 a 45 41 La Candelaria, Medellín, La Candelaria –", ambigua) y una URL de sitio web real (no tenían una cargada, el link original era `#`). Nadie lo guardó todavía en el formulario — es trabajo manual del usuario, no un cambio de código.
