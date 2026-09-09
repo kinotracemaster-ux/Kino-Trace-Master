@@ -4,6 +4,8 @@
 > **Versión**: 2.0 (Post-Optimización 2026-01-23)  
 > **Repositorio**: [WILBIdon/MULTI-CLIEN-KINO-NEW2](https://github.com/WILBIdon/MULTI-CLIEN-KINO-NEW2)  
 > **Stack**: PHP 7.4+, SQLite, PDF.js, Railway
+>
+> ⚠️ **Este documento tiene partes desactualizadas** (ej. nombres de acciones de API como `search_single`/`suggest_codes`, que ya no existen — el dispatcher real está en `api.php`). Para una referencia verificada contra el código actual (acciones de API, esquema SQLite completo, inventario de helpers/módulos, inconsistencias conocidas), ver `MAPA_TECNICO.md` en la raíz del repo.
 
 ---
 

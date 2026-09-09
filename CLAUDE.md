@@ -16,16 +16,19 @@ php -S localhost:8080
 php migrate.php
 
 # Tests (PHPUnit, bootstrap en tests/bootstrap.php)
+# ⚠️ composer.json NO declara require-dev (verificado 2026-09-09): PHPUnit no viene instalado
+# por `composer install` tal cual está el repo. Si vendor/bin/phpunit no existe, instalarlo primero:
+# composer require --dev phpunit/phpunit --no-interaction
 ./vendor/bin/phpunit
 ./vendor/bin/phpunit tests/Api/SearchControllerTest.php          # un archivo
 ./vendor/bin/phpunit --filter testNombreDelMetodo                # un test
-
-# Optimizar bases de datos SQLite (índices, ANALYZE, VACUUM)
-php optimize_db.php          # todos los clientes
-php optimize_db.php KINO     # un cliente específico
 ```
 
-No hay `composer.json` con scripts de lint/build; `composer install` solo trae dependencias (`setasign/fpdi-tcpdf`, `phpmailer/phpmailer`, PHPUnit vía require-dev si aplica).
+No hay `composer.json` con scripts de lint/build; `composer install` solo trae dependencias de producción (`setasign/fpdi-tcpdf`, `phpmailer/phpmailer`).
+
+⚠️ `optimize_db.php` **no existe** en el repo pese a haber sido documentado antes como comando. La optimización de índices real es automática y vive en `ensure_client_schema()` (`helpers/tenant.php`), que corre en cada `open_client_db()` — no requiere ejecutar nada manualmente.
+
+Para un mapa exhaustivo y verificado del código real (todas las acciones de `api.php`, esquema SQLite completo, inventario de helpers/módulos, inconsistencias conocidas), ver `MAPA_TECNICO.md`.
 
 ## Architecture
 
