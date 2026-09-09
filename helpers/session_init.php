@@ -43,6 +43,16 @@ session_set_cookie_params([
 
 session_start();
 
+// Asegurar que el token CSRF exista ANTES de liberar la sesión para escritura.
+// Las páginas embeben el token dentro del <head> (después de haber emitido ya
+// HTML como <!DOCTYPE html>), momento en el que headers_sent() es true y
+// session_start() ya no puede reabrir la sesión para persistir un token nuevo.
+// Generarlo aquí, mientras la sesión sigue abierta y no se ha emitido salida,
+// garantiza que quede guardado y que la validación posterior en api.php coincida.
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 // RENDIMIENTO: Liberar el bloqueo de sesión inmediatamente.
 // Esto permite que solicitudes concurrentes del mismo usuario
 // (múltiples pestañas, AJAX paralelo) NO se encolen esperando.
