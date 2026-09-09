@@ -21,7 +21,7 @@ class DocumentController extends BaseController
         $numero = trim($post['numero']);
         $fecha = trim($post['fecha']);
         $proveedor = trim($post['proveedor'] ?? '');
-        $codes = array_filter(array_map('trim', explode("\n", $post['codes'] ?? '')));
+        $codes = array_filter(array_map('normalize_code_token', explode("\n", $post['codes'] ?? '')));
 
         // ✨ SEGURIDAD: Validación robusta de archivo
         $uploadResult = SecureFileUploader::secureMove(
@@ -106,7 +106,7 @@ class DocumentController extends BaseController
             $this->jsonExit(['error' => 'Faltan campos requeridos']);
         }
 
-        $codes = array_filter(array_map('trim', explode("\n", $post['codes'] ?? '')));
+        $codes = array_filter(array_map('normalize_code_token', explode("\n", $post['codes'] ?? '')));
 
         // Check if document exists
         $stmt = $this->db->prepare("SELECT id, ruta_archivo FROM documentos WHERE id = ?");

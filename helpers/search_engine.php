@@ -11,6 +11,29 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/tenant.php';
 
 /**
+ * Normaliza un código de búsqueda o de entrada manual: quita espacios
+ * invisibles (NBSP, zero-width) que suelen quedar al copiar/pegar desde
+ * PDF/Excel/CSV, y puntuación residual pegada al final (coma, punto,
+ * punto y coma, dos puntos, pipe). No toca el contenido alfanumérico del
+ * código ni cambia mayúsculas/minúsculas.
+ *
+ * Se usa tanto al guardar códigos tipeados a mano (DocumentController)
+ * como al parsear la búsqueda voraz (SearchController), para que ambos
+ * lados de la comparación queden consistentes con lo que ya hace
+ * clean_extracted_code() para códigos auto-extraídos de PDF.
+ *
+ * @param string $code Código crudo.
+ * @return string Código normalizado.
+ */
+function normalize_code_token(string $code): string
+{
+    $code = str_replace(["\xC2\xA0", "\xE2\x80\x8B"], ' ', $code);
+    $code = trim($code);
+    $code = rtrim($code, " ,.;:|");
+    return $code;
+}
+
+/**
  * Busca un código en todos los documentos y sus códigos asociados.
  *
  * @param PDO $db Conexión a la base de datos del cliente.
@@ -19,7 +42,7 @@ require_once __DIR__ . '/tenant.php';
  */
 function search_by_code(PDO $db, string $searchTerm): array
 {
-    $searchTerm = trim($searchTerm);
+    $searchTerm = normalize_code_token($searchTerm);
     if ($searchTerm === '') {
         return [];
     }
@@ -78,7 +101,7 @@ function search_by_code(PDO $db, string $searchTerm): array
  */
 function greedy_search(PDO $db, array $codes): array
 {
-    $codes = array_filter(array_map('trim', $codes));
+    $codes = array_filter(array_map('normalize_code_token', $codes));
     if (empty($codes)) {
         return ['documents' => [], 'covered' => [], 'not_found' => []];
     }

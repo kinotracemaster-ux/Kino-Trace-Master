@@ -2,6 +2,12 @@
 
 Registro breve de cambios recientes y contexto abierto, para que sesiones futuras de Claude Code no necesiten re-leer todo el `git log` ni re-derivar decisiones ya tomadas. Para arquitectura y comandos ver `CLAUDE.md`. Este archivo se actualiza incrementalmente al tope (más reciente primero); no reescribas entradas viejas, solo agregá arriba.
 
+## 2026-09-09 — Fix: Búsqueda Voraz no encontraba algunos códigos existentes
+
+- **Causa raíz** (ver detalle en `TROUBLESHOOTING.md` #8): la comparación de códigos en `greedy_search()`/`search_by_code()` es exacta (`UPPER(codigo) = UPPER(?)`). Los códigos tipeados/pegados a mano al subir o editar un documento (`DocumentController::upload()`/`update()`) solo pasaban por `trim()`, así que espacios no separables (NBSP) o puntuación pegada (coma/punto final, típico al copiar de PDF/Excel) quedaban guardados literalmente. Lo mismo pasaba al parsear el textarea de la Búsqueda Voraz (`SearchController::search()`). Los códigos auto-extraídos de PDF sí se limpiaban (`clean_extracted_code()`), por eso el bug era inconsistente: solo afectaba entrada manual.
+- **Fix**: nueva función `normalize_code_token()` en `helpers/search_engine.php` (limpia NBSP/zero-width space y puntuación residual final, sin tocar guiones ni el contenido del código). Se aplicó en los 4 puntos que antes solo hacían `trim()`: `greedy_search()`, `search_by_code()`, `SearchController::search()` y `DocumentController::upload()`/`update()`.
+- **No se tocó** el algoritmo voraz en sí (selección greedy por mayor cobertura de códigos pendientes, empate a favor de fecha más reciente en `helpers/search_engine.php`) — el problema era de normalización de datos, no de la lógica de selección. Verificado con un script manual (SQLite en memoria) que reproduce el mismo escenario de códigos "sucios" antes y después del fix; no hay PHPUnit instalado en este entorno (`composer.json` no declara `require-dev`) para correr `tests/Api/SearchControllerTest.php`/`DocumentControllerTest.php`, pero ambos siguen pasando su lógica intacta (no se cambió ninguna firma ni comportamiento fuera de la limpieza de strings).
+
 ## 2026-08-21 (2) — Quitar auto-resaltado en visor público
 
 - **Pedido**: en `modules/Buscador/viewer_publico.php` (visor del buscador público, independiente del resto de la app), al buscar un código el PDF se abría y resaltaba automáticamente el término. Se pidió que solo abra/ubique el PDF y que el resaltado sea manual, vía el botón "🔍 Resaltar" que ya existía en el header superior.

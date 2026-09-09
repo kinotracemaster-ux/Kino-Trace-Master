@@ -113,3 +113,28 @@ El parser SQL original usaba `explode(',', ...)` para separar los valores de la 
 
 **Solución:**
 Se reescribió `parse_sql_inserts` en `helpers/import_engine.php` para usar un parser inteligente que respeta las comillas y paréntesis, ignorando las comas que están *dentro* de un valor.
+
+---
+
+## 8. Error: "Búsqueda Voraz no encuentra algunos códigos" (que sí existen)
+
+**Síntoma:**
+En la Búsqueda Voraz (`index.php?tab=voraz`), al pegar una lista de códigos, algunos aparecen en `not_found` aunque el código exista en un documento subido — visualmente el texto pegado y el código guardado se ven idénticos.
+
+**Causa:**
+El algoritmo voraz (`greedy_search()` en `helpers/search_engine.php`) compara con `UPPER(c.codigo) = UPPER(?)`, una igualdad **exacta**. Dos vías dejaban "ruido" invisible o puntuación pegada en los códigos sin limpiarlos, rompiendo esa igualdad exacta aunque se vieran iguales:
+
+1. Al **tipear/pegar códigos a mano** al subir o editar un documento (`DocumentController::upload()` / `update()`), el código solo se pasaba por `trim()`. Si el usuario pegaba desde PDF/Excel, podían quedar espacios no separables (NBSP, `\xC2\xA0`) o comas/puntos finales pegados (ej. copiar una columna con separador de coma), y esos caracteres se guardaban literalmente en la tabla `codigos`.
+2. Al **parsear el cuadro de texto de la Búsqueda Voraz** (`SearchController::search()`), se extraía solo la primera columna de cada línea, pero tampoco se limpiaba la puntuación residual ni los espacios no separables del token resultante.
+
+La extracción automática desde PDF (`clean_extracted_code()` en `helpers/pdf_extractor.php`) sí limpiaba esto, por eso el bug solo afectaba códigos con origen manual o listas de búsqueda pegadas con "ruido" — no era consistente entre las dos vías de entrada.
+
+**Solución:**
+Se agregó `normalize_code_token()` en `helpers/search_engine.php` (reemplaza espacios NBSP/zero-width por espacio normal, hace `trim()` y quita puntuación residual al final: `, . ; : |`, sin tocar guiones ni el contenido alfanumérico) y se aplicó en los cuatro puntos donde antes solo se hacía `trim()`:
+- `greedy_search()` y `search_by_code()` (los códigos buscados).
+- `DocumentController::upload()` y `update()` (los códigos tipeados/pegados a mano al guardar un documento).
+
+Con esto, tanto lo que se guarda como lo que se busca quedan normalizados de la misma forma que ya se hacía para los códigos auto-extraídos de PDF. El algoritmo voraz en sí (selección greedy del documento que cubre más códigos pendientes, con empate a favor del más reciente) no se tocó — el problema era de normalización de datos, no del algoritmo de selección.
+
+**Prevención:**
+Cualquier punto nuevo que reciba un código escrito/pegado por un humano (no generado por el propio sistema) debe pasar por `normalize_code_token()` antes de guardarse o compararse, igual que ya se hace con `clean_extracted_code()` para lo extraído de PDF.

@@ -21,7 +21,7 @@ class SearchController extends BaseController
 
             // Split by whitespace (spaces or tabs) and take only the first token
             $parts = preg_split('/[\s\t]+/', $line, 2);
-            $firstColumn = trim($parts[0] ?? '');
+            $firstColumn = normalize_code_token($parts[0] ?? '');
 
             if ($firstColumn !== '') {
                 $codes[] = $firstColumn;
