@@ -1175,6 +1175,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
             // First call to get initial pending count
             let pending = 999;
             let batchNum = 0;
+            let failedTotal = 0;
 
             while (pending > 0) {
                 batchNum++;
@@ -1191,16 +1192,21 @@ Se extraerán solo los códigos de la izquierda."></textarea>
 
                     totalIndexedSession += result.indexed;
                     pending = result.pending;
+                    failedTotal = result.failed || 0;
+                    const failedHtml = failedTotal > 0
+                        ? ` <span style="color: var(--warning);">(${failedTotal} con error: archivo faltante o PDF sin texto)</span>`
+                        : '';
 
-                    status.innerHTML = `✅ Indexados: ${totalIndexedSession}, Pendientes: ${pending}`;
+                    status.innerHTML = `✅ Indexados: ${totalIndexedSession}, Pendientes: ${pending}${failedHtml}`;
 
                     if (result.errors && result.errors.length > 0) {
                         console.log('Errores de indexación:', result.errors);
                     }
 
-                    // If nothing was indexed but still pending, files are missing
-                    if (result.indexed === 0 && pending > 0) {
-                        status.innerHTML += ` <span style="color: var(--warning);">(${pending} archivos no encontrados)</span>`;
+                    // Los que fallan quedan marcados y salen de la cola; solo se corta si el lote no avanzó nada
+                    const processed = result.indexed + (result.errors ? result.errors.length : 0);
+                    if (processed === 0 && pending > 0) {
+                        status.innerHTML += ` <span style="color: var(--warning);">(${pending} sin procesar)</span>`;
                         break;
                     }
                 } catch (error) {
@@ -1210,7 +1216,8 @@ Se extraerán solo los códigos de la izquierda."></textarea>
             }
 
             if (pending === 0) {
-                status.innerHTML = `✅ ¡Completado! ${totalIndexedSession} documentos indexados`;
+                status.innerHTML = `✅ ¡Completado! ${totalIndexedSession} documentos indexados`
+                    + (failedTotal > 0 ? ` <span style="color: var(--warning);">(${failedTotal} con error: archivo faltante o PDF sin texto)</span>` : '');
             }
 
             btn.disabled = false;
