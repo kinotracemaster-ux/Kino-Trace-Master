@@ -451,7 +451,8 @@ function find_tesseract(): ?string
 function find_pdftoppm(): ?string
 {
     if (PHP_OS_FAMILY === 'Windows') {
-        return null; // Difícil en hosting windows sin configuración
+        // El paquete del modo local agrega Poppler al PATH (local/construir)
+        return shell_exec("where pdftoppm 2>nul") ? 'pdftoppm' : null;
     }
     $which = shell_exec('which pdftoppm 2>/dev/null');
     return $which ? trim($which) : null;

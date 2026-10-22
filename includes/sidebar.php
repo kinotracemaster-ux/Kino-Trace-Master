@@ -167,7 +167,24 @@ $currentSection = $currentSection ?? 'voraz';
             <span class="nav-label">Backup</span>
         </button>
 
-        <?php if (in_array($clientCode, ['kino', 'admin'])): ?>
+        <?php if (defined('KT_MODO_LOCAL')): ?>
+            <!-- MODO LOCAL: enviar a la nube lo trabajado en este PC (docs/modo_local/) -->
+            <a href="<?= $baseUrl ?? '' ?>local/sincronizar.php" class="nav-item"
+                style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <span class="nav-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                        stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+                    </svg>
+                </span>
+                <span class="nav-label">Sincronizar con la nube
+                    <small style="display:block; opacity:.7;">Modo local · licencia <?= (int) (KT_LICENCIA['dias'] ?? 0) ?> días</small>
+                </span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (in_array($clientCode, ['kino', 'admin']) && !defined('KT_MODO_LOCAL')): ?>
             <!-- GESTOR DE CLIENTES - Solo para kino y admin -->
             <a href="<?= $baseUrl ?? '' ?>Admin-gestor/panel.php" class="nav-item"
                 style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">

@@ -959,6 +959,7 @@ $clientCodes = array_column($clients, 'codigo');
                     </svg>
                     Dashboard
                 </a>
+                <a href="sync_local.php" class="btn btn-secondary" title="Copias de trabajo en PC y sincronización">💻 Modo local</a>
                 <a href="../logout.php" class="btn btn-secondary">Salir</a>
             </div>
         </header>

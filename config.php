@@ -137,3 +137,10 @@ try {
     // Si la conexión falla, detener la ejecución con un mensaje claro
     die('❌ Error conectando a la base central: ' . $e->getMessage());
 }
+
+// MODO LOCAL: paquete instalado en el PC de un cliente (docs/modo_local/).
+// El marcador solo lo crea la herramienta de empaquetado; en la nube no existe
+// (y aunque alguien lo subiera por error, en Railway se ignora).
+if (is_file(BASE_DIR . '/local/MODO_LOCAL') && !getenv('RAILWAY_ENVIRONMENT')) {
+    require_once BASE_DIR . '/local/arranque.php';
+}
