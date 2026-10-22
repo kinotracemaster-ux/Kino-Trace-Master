@@ -221,7 +221,7 @@ Entrada real de usuario: `SearchController::search()` toma el textarea `#bulkInp
 | `import_engine.php` | on-demand | `parse_csv`, `parse_sql_inserts` (parser manual balanceado, respeta comas dentro de valores — ver `TROUBLESHOOTING.md` #7), `suggest_column_mapping`, `import_to_database`, `validate_import_data` |
 | `logger.php` | cargado por `error_codes.php` | clase `Logger`: `debug/info/warning/error/critical/exception`, `enableConsole`; escribe a `clients/logs/app.log`, `error.log`, y `clients/logs/{cliente}/{cliente}.log`; rota >10MB |
 | `mailer.php` | on-demand | `mail_env`, `is_mail_configured`, `build_reset_email_html`, `send_via_resend`, `send_via_smtp`, `send_reset_email` (Resend primero, SMTP fallback) |
-| `pdf_linker.php` | on-demand | `stripTimestamp`, `processZipAndLink` (vincula PDFs de un ZIP a documentos existentes por `original_path`/`numero`) |
+| `pdf_linker.php` | on-demand | `stripTimestamp`, `processZipAndLink` (vincula PDFs de un ZIP a documentos existentes por `original_path`/`numero`), `relinkFromServer` (re-enlaza huérfanos con PDF que ya están en `uploads/`: nombre exacto, cruces entre repetidos, nombres mal leídos de ZIP de Windows; vista previa o aplicar — Gestor → 🔍 Huérfanos) |
 | `subdomain.php` | on-demand | `getSubdomain`, `resolveClientCode`, `getClientFromSubdomain` (multi-tenant por subdominio, columna `control_clientes.subdominio`) |
 | `validator.php` | on-demand | **stub no funcional** (ver §0) |
 
