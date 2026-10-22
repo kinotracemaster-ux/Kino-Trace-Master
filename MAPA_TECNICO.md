@@ -222,6 +222,7 @@ Entrada real de usuario: `SearchController::search()` toma el textarea `#bulkInp
 | `logger.php` | cargado por `error_codes.php` | clase `Logger`: `debug/info/warning/error/critical/exception`, `enableConsole`; escribe a `clients/logs/app.log`, `error.log`, y `clients/logs/{cliente}/{cliente}.log`; rota >10MB |
 | `mailer.php` | on-demand | `mail_env`, `is_mail_configured`, `build_reset_email_html`, `send_via_resend`, `send_via_smtp`, `send_reset_email` (Resend primero, SMTP fallback) |
 | `pdf_linker.php` | on-demand | `stripTimestamp`, `processZipAndLink` (vincula PDFs de un ZIP a documentos existentes por `original_path`/`numero`), `relinkFromServer` (re-enlaza huérfanos y enlaces rotos con PDF que ya están en `uploads/`: nombre exacto, cruces entre repetidos, nombres mal leídos de ZIP de Windows; vista previa o aplicar, todo o un solo documento — Gestor → 🔍 Huérfanos y `modules/resaltar/pdf_faltante.php`), `kt_linker_rotos` (documentos enlazados a un PDF que ya no está) |
+| `zip_stream.php` | on-demand | `kt_zip_enviar` (escribe un ZIP sin comprimir al navegador a medida que lee los archivos, sin temporal ni data descriptor; máx. 4 GB y 65.535 archivos por ZIP), `kt_zip_tamano` (tamaño exacto para Content-Length). Lo usa `Admin-gestor/backup.php` |
 | `subdomain.php` | on-demand | `getSubdomain`, `resolveClientCode`, `getClientFromSubdomain` (multi-tenant por subdominio, columna `control_clientes.subdominio`) |
 | `validator.php` | on-demand | **stub no funcional** (ver §0) |
 
@@ -278,7 +279,7 @@ Secciones (`id="section-*"`, activadas por `switchSection()` en `includes/sideba
 | `section-subir` | `<iframe src="modules/subir/">` | delega todo al módulo `subir/` |
 | `section-consultar` | Tabla + filtros + full-text | `loadDocuments()` → `action=list`; `searchFulltext()` → `action=fulltext_search`; `reindexDocuments()` → loop `action=reindex_documents`; `deleteDoc()` → `action=delete`; `downloadCSV()` → `action=export_csv` **(roto, ver §0)** |
 | `section-codigo` | Input + autocompletado | `selectCode()`/input → `action=suggest`; `searchSingleCode()` → `action=search_by_code` |
-| `section-backup` | Placeholder cargado por fetch | `fetch('Admin-gestor/backup.php?partial=1')` |
+| `section-backup` | Placeholder cargado por fetch | `fetch('Admin-gestor/backup.php?partial=1')`. La descarga (`?download=1`) manda el ZIP mientras lo arma (`helpers/zip_stream.php`, sin comprimir ni archivo temporal); si pasa de 700 MB se baja en partes por rango de nombres (`desde`/`hasta`), la base va en la parte 1; `solo_bd=1` baja solo la base |
 
 Submenú "Admin" del sidebar enlaza directo (no AJAX) a `excel_import/`, `importar/`, `lote/`, `sincronizar/`, `trazabilidad/vincular.php`, `indexar/`, `trazabilidad/validar.php`, `Admin-gestor/panel.php`.
 
