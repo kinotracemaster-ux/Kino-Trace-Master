@@ -38,9 +38,20 @@ $rutaArchivo = $document['ruta_archivo'];
 $pdfPath = resolve_pdf_path($clientCode, $document);
 
 if (!$pdfPath) {
+    header('Content-Type: text/html; charset=utf-8');
+    // Caso 1: el documento nunca se enlazó a su PDF (importado por SQL/CSV sin archivo)
+    if ($rutaArchivo === null || $rutaArchivo === '' || $rutaArchivo === 'pending') {
+        $esperado = trim((string) ($document['original_path'] ?? ''));
+        die("Este documento todavía no tiene su PDF enlazado (se importó sin archivo).<br>"
+            . ($esperado !== '' ? 'Archivo esperado: <strong>' . htmlspecialchars($esperado) . '</strong><br>' : '')
+            . 'Pida a Kino que lo enlace (Gestor → 🔍 Huérfanos) o edite el documento y adjunte el PDF.');
+    }
+    // Caso 2: está enlazado, pero el archivo no está en el disco del servidor
     $folders = get_available_folders($clientCode);
     $foldersStr = implode(', ', $folders);
-    die("Archivo PDF no encontrado en el servidor.<br>Rutas revisadas automáticamente.<br>Carpetas disponibles: $foldersStr");
+    die('El PDF enlazado a este documento no está en el servidor: <strong>' . htmlspecialchars(basename($rutaArchivo)) . '</strong><br>'
+        . 'Rutas revisadas automáticamente.<br>Carpetas disponibles: ' . htmlspecialchars($foldersStr) . '<br>'
+        . 'Edite el documento y vuelva a adjuntar el PDF.');
 }
 
 // Serve the file directly (works regardless of file location on disk)
