@@ -43,13 +43,17 @@ RUN mkdir -p /var/www/html/clients \
 # Permitir .htaccess
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
-# Script de inicio que configura el puerto dinámicamente, arregla MPM y permisos
+# Script de inicio que configura el puerto dinámicamente, arregla MPM y permisos.
+# Los sed deben ser idempotentes: si Railway reinicia el MISMO contenedor el script
+# vuelve a correr sobre archivos ya modificados. El sed anterior ("s/80/$PORT/g")
+# convertía "Listen 8080" en "Listen 808080" y Apache no arrancaba más
+# (AH00526: Invalid address or port en ports.conf).
 RUN echo '#!/bin/bash\n\
     rm -f /etc/apache2/mods-enabled/mpm_event.* 2>/dev/null\n\
     chown -R www-data:www-data /var/www/html/clients\n\
     chmod -R 777 /var/www/html/clients\n\
-    sed -i "s/80/${PORT:-8080}/g" /etc/apache2/sites-available/000-default.conf\n\
-    sed -i "s/Listen 80/Listen ${PORT:-8080}/g" /etc/apache2/ports.conf\n\
+    sed -i -E "s/<VirtualHost [*]:[0-9]+>/<VirtualHost *:${PORT:-8080}>/" /etc/apache2/sites-available/000-default.conf\n\
+    sed -i -E "s/^Listen [0-9]+$/Listen ${PORT:-8080}/" /etc/apache2/ports.conf\n\
     apache2-foreground' > /start.sh && chmod +x /start.sh
 
 EXPOSE 8080
