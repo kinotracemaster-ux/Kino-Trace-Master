@@ -5,109 +5,78 @@
  * Creates a downloadable backup of client data including:
  * - SQLite database file
  * - All uploaded documents (PDFs)
+ *
+ * El ZIP se manda MIENTRAS se arma (helpers/zip_stream.php): antes se comprimía todo en un
+ * archivo temporal y recién después empezaba la descarga; con muchos PDF eso superaba el
+ * límite de 15 minutos por petición de Railway y la descarga nunca llegaba. Si el respaldo
+ * es grande se baja en partes, cada una con tiempo de sobra.
  * 
  * Access: Client-only (logged in users)
  */
 
-// 1. ROMPER LÍMITES DE TIEMPO Y MEMORIA
-set_time_limit(0);              // Evita el error "Maximum execution time exceeded"
-ini_set('memory_limit', '1024M'); // Aumenta RAM a 1GB para procesar ZIPs grandes
-ini_set('max_execution_time', 0); // Refuerzo para servidores estrictos
+set_time_limit(0); // la descarga puede tardar varios minutos
 
 require_once __DIR__ . '/../helpers/session_init.php';
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/tenant.php';
+require_once __DIR__ . '/../helpers/zip_stream.php';
 
 // Verify authentication
 if (!isset($_SESSION['client_code'])) {
-    header('Location: login.php');
+    header('Location: ../login.php');
     exit;
 }
 
 $clientCode = $_SESSION['client_code'];
 
+// Tamaño máximo de cada parte: a 10 Mbps (1,25 MB/s) baja en unos 9 minutos
+const KT_BACKUP_PARTE_BYTES = 700 * 1024 * 1024;
+
 /**
- * Create a backup ZIP file containing:
- * - The client's SQLite database
- * - All files in the uploads directory
- * 
- * @param string $clientCode Client identifier
- * @return array Result with success status and file path or error
+ * Archivos de uploads/, ordenados por su ruta dentro del ZIP.
+ *
+ * @return array<int, array{ruta: string, nombre: string, tamano: int}>
  */
-function createBackup(string $clientCode): array
+function kt_backup_lista(string $uploadsDir): array
 {
-    $clientDir = CLIENTS_DIR . '/' . $clientCode;
-    // La base real es {codigo}.db (antes buscaba "data.db", que no existe, y el
-    // respaldo salía SIN base de datos, solo con los PDFs).
-    $dbPath = client_db_path($clientCode);
-    $uploadsDir = $clientDir . '/uploads';
-
-    // Verify client directory exists
-    if (!is_dir($clientDir)) {
-        return ['success' => false, 'error' => 'Directorio del cliente no encontrado'];
-    }
-
-    // Create temp directory for backup if needed
-    $tempDir = sys_get_temp_dir();
-    $timestamp = date('Y-m-d_H-i-s');
-    $backupName = "backup_{$clientCode}_{$timestamp}.zip";
-    $zipPath = $tempDir . '/' . $backupName;
-
-    $zip = new ZipArchive();
-
-    if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-        return ['success' => false, 'error' => 'No se pudo crear el archivo ZIP'];
-    }
-
-    $filesAdded = 0;
-
-    // Add database file if exists (copia consistente: incluye lo pendiente en el WAL)
-    $dbCopy = null;
-    if (file_exists($dbPath)) {
-        $dbCopy = $tempDir . '/kt_backup_' . bin2hex(random_bytes(6)) . '.db';
-        $src = new PDO('sqlite:' . $dbPath);
-        $src->exec('VACUUM INTO ' . $src->quote($dbCopy));
-        $src = null;
-        $zip->addFile($dbCopy, $clientCode . '.db');
-        $filesAdded++;
-    }
-
-    // Add all files from uploads directory
+    $lista = [];
     if (is_dir($uploadsDir)) {
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($uploadsDir, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        foreach ($iterator as $item) {
-            $relativePath = 'uploads/' . substr($item->getPathname(), strlen($uploadsDir) + 1);
-
-            if ($item->isDir()) {
-                $zip->addEmptyDir($relativePath);
-            } else {
-                $zip->addFile($item->getPathname(), $relativePath);
-                $filesAdded++;
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($uploadsDir, FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $f) {
+            if ($f->isFile()) {
+                $lista[] = [
+                    'ruta' => $f->getPathname(),
+                    'nombre' => 'uploads/' . str_replace('\\', '/', substr($f->getPathname(), strlen($uploadsDir) + 1)),
+                    'tamano' => (int) $f->getSize(),
+                ];
             }
         }
     }
+    usort($lista, fn($a, $b) => strcmp($a['nombre'], $b['nombre']));
+    return $lista;
+}
 
-    $zip->close();
-    if ($dbCopy) {
-        @unlink($dbCopy);
+/**
+ * Divide la lista en partes por rango de nombres [desde, hasta): un archivo subido entre que
+ * se abre la página y se baja una parte cae en una sola parte (ni se repite ni se pierde).
+ * La parte 1 lleva además la base de datos.
+ */
+function kt_backup_partes(array $lista, int $maxBytes): array
+{
+    $partes = [];
+    $actual = null;
+    foreach ($lista as $e) {
+        if ($actual !== null && ($actual['tamano'] + $e['tamano'] > $maxBytes || $actual['archivos'] >= 60000)) {
+            $actual['hasta'] = $e['nombre'];
+            $partes[] = $actual;
+            $actual = null;
+        }
+        $actual = $actual ?? ['desde' => $partes ? $e['nombre'] : '', 'hasta' => '', 'tamano' => 0, 'archivos' => 0];
+        $actual['tamano'] += $e['tamano'];
+        $actual['archivos']++;
     }
-
-    if ($filesAdded === 0) {
-        unlink($zipPath);
-        return ['success' => false, 'error' => 'No hay archivos para respaldar'];
-    }
-
-    return [
-        'success' => true,
-        'path' => $zipPath,
-        'filename' => $backupName,
-        'files_count' => $filesAdded,
-        'size' => filesize($zipPath)
-    ];
+    $partes[] = $actual ?? ['desde' => '', 'hasta' => '', 'tamano' => 0, 'archivos' => 0];
+    return $partes;
 }
 
 /**
@@ -123,27 +92,88 @@ function formatBytes(int $bytes): string
     return round($bytes, 2) . ' ' . $units[$pow];
 }
 
+$uploadsDir = CLIENTS_DIR . '/' . $clientCode . '/uploads';
+
 // Handle download request
 if (isset($_GET['download']) && $_GET['download'] === '1') {
-    $result = createBackup($clientCode);
+    $soloBd = ($_GET['solo_bd'] ?? '') === '1';
+    $desde = (string) ($_GET['desde'] ?? '');
+    $hasta = (string) ($_GET['hasta'] ?? '');
+    $parte = max(0, (int) ($_GET['parte'] ?? 0));
+    $de = max(0, (int) ($_GET['de'] ?? 0));
 
-    if ($result['success']) {
-        // Send file to browser
+    $entradas = [];
+    if (!$soloBd) {
+        foreach (kt_backup_lista($uploadsDir) as $e) {
+            if (strcmp($e['nombre'], $desde) >= 0 && ($hasta === '' || strcmp($e['nombre'], $hasta) < 0)) {
+                $entradas[] = $e;
+            }
+        }
+    }
+
+    // Base de datos (copia consistente: incluye lo pendiente en el WAL) en la parte 1
+    $dbPath = client_db_path($clientCode);
+    if (($soloBd || $desde === '') && file_exists($dbPath)) {
+        $dbCopy = sys_get_temp_dir() . '/kt_backup_' . bin2hex(random_bytes(6)) . '.db';
+        register_shutdown_function(function () use ($dbCopy) {
+            @unlink($dbCopy); // también si el navegador corta la descarga
+        });
+        $src = new PDO('sqlite:' . $dbPath);
+        $src->exec('VACUUM INTO ' . $src->quote($dbCopy));
+        $src = null;
+        clearstatcache(true, $dbCopy);
+        array_unshift($entradas, ['ruta' => $dbCopy, 'nombre' => $clientCode . '.db', 'tamano' => (int) filesize($dbCopy)]);
+    }
+
+    if (!$entradas) {
+        $error = 'No hay archivos para respaldar';
+    } elseif (count($entradas) > KT_ZIP_MAX_ARCHIVOS || kt_zip_tamano($entradas) > KT_ZIP_MAX_BYTES) {
+        $error = 'Esta parte quedó demasiado grande (se subieron archivos mientras tanto). Recargue la página y vuelva a descargar.';
+    } else {
+        $sufijo = $soloBd ? '_base_de_datos' : ($de > 1 ? "_parte{$parte}de{$de}" : '');
+        $filename = "backup_{$clientCode}_" . date('Y-m-d_H-i') . $sufijo . '.zip';
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
         header('Content-Type: application/zip');
-        header('Content-Disposition: attachment; filename="' . $result['filename'] . '"');
-        header('Content-Length: ' . $result['size']);
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . kt_zip_tamano($entradas));
         header('Cache-Control: no-cache, no-store, must-revalidate');
         header('Pragma: no-cache');
         header('Expires: 0');
-
-        readfile($result['path']);
-
-        // Clean up temp file
-        unlink($result['path']);
+        header('X-Accel-Buffering: no');
+        kt_zip_enviar($entradas);
         exit;
-    } else {
-        $error = $result['error'];
     }
+}
+
+/**
+ * Botones de descarga: uno si el respaldo cabe en una parte; si no, una por parte.
+ * $base: URL de este archivo vista desde la página donde se muestran.
+ */
+function kt_backup_botones(array $partes, int $dbBytes, string $base): string
+{
+    $h = fn($t) => htmlspecialchars((string) $t, ENT_QUOTES, 'UTF-8');
+    $icono = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>';
+    $n = count($partes);
+    if ($n === 1) {
+        $html = '<a href="' . $h($base . '?download=1') . '" class="backup-btn">' . $icono
+            . ' Descargar Backup Completo (' . formatBytes($partes[0]['tamano'] + $dbBytes) . ')</a>';
+    } else {
+        $total = array_sum(array_column($partes, 'tamano')) + $dbBytes;
+        $html = '<p class="backup-partes-nota">Su respaldo pesa <strong>' . formatBytes($total) . '</strong>. Para que la descarga no se corte, '
+            . "se baja en <strong>{$n} partes</strong>. Baje todas y descomprímalas en la misma carpeta.</p>"
+            . '<div class="backup-partes">';
+        foreach ($partes as $i => $p) {
+            $url = $base . '?' . http_build_query(['download' => 1, 'parte' => $i + 1, 'de' => $n, 'desde' => $p['desde'], 'hasta' => $p['hasta']]);
+            $html .= '<a href="' . $h($url) . '" class="backup-btn">' . $icono . ' Parte ' . ($i + 1) . " de {$n} ("
+                . formatBytes($p['tamano'] + ($i === 0 ? $dbBytes : 0)) . ($i === 0 ? ', con la base de datos' : '') . ')</a>';
+        }
+        $html .= '</div>';
+    }
+    return $html . '<div class="backup-solo-bd"><a href="' . $h($base . '?download=1&solo_bd=1') . '">Descargar solo la base de datos ('
+        . formatBytes($dbBytes) . ')</a></div>';
 }
 
 // Get client stats for display
@@ -155,20 +185,11 @@ $stats = [
 ];
 
 // Calculate uploads size
-$uploadsDir = CLIENTS_DIR . '/' . $clientCode . '/uploads';
-$uploadsSize = 0;
-$fileCount = 0;
-if (is_dir($uploadsDir)) {
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($uploadsDir, RecursiveDirectoryIterator::SKIP_DOTS)
-    );
-    foreach ($iterator as $file) {
-        if ($file->isFile()) {
-            $uploadsSize += $file->getSize();
-            $fileCount++;
-        }
-    }
-}
+$lista = kt_backup_lista($uploadsDir);
+$uploadsSize = array_sum(array_column($lista, 'tamano'));
+$fileCount = count($lista);
+$partes = kt_backup_partes($lista, KT_BACKUP_PARTE_BYTES);
+$dbBytes = (int) @filesize(client_db_path($clientCode)) + (int) @filesize(client_db_path($clientCode) . '-wal');
 
 // Partial load for AJAX (from sidebar)
 if (isset($_GET['partial']) && $_GET['partial'] === '1') {
@@ -203,13 +224,7 @@ if (isset($_GET['partial']) && $_GET['partial'] === '1') {
             </div>
         </div>
 
-        <a href="Admin-gestor/backup.php?download=1" class="backup-btn">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Descargar Backup Completo
-        </a>
+        <?= kt_backup_botones($partes, $dbBytes, 'Admin-gestor/backup.php') ?>
     </div>
 
     <div class="backup-info">
@@ -225,6 +240,7 @@ if (isset($_GET['partial']) && $_GET['partial'] === '1') {
     <div class="backup-info" style="margin-top: 1rem;">
         <h3>💡 Recomendaciones</h3>
         <ul>
+            <li>La descarga empieza enseguida y el navegador muestra cuánto falta</li>
             <li>Realiza backups periódicamente (semanal o mensual)</li>
             <li>Guarda el archivo en un lugar seguro externo</li>
             <li>Verifica que el ZIP descargue correctamente</li>
@@ -319,6 +335,26 @@ if (isset($_GET['partial']) && $_GET['partial'] === '1') {
         .backup-btn svg {
             width: 20px;
             height: 20px;
+        }
+
+        .backup-partes {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .backup-partes-nota {
+            margin-bottom: 1rem !important;
+        }
+
+        .backup-solo-bd {
+            margin-top: 0.9rem;
+            font-size: 0.85rem;
+        }
+
+        .backup-solo-bd a {
+            color: var(--text-secondary);
         }
 
         .backup-info {
@@ -460,6 +496,26 @@ $pageTitle = 'Respaldo de Datos';
             height: 24px;
         }
 
+        .backup-partes {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .backup-partes-nota {
+            margin-bottom: 1rem !important;
+        }
+
+        .backup-solo-bd {
+            margin-top: 0.9rem;
+            font-size: 0.85rem;
+        }
+
+        .backup-solo-bd a {
+            color: var(--text-secondary);
+        }
+
         .backup-info {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
@@ -557,14 +613,7 @@ $pageTitle = 'Respaldo de Datos';
                         </div>
                     </div>
 
-                    <a href="?download=1" class="backup-btn"
-                        onclick="this.innerHTML='<svg class=\'spinner\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><circle cx=\'12\' cy=\'12\' r=\'10\' stroke=\'currentColor\' stroke-width=\'3\' fill=\'none\' opacity=\'0.3\'/><path d=\'M12 2a10 10 0 0 1 10 10\' stroke=\'currentColor\' stroke-width=\'3\' fill=\'none\'/></svg> Preparando backup...'; return true;">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Descargar Backup Completo
-                    </a>
+                    <?= kt_backup_botones($partes, $dbBytes, 'backup.php') ?>
                 </div>
 
                 <div class="backup-info">
@@ -580,6 +629,7 @@ $pageTitle = 'Respaldo de Datos';
                 <div class="backup-info" style="margin-top: 1rem;">
                     <h3>💡 Recomendaciones</h3>
                     <ul>
+                        <li>La descarga empieza enseguida y el navegador muestra cuánto falta</li>
                         <li>Realiza backups periódicamente (semanal o mensual)</li>
                         <li>Guarda el archivo en un lugar seguro externo</li>
                         <li>Verifica que el ZIP descargue correctamente</li>
