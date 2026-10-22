@@ -130,6 +130,11 @@ if ($documentId > 0) {
     ];
 }
 
+if ((!$pdfPath || !file_exists($pdfPath)) && $documentId > 0) {
+    // En vez de un error: pantalla para buscarlo en el servidor o subirlo de nuevo
+    header('Location: pdf_faltante.php?doc=' . $documentId . '&volver=' . rawurlencode('viewer.php?' . ($_SERVER['QUERY_STRING'] ?? '')));
+    exit;
+}
 if (!$pdfPath || !file_exists($pdfPath)) {
     $available = get_available_folders($clientCode);
     die("Archivo PDF no encontrado.<br>Ruta: " . htmlspecialchars($pdfPath ?? 'NULL'));

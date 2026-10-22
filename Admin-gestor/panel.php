@@ -489,15 +489,20 @@ try {
                      ORDER BY d.numero"
                 );
                 $orphanDocs = $orphanStmt->fetchAll(PDO::FETCH_ASSOC);
-                $withPdf = $totalDocs - count($orphanDocs);
-                $message = "🔍 Diagnóstico de '{$diagCode}': {$totalDocs} documentos totales, {$withPdf} con PDF, " . count($orphanDocs) . " sin PDF.";
+                // Enlazados a un PDF que ya no está en el servidor
+                require_once __DIR__ . '/../helpers/pdf_linker.php';
+                $brokenDocs = kt_linker_rotos($diagDb, $diagCode);
+                $withPdf = $totalDocs - count($orphanDocs) - count($brokenDocs);
+                $message = "🔍 Diagnóstico de '{$diagCode}': {$totalDocs} documentos totales, {$withPdf} con PDF, " . (count($orphanDocs) + count($brokenDocs)) . " sin PDF.";
                 // Store for JSON response
                 $diagOrphanData = [
                     'client_code' => $diagCode,
                     'total_docs' => $totalDocs,
                     'with_pdf' => $withPdf,
                     'orphan_count' => count($orphanDocs),
-                    'orphan_docs' => $orphanDocs
+                    'orphan_docs' => $orphanDocs,
+                    'broken_count' => count($brokenDocs),
+                    'broken_docs' => $brokenDocs
                 ];
             }
         }
@@ -517,10 +522,11 @@ try {
                     require_once __DIR__ . '/../helpers/sync_local.php';
                     $respaldo = basename(kt_respaldar_cliente(CLIENTS_DIR, $diagCode, 'antes_reenlazar'));
                 }
-                $relinkData = relinkFromServer($relDb, CLIENTS_DIR . "/{$diagCode}/uploads", $aplicar);
+                $rotos = array_column(kt_linker_rotos($relDb, $diagCode), 'id');
+                $relinkData = relinkFromServer($relDb, CLIENTS_DIR . "/{$diagCode}/uploads", $aplicar, $rotos);
                 $relinkData['respaldo'] = $respaldo;
                 $message = ($aplicar ? '✅ Re-enlazados ' : '🔎 Se pueden re-enlazar ') . count($relinkData['enlaces'])
-                    . ' documento(s) con PDF que ya están en el servidor; ' . count($relinkData['sin_archivo']) . ' siguen sin archivo.';
+                    . ' documento(s) con PDF que ya están en el servidor. Sin PDF en el servidor: ' . count($relinkData['sin_archivo']) . '.';
             }
         }
 
@@ -2089,6 +2095,11 @@ $clientCodes = array_column($clients, 'codigo');
                 if (r.conflictos.length) {
                     html += '<div style="color:#f87171;">Revisar a mano:<br>' + r.conflictos.map(escHtml).join('<br>') + '</div>';
                 }
+                if (r.sin_archivo.length) {
+                    html += `<div style="margin-top:0.4rem;">${aplicar ? 'Siguen' : 'Quedarían'} sin PDF (no están en el servidor: hay que subirlos; la lista se descarga con 📥):</div>`
+                        + '<ul style="margin:0.25rem 0 0.5rem 1.1rem;max-height:140px;overflow-y:auto;color:#f87171;">'
+                        + r.sin_archivo.map(d => `<li>${escHtml(d.numero)} <span style="color:var(--text-muted);font-size:0.75rem;">#${d.id}</span></li>`).join('') + '</ul>';
+                }
                 if (!aplicar && (r.enlaces.length || r.cruces.length)) {
                     html += `<button onclick="if (confirm('Se hará un respaldo de la base y luego se enlazarán. ¿Continuar?')) relinkServer('${escHtml(clientCode)}', '${escHtml(clientName)}', true)"
                         style="margin-top:0.5rem;padding:0.5rem 1rem;border-radius:8px;background:#16a34a;color:#fff;border:none;cursor:pointer;">✅ Aplicar</button>`;
@@ -2105,12 +2116,30 @@ $clientCodes = array_column($clients, 'codigo');
             }
         }
 
+        // Lista de documentos sin PDF en CSV (se abre con Excel: ; y BOM para las tildes)
+        function downloadOrphanList() {
+            const lista = window.orphanListData || { code: '', docs: [] };
+            const celda = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+            const filas = [['ID', 'Documento', 'Tipo', 'Estado', 'Archivo que corresponde', 'Códigos']]
+                .concat(lista.docs.map(d => [d.id, (d.numero || '').trim(), d.tipo, d.estado, d.archivo, d.num_codes || 0]));
+            const csv = '\ufeff' + filas.map(f => f.map(celda).join(';')).join('\r\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            a.download = `sin_pdf_${lista.code}_${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        }
+
         function showOrphanModal(data, clientName) {
             // Remove existing modal if any
             const existing = document.getElementById('orphanModal');
             if (existing) existing.remove();
 
-            const orphans = data.orphan_docs || [];
+            // Sin enlazar (importados sin PDF) + enlace roto (el PDF ya no está en el servidor)
+            const orphans = (data.orphan_docs || []).map(d => ({ ...d, estado: 'Sin enlazar', archivo: d.original_path || '' }))
+                .concat((data.broken_docs || []).map(d => ({ ...d, estado: 'Enlace roto', archivo: d.original_path || (d.ruta_archivo || '').split('/').pop() })));
+            window.orphanListData = { code: data.client_code || '', docs: orphans };
             const code = data.client_code || '';
             const name = clientName || code;
 
@@ -2129,18 +2158,20 @@ $clientCodes = array_column($clients, 'codigo');
                     <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">Con PDF ✅</div>
                 </div>
                 <div style="flex:1;min-width:120px;background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.2);border-radius:10px;padding:0.75rem 1rem;text-align:center;">
-                    <div style="font-size:1.5rem;font-weight:700;color:#fbbf24;">${data.orphan_count}</div>
-                    <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">Sin PDF ⚠️</div>
+                    <div style="font-size:1.5rem;font-weight:700;color:#fbbf24;">${orphans.length}</div>
+                    <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">Sin PDF ⚠️${data.broken_count ? ` (${data.broken_count} con enlace roto)` : ''}</div>
                 </div>
             </div>`;
 
             let tableHtml = '';
             if (orphans.length > 0) {
                 tableHtml = `
-            <div style="margin-bottom:0.75rem;">
+            <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem;">
                 <input type="text" id="orphanSearchInput" placeholder="🔍 Buscar por nombre, tipo o archivo..." 
-                    style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.3);color:var(--text-primary);font-size:0.85rem;outline:none;box-sizing:border-box;"
+                    style="flex:1;min-width:0;padding:10px 14px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.3);color:var(--text-primary);font-size:0.85rem;outline:none;box-sizing:border-box;"
                     oninput="filterOrphanTable(this.value)">
+                <button onclick="downloadOrphanList()" title="Descargar la lista para abrirla en Excel"
+                    style="padding:0 1rem;border-radius:8px;background:#16a34a;color:#fff;border:none;cursor:pointer;font-size:0.85rem;white-space:nowrap;">📥 Descargar lista</button>
             </div>
             <div style="max-height:450px;overflow-y:auto;border-radius:10px;border:1px solid var(--border-color);">
                 <table id="orphanTable" style="width:100%;border-collapse:collapse;font-size:0.82rem;">
@@ -2149,6 +2180,7 @@ $clientCodes = array_column($clients, 'codigo');
                             <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:50px;">ID</th>
                             <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);">Nombre del documento</th>
                             <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:120px;">Tipo</th>
+                            <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:110px;">Estado</th>
                             <th style="padding:10px 12px;text-align:left;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);">Archivo esperado (nombre para enlazar)</th>
                             <th style="padding:10px 12px;text-align:center;color:#fbbf24;font-weight:600;border-bottom:2px solid rgba(251,191,36,0.2);width:70px;">Códigos</th>
                         </tr>
@@ -2158,7 +2190,8 @@ $clientCodes = array_column($clients, 'codigo');
                             <td style="padding:8px 12px;color:var(--text-muted);font-family:var(--font-mono);font-size:0.75rem;">${d.id}</td>
                             <td style="padding:8px 12px;font-weight:500;">${escHtml(d.numero || '')}</td>
                             <td style="padding:8px 12px;font-size:0.75rem;"><span style="background:rgba(100,116,139,0.2);padding:2px 8px;border-radius:4px;color:var(--text-secondary);">${escHtml(d.tipo || '—')}</span></td>
-                            <td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">${escHtml(d.original_path || '—')}</td>
+                            <td style="padding:8px 12px;font-size:0.75rem;color:${d.estado === 'Enlace roto' ? '#f87171' : '#fbbf24'};white-space:nowrap;">${d.estado}</td>
+                            <td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">${escHtml(d.archivo || '—')}</td>
                             <td style="padding:8px 12px;text-align:center;font-weight:600;color:${(d.num_codes || 0) > 0 ? '#4ade80' : '#f87171'};">${d.num_codes || 0}</td>
                         </tr>`).join('')}
                     </tbody>
