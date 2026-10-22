@@ -7,6 +7,18 @@ use Exception;
 
 class SystemController extends BaseController
 {
+    /**
+     * Documento pendiente de indexar: sin texto extraído y sin error registrado.
+     * Los que fallaron (archivo faltante, PDF sin texto) quedan marcados con "error"
+     * y ya no se toman en cada lote; si no, bloqueaban la cola (siempre se pedían
+     * los mismos N más recientes y los más antiguos nunca se indexaban).
+     */
+    private const PENDING_CONDITION = "(
+        datos_extraidos IS NULL
+        OR datos_extraidos = ''
+        OR (datos_extraidos NOT LIKE '%\"text\":%' AND datos_extraidos NOT LIKE '%\"error\":%')
+    )";
+
     public function reindex($request)
     {
         // Start output buffering to catch any stray warnings/errors
@@ -47,11 +59,7 @@ class SystemController extends BaseController
                 SELECT id, ruta_archivo, tipo, datos_extraidos
                 FROM documentos 
                 WHERE ruta_archivo LIKE '%.pdf'
-                AND (
-                    datos_extraidos IS NULL 
-                    OR datos_extraidos = '' 
-                    OR datos_extraidos NOT LIKE '%\"text\":%'
-                )
+                AND " . self::PENDING_CONDITION . "
                 ORDER BY id DESC
                 LIMIT $batchSize
             ");
@@ -124,9 +132,13 @@ class SystemController extends BaseController
                         $updateStmt->execute([json_encode($datosExtraidos, JSON_UNESCAPED_UNICODE), $doc['id']]);
                         $indexed++;
                     }
-                } catch (Exception $e) {
+                } catch (\Throwable $e) {
                     $errors[] = "#{$doc['id']}: " . $e->getMessage();
                     error_log("Doc #{$doc['id']} fatal match: " . $e->getMessage());
+
+                    // Guardar el error para que el documento salga de la cola de pendientes
+                    $errorData = json_encode(['error' => $e->getMessage(), 'timestamp' => time()]);
+                    $updateStmt->execute([$errorData, $doc['id']]);
                 }
 
                 // Free memory after each iteration
@@ -138,21 +150,27 @@ class SystemController extends BaseController
                 SELECT COUNT(*) as total
                 FROM documentos 
                 WHERE ruta_archivo LIKE '%.pdf'
-                AND (
-                    datos_extraidos IS NULL 
-                    OR datos_extraidos = '' 
-                    OR datos_extraidos NOT LIKE '%\"text\":%'
-                )
+                AND " . self::PENDING_CONDITION . "
             ");
             $stmtCount->execute();
-            $pending = $stmtCount->fetchColumn();
+            $pending = (int) $stmtCount->fetchColumn();
+
+            // Documentos que ya fallaron (archivo faltante, PDF sin texto, etc.).
+            // Se reintentan solo con force=1.
+            $failed = (int) $this->db->query("
+                SELECT COUNT(*) FROM documentos
+                WHERE ruta_archivo LIKE '%.pdf'
+                AND datos_extraidos NOT LIKE '%\"text\":%'
+                AND datos_extraidos LIKE '%\"error\":%'
+            ")->fetchColumn();
 
             $response = [
                 'success' => true,
                 'indexed' => $indexed,
                 'errors' => $errors,
                 'pending' => $pending,
-                'message' => "Indexados: $indexed, Pendientes: $pending"
+                'failed' => $failed,
+                'message' => "Indexados: $indexed, Pendientes: $pending, Con error: $failed"
             ];
 
         } catch (\Throwable $e) {

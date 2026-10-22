@@ -29,7 +29,8 @@ $totalPdfCount = $countStmt->fetchColumn();
 $pendingStmt = $db->query("
     SELECT COUNT(*) FROM documentos 
     WHERE ruta_archivo LIKE '%.pdf' 
-    AND (datos_extraidos IS NULL OR datos_extraidos = '' OR datos_extraidos NOT LIKE '%\"text\":%')
+    AND (datos_extraidos IS NULL OR datos_extraidos = ''
+         OR (datos_extraidos NOT LIKE '%\"text\":%' AND datos_extraidos NOT LIKE '%\"error\":%'))
 ");
 $pendingCount = $pendingStmt->fetchColumn();
 ?>

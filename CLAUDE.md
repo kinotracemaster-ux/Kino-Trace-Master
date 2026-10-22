@@ -64,6 +64,10 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 
 Passwords con `password_hash()`/PDO prepared statements en todas partes. `helpers/csrf_protection.php` y `helpers/rate_limiter.php` protegen `api.php`. `helpers/secure_uploader.php` valida uploads. `ADMIN_RESET_PASSWORD` (env var) permite resetear password de `admin`/`kino` en cada arranque — solo para pruebas/deploy nuevo, no dejarla seteada en producción normal.
 
+### Modo local (copia de trabajo en el PC de un cliente)
+
+Paquete Windows portable (PHP + `php -S` en 127.0.0.1, navegador como interfaz) con la base de UN cliente, licencia Ed25519 atada al equipo y sincronización con la nube por paquetes (`.ktdata` nube→PC, `.ktsync` PC→nube: reemplazo si la nube no cambió, fusión aditiva si cambió, siempre con respaldo previo). Se activa solo si existe `local/MODO_LOCAL` (lo crea `local/herramientas/kt.php paquete`; ignorado en Railway). Núcleo en `helpers/sync_local.php` (no incluye config.php). Toda la operación, estructura y seguridad: `docs/modo_local/` (empezar por `README.md` y `PROCESO.md`).
+
 ### Deploy
 
 Railway vía Docker (`Dockerfile`: PHP 8.2 + Apache, poppler-utils + tesseract-ocr para procesamiento de PDF/OCR). Volumen obligatorio en `/var/www/html/clients`. Variables relevantes: `GEMINI_API_KEY` (IA opcional), `ADMIN_RESET_PASSWORD`, `RESEND_API_KEY`/SMTP (recuperación de contraseña, ver `.env.example`), `APP_BRANCH` (indicador visual de rama activa).

@@ -16,6 +16,12 @@
 define('BASE_DIR', __DIR__);
 define('APP_VERSION', substr(md5_file(__FILE__), 0, 8)); // Cache buster estable basado en contenido
 
+// Locale UTF-8 para caracteres (solo LC_CTYPE, no toca formato numérico).
+// PHP 8 arranca en locale "C" y ahí escapeshellarg() BORRA los caracteres no ASCII:
+// "PAÑALERA.pdf" llegaba a pdftotext/tesseract como "PAALERA.pdf" (archivo inexistente)
+// y esos PDFs nunca se indexaban.
+setlocale(LC_CTYPE, 'C.UTF-8', 'en_US.UTF-8', 'es_ES.UTF-8', 'es_CO.UTF-8');
+
 // Detectar HTTPS detrás de proxy (Railway/Cloudflare)
 if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
     $_SERVER['HTTPS'] = 'on';
@@ -130,4 +136,11 @@ try {
 } catch (PDOException $e) {
     // Si la conexión falla, detener la ejecución con un mensaje claro
     die('❌ Error conectando a la base central: ' . $e->getMessage());
+}
+
+// MODO LOCAL: paquete instalado en el PC de un cliente (docs/modo_local/).
+// El marcador solo lo crea la herramienta de empaquetado; en la nube no existe
+// (y aunque alguien lo subiera por error, en Railway se ignora).
+if (is_file(BASE_DIR . '/local/MODO_LOCAL') && !getenv('RAILWAY_ENVIRONMENT')) {
+    require_once BASE_DIR . '/local/arranque.php';
 }

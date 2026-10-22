@@ -71,7 +71,8 @@ $pendingIndex = 0;
 $allDocsStmt = $db->query("SELECT datos_extraidos FROM documentos WHERE ruta_archivo LIKE '%.pdf'");
 while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
     $data = json_decode($row['datos_extraidos'] ?? '', true);
-    if (empty($data['text']) || strlen($data['text'] ?? '') < 100) {
+    // Pendiente = sin texto y sin error registrado (los fallidos se reintentan desde Indexar con "forzar")
+    if (empty($data['text']) && empty($data['error'])) {
         $pendingIndex++;
     }
 }
@@ -383,8 +384,9 @@ while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
                         progressBar.style.width = percent + '%';
                         progressText.textContent = `Indexados: ${totalIndexed}, Pendientes: ${pending}`;
 
-                        // Safety break if no progress is made
-                        if (result.indexed === 0 && pending > 0) {
+                        // Safety break if no progress is made (los fallidos quedan marcados y salen de la cola)
+                        const processed = result.indexed + (result.errors ? result.errors.length : 0);
+                        if (processed === 0 && pending > 0) {
                             throw new Error(`El proceso se detuvo. ${pending} documentos no se pudieron procesar (posiblemente archivos faltantes).`);
                         }
 

@@ -37,7 +37,8 @@ $error = '';
 $adminError = '';
 
 // Handle admin secret access
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret'])) {
+// En modo local (PC del cliente) no existe acceso de administrador
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret']) && !defined('KT_MODO_LOCAL')) {
     $secret = $_POST['admin_secret'] ?? '';
     if ($secret === ADMIN_SECRET) {
         // Reabrir sesión para escritura

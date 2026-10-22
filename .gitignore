@@ -31,3 +31,11 @@ desktop.ini
 
 # Logs
 *.log
+
+# Modo local (solo existen dentro del paquete del cliente; nunca en el repo ni en la nube)
+/local/MODO_LOCAL
+/local/licencia.txt
+/local/clave_publica.txt
+/local/.reloj
+*.ktdata
+*.ktsync
