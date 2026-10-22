@@ -5,7 +5,9 @@ php_value max_execution_time 600
 php_value max_input_time 600
 
 # Bloquear acceso a archivos sensibles
-<FilesMatch "\.(db|sql|zip|env|log|json)$">
+# md: la documentación (docs/, MAPA_TECNICO.md...) describe la arquitectura y hallazgos de seguridad
+# ps1/ktdata/ktsync/lock: herramientas y paquetes del modo local
+<FilesMatch "\.(db|sql|zip|env|log|json|md|ps1|ktdata|ktsync|lock)$">
     Order Allow,Deny
     Deny from all
 </FilesMatch>

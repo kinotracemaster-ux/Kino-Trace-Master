@@ -37,7 +37,9 @@ $clientCode = $_SESSION['client_code'];
 function createBackup(string $clientCode): array
 {
     $clientDir = CLIENTS_DIR . '/' . $clientCode;
-    $dbPath = $clientDir . '/data.db';
+    // La base real es {codigo}.db (antes buscaba "data.db", que no existe, y el
+    // respaldo salía SIN base de datos, solo con los PDFs).
+    $dbPath = client_db_path($clientCode);
     $uploadsDir = $clientDir . '/uploads';
 
     // Verify client directory exists
@@ -59,9 +61,14 @@ function createBackup(string $clientCode): array
 
     $filesAdded = 0;
 
-    // Add database file if exists
+    // Add database file if exists (copia consistente: incluye lo pendiente en el WAL)
+    $dbCopy = null;
     if (file_exists($dbPath)) {
-        $zip->addFile($dbPath, 'data.db');
+        $dbCopy = $tempDir . '/kt_backup_' . bin2hex(random_bytes(6)) . '.db';
+        $src = new PDO('sqlite:' . $dbPath);
+        $src->exec('VACUUM INTO ' . $src->quote($dbCopy));
+        $src = null;
+        $zip->addFile($dbCopy, $clientCode . '.db');
         $filesAdded++;
     }
 
@@ -85,6 +92,9 @@ function createBackup(string $clientCode): array
     }
 
     $zip->close();
+    if ($dbCopy) {
+        @unlink($dbCopy);
+    }
 
     if ($filesAdded === 0) {
         unlink($zipPath);
