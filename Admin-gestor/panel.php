@@ -502,6 +502,28 @@ try {
             }
         }
 
+        // RE-ENLAZAR HUÉRFANOS CON LOS PDF QUE YA ESTÁN EN EL SERVIDOR (sin subir nada)
+        elseif ($action === 'relink_server') {
+            $diagCode = sanitize_code($_POST['diag_code'] ?? '');
+            $aplicar = ($_POST['aplicar'] ?? '') === '1';
+            if ($diagCode === '' || !is_dir(CLIENTS_DIR . "/{$diagCode}")) {
+                $error = 'Cliente no válido.';
+            } else {
+                require_once __DIR__ . '/../helpers/pdf_linker.php';
+                $relDb = open_client_db($diagCode);
+                $respaldo = null;
+                if ($aplicar) {
+                    // Respaldo de la base antes de tocarla (se puede restaurar desde 💻 Modo local)
+                    require_once __DIR__ . '/../helpers/sync_local.php';
+                    $respaldo = basename(kt_respaldar_cliente(CLIENTS_DIR, $diagCode, 'antes_reenlazar'));
+                }
+                $relinkData = relinkFromServer($relDb, CLIENTS_DIR . "/{$diagCode}/uploads", $aplicar);
+                $relinkData['respaldo'] = $respaldo;
+                $message = ($aplicar ? '✅ Re-enlazados ' : '🔎 Se pueden re-enlazar ') . count($relinkData['enlaces'])
+                    . ' documento(s) con PDF que ya están en el servidor; ' . count($relinkData['sin_archivo']) . ' siguen sin archivo.';
+            }
+        }
+
         // GUARDAR PÁGINA PÚBLICA
         elseif ($action === 'update_public_page') {
             $code = sanitize_code($_POST['pp_code'] ?? '');
@@ -560,6 +582,9 @@ if (
         // Include orphan diagnostics data if available
         if (!empty($diagOrphanData)) {
             $jsonResp['orphan_data'] = $diagOrphanData;
+        }
+        if (!empty($relinkData)) {
+            $jsonResp['relink_data'] = $relinkData;
         }
         echo json_encode($jsonResp);
     }
@@ -2040,6 +2065,46 @@ $clientCodes = array_column($clients, 'codigo');
         }
 
         // ═══════ ORPHAN MODAL ═══════
+        async function relinkServer(clientCode, clientName, aplicar) {
+            const box = document.getElementById('relinkResult');
+            if (box) box.innerHTML = aplicar ? '⏳ Re-enlazando…' : '⏳ Buscando PDF en el servidor…';
+            try {
+                const formData = new FormData();
+                formData.append('action', 'relink_server');
+                formData.append('diag_code', clientCode);
+                formData.append('aplicar', aplicar ? '1' : '0');
+                const resp = await fetch('panel.php', { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const data = await resp.json();
+                if (!data.success || !data.relink_data) { if (box) box.innerHTML = '❌ ' + escHtml(data.error || 'Error'); return; }
+                const r = data.relink_data;
+                const metodos = { ARCHIVO: 'nombre exacto', CRUCE_REPARADO: 'cruce reparado', NOMBRE_REPARADO: 'tildes corregidas', ARCHIVO_SIN_FECHA: 'nombre sin fecha', NOMBRE: 'nombre del documento' };
+                let html = `<div style="margin-bottom:0.4rem;">${escHtml(data.message)}</div>`;
+                if (r.enlaces.length) {
+                    html += '<ul style="margin:0.25rem 0 0.5rem 1.1rem;max-height:180px;overflow-y:auto;">' + r.enlaces.map(e =>
+                        `<li><strong>${escHtml(e.numero)}</strong> ← <span style="font-family:var(--font-mono);font-size:0.75rem;">${escHtml(e.archivo.split('/').pop())}</span> <em style="color:var(--text-muted);">(${metodos[e.metodo] || e.metodo})</em></li>`).join('') + '</ul>';
+                }
+                if (r.cruces.length) {
+                    html += '<div style="color:#fbbf24;">Se corrige el PDF de ' + r.cruces.length + ' documento(s) repetido(s) que tenían el archivo del otro: ' + r.cruces.map(c => escHtml(c.numero_otro) + ' #' + c.id_otro).join(', ') + '</div>';
+                }
+                if (r.conflictos.length) {
+                    html += '<div style="color:#f87171;">Revisar a mano:<br>' + r.conflictos.map(escHtml).join('<br>') + '</div>';
+                }
+                if (!aplicar && (r.enlaces.length || r.cruces.length)) {
+                    html += `<button onclick="if (confirm('Se hará un respaldo de la base y luego se enlazarán. ¿Continuar?')) relinkServer('${escHtml(clientCode)}', '${escHtml(clientName)}', true)"
+                        style="margin-top:0.5rem;padding:0.5rem 1rem;border-radius:8px;background:#16a34a;color:#fff;border:none;cursor:pointer;">✅ Aplicar</button>`;
+                }
+                if (aplicar) {
+                    html += r.respaldo ? `<div style="color:var(--text-muted);margin-top:0.3rem;">Respaldo previo: ${escHtml(r.respaldo)}</div>` : '';
+                    if (box) box.innerHTML = html;
+                    setTimeout(() => diagnoseOrphans(clientCode, clientName), 1500); // refrescar la lista
+                    return;
+                }
+                if (box) box.innerHTML = html;
+            } catch (err) {
+                if (box) box.innerHTML = '❌ Error de conexión: ' + escHtml(err.message);
+            }
+        }
+
         function showOrphanModal(data, clientName) {
             // Remove existing modal if any
             const existing = document.getElementById('orphanModal');
@@ -2115,6 +2180,13 @@ $clientCodes = array_column($clients, 'codigo');
                         onmouseover="this.style.background='rgba(239,68,68,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">✕</button>
                 </div>
                 ${statsHtml}
+                ${orphans.length > 0 ? `
+                <div style="margin-bottom:1rem;padding:0.85rem 1rem;border-radius:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);">
+                    <div style="font-size:0.85rem;margin-bottom:0.5rem;">Si los PDF ya se subieron antes (por ejemplo en un ZIP), pueden estar en el servidor sin enlazar. Esto los busca y los enlaza <strong>sin subir nada</strong>; primero muestra qué haría.</div>
+                    <button onclick="relinkServer('${escHtml(code)}', '${escHtml(name)}', false)"
+                        style="padding:0.5rem 1rem;border-radius:8px;background:#3b82f6;color:#fff;border:none;cursor:pointer;font-size:0.85rem;">🔗 Re-enlazar con los PDF que ya están en el servidor</button>
+                    <div id="relinkResult" style="margin-top:0.75rem;font-size:0.82rem;"></div>
+                </div>` : ''}
                 ${tableHtml}
                 <div style="margin-top:1.25rem;text-align:right;">
                     <button onclick="document.getElementById('orphanModal').remove()" 
