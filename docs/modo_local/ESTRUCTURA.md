@@ -43,10 +43,12 @@ KinoTrace_losmonta/
 │           ├── uploads/…         Sus PDFs
 │           └── logo.*            (si tiene)
 └── runtime/
-    ├── php/                      PHP x64 NTS para Windows + php.ini
+    ├── php/                      PHP x64 NTS para Windows + php.ini (base)
+    │   └── php-local.ini         (lo genera preparar.php en cada arranque: rutas absolutas)
     ├── poppler/bin/              pdftotext.exe, pdftoppm.exe (+ DLLs)
     ├── cacert.pem                Certificados raíz (HTTPS al sincronizar)
-    ├── puerto.php                Busca puerto libre 8765–8799
+    ├── vc_redist.x64.exe         Visual C++ 2015-2022 (solo se usa si el PC no lo tiene)
+    ├── preparar.php              Escribe php-local.ini y busca puerto libre 8765–8799
     ├── sesiones/                 Sesiones PHP
     └── logs/php_errores.log
 ```
@@ -66,8 +68,8 @@ clients/<c>/logo.*
 ### `.ktsync` (PC → nube) — zip
 ```
 kt_manifest.json   {tipo:"ktsync", version:1, paquete_id, cliente, snapshot_id, huella_base, huella_local,
-                    max_cambio, creado_en, licencia_id, equipo, resumen, archivos:{ruta:{sha256,bytes}},
-                    archivos_faltantes}
+                    max_cambio, creado_en, licencia_id, equipo, resumen, archivos:{ruta_real:{sha256,bytes}},
+                    ubicaciones:{ruta_archivo:ruta_real}, archivos_faltantes}
 db/<c>.db
 uploads/<ruta>     solo documentos nuevos/modificados
 ```
@@ -84,7 +86,7 @@ Código de equipo = `KT-` + 16 hex de `SHA-256("kinotrace-equipo|" + id_máquina
 
 | Tabla | Columnas | Uso |
 |---|---|---|
-| `kt_estado` | clave, valor | cliente, snapshot_id, huella_base, exportado_en, origen, ultima_sync, ultima_sync_paquete |
+| `kt_estado` | clave, valor | cliente, snapshot_id, huella_base, exportado_en, origen, ultima_sync, ultima_sync_paquete, paquetes_generados (JSON, últimos 50) |
 | `kt_cambios` | id, tabla, fila_id, op (I/U/D), fecha | Diario de cambios desde el corte |
 | triggers `kt_trg_*` | — | Llenan `kt_cambios` |
 
@@ -93,11 +95,13 @@ Al volver a la nube por **reemplazo**, todo `kt_*` se elimina antes de instalar 
 ## Carpetas nuevas en la nube (dentro del volumen `clients/<c>/`)
 ```
 _respaldos/<AAAAMMDD_HHMMSS>_<etiqueta>/<c>.db   (+ archivos/ sobrescritos)
-_sync/registro.jsonl                             historial / anti-repetición
+_sync/registro.jsonl                             historial / anti-repetición / encadenar envíos
 _sync/recibidos/<fecha>_<paquete_id>.ktsync      paquetes recibidos
+_sync/intentos.json                              fallos de contraseña recientes (bloqueo 15 min)
 .kt_sync.lock                                    bloqueo durante una aplicación
 ```
-`_respaldos` crece con cada sincronización: revisar y depurar los antiguos de vez en cuando.
+Se conservan los últimos 15 respaldos y 15 paquetes recibidos por cliente. Todo esto (y los
+`-wal`/`-shm` de SQLite) está bloqueado para descarga en `.htaccess`.
 
 ## Flujo de una petición en el PC
 ```

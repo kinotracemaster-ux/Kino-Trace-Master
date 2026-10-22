@@ -19,6 +19,7 @@ require_once __DIR__ . '/helpers/tenant.php';
 require_once __DIR__ . '/helpers/sync_local.php';
 
 header('Content-Type: application/json; charset=utf-8');
+ini_set('display_errors', '0'); // un warning antes del JSON rompe la respuesta y muestra rutas
 
 function kt_responder(int $http, array $datos): void
 {
@@ -35,15 +36,42 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 RateLimiter::middleware();
 
+// Paquete más grande que post_max_size: PHP descarta el cuerpo entero y $_POST llega vacío
+// (sin esto se respondía "contraseña incorrecta", que confunde).
+if (empty($_POST) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    kt_responder(413, ['ok' => false, 'error' => 'El paquete supera el tamaño que acepta el servidor ('
+        . ini_get('post_max_size') . '). Use "Descargar paquete" y envíelo a Kino.']);
+}
+
 // --- Autenticación ---
+// Fuerza bruta: 5 fallos en 15 minutos bloquean la sincronización de ESE código por 15 minutos.
+// Se cuenta por cliente (no por IP, que se puede falsear) y sin dormir procesos de Apache.
+const KT_MAX_FALLOS = 5;
+const KT_VENTANA_FALLOS = 900;
 $codigo = sanitize_code((string) ($_POST['codigo'] ?? ''));
 $password = (string) ($_POST['password'] ?? '');
 $st = $centralDb->prepare('SELECT password_hash FROM control_clientes WHERE codigo = ? AND activo = 1 LIMIT 1');
 $st->execute([$codigo]);
 $hash = $st->fetchColumn();
+$intentosF = $hash ? CLIENTS_DIR . "/$codigo/_sync/intentos.json" : null;
+$fallos = [];
+if ($intentosF && is_file($intentosF)) {
+    $fallos = array_values(array_filter((array) json_decode((string) file_get_contents($intentosF), true),
+        fn($t) => is_int($t) && $t > time() - KT_VENTANA_FALLOS));
+}
+if (count($fallos) >= KT_MAX_FALLOS) {
+    kt_responder(429, ['ok' => false, 'error' => 'Demasiados intentos fallidos. Espere 15 minutos o envíe el paquete a Kino.']);
+}
 if ($codigo === '' || !$hash || !password_verify($password, $hash)) {
-    sleep(2); // frena intentos de adivinar la contraseña
+    if ($intentosF) {
+        @mkdir(dirname($intentosF), 0770, true);
+        $fallos[] = time();
+        file_put_contents($intentosF, json_encode($fallos), LOCK_EX);
+    }
     kt_responder(401, ['ok' => false, 'error' => 'Código o contraseña incorrectos.']);
+}
+if ($intentosF && is_file($intentosF)) {
+    @unlink($intentosF);
 }
 
 // --- Archivo ---
@@ -61,12 +89,17 @@ try {
         throw new RuntimeException('El paquete es de otro cliente.');
     }
 
-    // Guardar copia del paquete recibido (auditoría / reintento manual)
+    // Guardar copia del paquete recibido (auditoría / reintento manual); se conservan los últimos
     $dirSync = CLIENTS_DIR . "/$codigo/_sync/recibidos";
     @mkdir($dirSync, 0770, true);
-    @copy($f['tmp_name'], "$dirSync/" . gmdate('Ymd_His') . '_' . $m['paquete_id'] . '.ktsync');
+    $copia = "$dirSync/" . gmdate('Ymd_His') . '_' . $m['paquete_id'] . '.ktsync';
+    @copy($f['tmp_name'], $copia);
+    kt_podar(glob("$dirSync/*.ktsync") ?: [], KT_RETENER);
 
     $r = kt_aplicar_sync(CLIENTS_DIR, $paquete, null, 'cliente:' . $codigo);
+    if ($r['modo'] === 'ya_aplicado') {
+        @unlink($copia); // un reenvío no ocupa espacio
+    }
     $mensajes = [
         'reemplazo' => 'Listo: la nube quedó igual a la copia de su equipo.',
         'fusion' => 'Listo: se agregaron a la nube los documentos nuevos de su equipo.',

@@ -1,4 +1,4 @@
-<#
+﻿<#
   local/construir/construir.ps1 — Arma el paquete Windows de un cliente desde un PC Windows
   del ADMINISTRADOR, sin tener PHP instalado. Guía: docs/modo_local/DESPLIEGUE_PC.md
 
@@ -45,12 +45,15 @@ if (-not (Test-Path $php)) {
     $hash = (Get-FileHash $phpZip -Algorithm SHA256).Hash
     if ($hash -ne $zipInfo.sha256.ToUpper()) { Remove-Item $phpZip; throw 'El PHP descargado no coincide con su SHA-256. No se usa.' }
     Expand-Archive $phpZip -DestinationPath $phpDir -Force
-    $ini = @("extension_dir=`"$phpDir\ext`"")
+    # Ruta con "/" y entre comillas; archivo en UTF-8 SIN BOM (en ASCII una carpeta de usuario
+    # con acentos, p. ej. C:\Users\José, quedaba como "Jos?" y no cargaba ninguna extensión)
+    $extDir = (Join-Path $phpDir 'ext') -replace '\\', '/'
+    $ini = @('; php.ini del constructor de paquetes KINO TRACE', "extension_dir = `"$extDir`"")
     foreach ($e in @('curl', 'fileinfo', 'mbstring', 'openssl', 'pdo_sqlite', 'sqlite3', 'sodium', 'zip')) {
         if (Test-Path (Join-Path $phpDir "ext\php_$e.dll")) { $ini += "extension=$e" }
     }
     $ini += 'memory_limit=2048M'
-    Set-Content -Path (Join-Path $phpDir 'php.ini') -Value $ini -Encoding ASCII
+    [IO.File]::WriteAllLines((Join-Path $phpDir 'php.ini'), [string[]]$ini, (New-Object System.Text.UTF8Encoding $false))
 } else {
     $phpZip = Get-ChildItem $cache -Filter 'php-*.zip' | Select-Object -First 1 -ExpandProperty FullName
 }

@@ -16,7 +16,7 @@
 | Alguien en la red de la oficina abre el programa | El servidor escucha solo en `127.0.0.1`; además se valida IP y `Host` en cada petición | `INICIAR…bat`, `router.php`, `arranque.php` |
 | Una web maliciosa apunta su dominio a 127.0.0.1 (*DNS rebinding*) | `Host` debe ser `127.0.0.1`/`localhost` o se responde 403 | `router.php`, `arranque.php` |
 | Otra pestaña del navegador envía formularios al programa (CSRF) | Cookie de sesión `SameSite=Lax` + token CSRF en sincronizar y en el panel | `session_init.php`, `sincronizar.php`, `Admin-gestor/sync_local.php` |
-| Leer la base, respaldos, herramientas o la licencia por URL | Bloqueo por carpeta (`Admin-gestor`, `helpers`, `vendor`, `local/herramientas`…), por extensión (`.db .sql .zip .json .md .txt .ini .pem …`) y archivos ocultos; contención por `realpath` (atajos/nombres cortos de Windows) | `router.php` |
+| Leer la base, respaldos, herramientas o la licencia por URL | Solo se atienden rutas **canónicas**: `//x`, `///x`, `/x./`, `/./x` se redirigen a su forma normal y recién ahí se revisan (antes `///clients/kino/kino.db` descargaba la base sin sesión). Se rechazan `..`, `...`, `%2e%2e` y `:` (flujos alternativos de Windows `archivo::$DATA`). Bloqueo por carpeta (`Admin-gestor`, `helpers`, `vendor`, `local/herramientas`…), por extensión (`.db .sql .zip .json .md .txt .ini .pem …`) y archivos ocultos; contención por `realpath` | `router.php` |
 | Abrir un PDF del cliente sin haber iniciado sesión | Solo con sesión **de ese cliente** y licencia válida | `router.php` |
 | Entrar como administrador en el PC | Acceso admin deshabilitado (login, router y arranque); el Gestor no aparece | `login.php`, `router.php`, `arranque.php` |
 | **Copiar la carpeta a otro PC** | Licencia atada al código de equipo (hash de `MachineGuid`) | `licencia.php` |
@@ -26,8 +26,11 @@
 | Filtrar datos de otros clientes en el paquete | `central.db` filtrada (borra las demás filas y tablas) + `VACUUM` (no quedan en páginas libres; verificado por bytes) | `kt_exportar_datos` |
 | Secretos dentro del paquete | No viaja ninguno: sin `GEMINI_API_KEY`, SMTP, `ADMIN_SECRET`; `password_plain` y tokens de recuperación se borran | `kt_exportar_datos`, lista blanca de `kt.php` |
 | Paquete `.ktsync` manipulado (zip-slip, archivos colados, base alterada) | Lista blanca exacta de entradas, rutas validadas, SHA-256 por archivo, `quick_check`, huella de la base = manifiesto | `kt_leer_paquete_sync` |
+| "Zip bomb": un paquete chico que al descomprimir llena el volumen de todos los clientes | Tamaños declarados revisados antes de extraer (total ≤ 8 GiB, cada PDF = tamaño del manifiesto) y topes reales al extraer (base ≤ 2 GiB) | `kt_leer_paquete_sync`, `kt_zip_extraer` |
+| Llenar el volumen con respaldos/paquetes | Se conservan los últimos 15 respaldos y 15 paquetes por cliente; reenvíos no se guardan | `kt_podar` |
+| Descargar los archivos `-wal`/`-shm` de SQLite o el historial de sincronización en la nube | `.htaccess` bloquea `.db-wal .db-shm .db-journal .jsonl .nuevo` y las carpetas `_sync`/`_respaldos` (probado con Apache) | `.htaccess` |
 | Subir un paquete a nombre de otro cliente | Autenticación con código + contraseña; el cliente del paquete debe coincidir | `sync_recibir.php` |
-| Adivinar la contraseña vía `sync_recibir.php` | `password_verify` + 2 s de espera por fallo + límite general 100 peticiones/min/IP | `sync_recibir.php`, `RateLimiter` |
+| Adivinar la contraseña vía `sync_recibir.php` | 5 fallos en 15 min **bloquean ese código** 15 min (por cliente, no por IP, que se puede falsear), sin dormir procesos de Apache (antes `sleep(2)` permitía ocupar los 25 procesos) + límite general 100 peticiones/min/IP | `sync_recibir.php`, `RateLimiter` |
 | Repetir un paquete viejo (*replay*) | `paquete_id` aplicado queda en `registro.jsonl` y no se reaplica; huella igual = "ya aplicado" | `kt_previsualizar_sync` |
 | Una sincronización daña la nube | Respaldo automático **antes** de aplicar + Restaurar; fusión nunca borra ni edita | `kt_aplicar_sync`, panel |
 | Descargar binarios falsos al armar el paquete | SHA-256 verificado (PHP desde `releases.json` de php.net, cacert con su `.sha256`, Poppler si GitHub publica el digest) | `kt.php`, `construir.ps1` |
@@ -95,9 +98,33 @@ y revocar las viejas en cada proveedor):
 | **ALTA** | Contraseñas en **texto plano**: columna `password_plain` en `central.db`, la escribe el panel al crear/cambiar contraseñas y `ADMIN_RESET_PASSWORD`, y el panel la muestra. Quien obtenga `central.db` (p. ej. un respaldo del volumen) tiene todas las contraseñas. | Dejar de guardarla, `UPDATE control_clientes SET password_plain = NULL`, y pedir cambio de contraseña. (El paquete local ya la elimina.) |
 | **MEDIA** | PDFs accesibles **sin sesión** por URL (`/clients/<c>/uploads/…`); el `.htaccess` solo bloquea `.db/.sql/.zip/.env/.log/.json`. Los nombres llevan un sufijo aleatorio, pero un enlace filtrado funciona para siempre. | Servir los PDFs por un script con sesión (como `local/router.php`) y denegar `/clients/` en `.htaccess`. |
 | **MEDIA** (arreglado aquí) | El botón **Backup** buscaba `data.db` y entregaba respaldos **sin base de datos**. | Arreglado en `Admin-gestor/backup.php`. Los respaldos viejos no sirven para restaurar la base. |
+| **MEDIA** (arreglado aquí) | Con SQLite en modo WAL, junto a cada base hay `<c>.db-wal` y `<c>.db-shm`; el `.htaccess` solo bloqueaba `.db`, así que el `-wal` (cambios recientes de la base) se podía descargar conociendo el código del cliente. | Bloqueados en `.htaccess`. |
 | BAJA | La cuenta `kino` (contraseña normal) también entra al Gestor. | Tratar su contraseña como de administrador (larga, única). |
 
-## 7. Checklist antes de entregar un paquete
+## 7. Revisión adversarial (2026-10-22)
+
+Se revisó todo el cambio con varios agentes y luego se verificó cada hallazgo a mano (reproduciéndolo).
+Confirmados y **corregidos**:
+- **Crítico — router local**: `///clients/kino/kino.db`, `///local/licencia.txt` y `//clients/…/x.pdf`
+  se servían sin sesión (`parse_url` interpreta mal las barras dobles). Ahora solo rutas canónicas.
+- Nube: `-wal`/`-shm`, `registro.jsonl` y `.db.nuevo` descargables; "zip bomb" sin límite; `sleep(2)`
+  aprovechable para agotar procesos; paquete grande respondido como "contraseña incorrecta"; sin
+  retención de respaldos.
+- Sincronización: documentos distintos con el mismo PDF se juntaban en una fusión; reenvíos sin hash
+  ni ruta se duplicaban; tras un envío del que el PC no se enteró, las ediciones posteriores se perdían;
+  restaurar impedía reaplicar el mismo paquete; un REEMPLAZO borraba el texto indexado en la nube y
+  cambios de configuración; los PDF de **Subida en lote** no viajaban; en Windows quedaba una copia de
+  la base en `%TEMP%`.
+- Windows: rutas con `( & ~ !` o acentos rompían el arranque; el chequeo de puerto libre no veía puertos
+  ocupados; faltaba el Visual C++ que PHP necesita; `construir.ps1` corrompía rutas con acentos; la
+  sección Backup mostraba "No encontrado" en modo local.
+
+Conocidos y **no corregidos** (documentados): en Windows el límite de tiempo de `pdftotext` no corta un
+PDF que lo cuelga (se ve la ventana trabada; cerrar y reabrir); el visor de PDF usa PDF.js y SweetAlert2
+desde internet (sin conexión, el resaltador no carga); quedan sin probar en Windows real el `.bat`, el
+`.ps1` y las descargas.
+
+## 8. Checklist antes de entregar un paquete
 - [ ] El `.ktdata` es del cliente correcto (nombre del archivo y `conteos` coherentes).
 - [ ] Paquete armado con la versión actual del repo (`git pull`).
 - [ ] Zip entregado por canal privado; nunca adjunto en un chat grupal.

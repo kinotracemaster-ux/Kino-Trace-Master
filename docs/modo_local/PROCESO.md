@@ -65,7 +65,11 @@ Tiempo típico: 10–20 min (la mayor parte es la descarga del paquete).
 2. La nube respalda la base, aplica y responde:
    - *"la nube quedó igual a la copia de su equipo"* → **reemplazo** (la nube no cambió mientras tanto).
    - *"se agregaron los documentos nuevos"* → **fusión** (la nube también cambió); si hay conflictos
-     se listan para revisarlos a mano en la nube.
+     se listan para revisarlos a mano en la nube. Después de una fusión, **no seguir trabajando en esa
+     copia**: volver a la nube o pedir un `.ktdata` nuevo (las ediciones posteriores no se aplicarían).
+   - Se puede sincronizar varias veces (por ejemplo al final de cada día): mientras nadie trabaje en la
+     nube, cada envío es un reemplazo, aunque un envío anterior se haya hecho a mano (Camino B).
+   - 5 contraseñas equivocadas seguidas bloquean el envío de ese cliente por 15 minutos.
 
 **Camino B — sin internet o la nube rechaza el envío:**
 1. *Opción 2 — Descargar paquete* → archivo `sync_losmonta_….ktsync`.
