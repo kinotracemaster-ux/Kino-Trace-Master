@@ -2,6 +2,11 @@
 
 Registro breve de cambios recientes y contexto abierto, para que sesiones futuras de Claude Code no necesiten re-leer todo el `git log` ni re-derivar decisiones ya tomadas. Para arquitectura y comandos ver `CLAUDE.md`. Este archivo se actualiza incrementalmente al tope (más reciente primero); no reescribas entradas viejas, solo agregá arriba.
 
+## 2026-10-22 — CONTEXTO.md como punto de entrada
+
+- Creado `CONTEXTO.md`: resumen de una página (qué es la app, mapa del repo, flujos clave incluyendo login/admin/Buscador público/backup, reglas para no romper nada, bugs conocidos, índice de docs). `CLAUDE.md` ahora apunta a él.
+- Detectados (sin corregir): `Admin-gestor/backup.php` busca `data.db` en vez de `{codigo}.db` (el backup no incluye la BD); `ADMIN_SECRET` cae a default `'3312'` si no hay env var; Smalot PdfParser no está instalado.
+
 ## 2026-09-09 — Fix: Búsqueda Voraz no encontraba algunos códigos existentes
 
 - **Causa raíz** (ver detalle en `TROUBLESHOOTING.md` #8): la comparación de códigos en `greedy_search()`/`search_by_code()` es exacta (`UPPER(codigo) = UPPER(?)`). Los códigos tipeados/pegados a mano al subir o editar un documento (`DocumentController::upload()`/`update()`) solo pasaban por `trim()`, así que espacios no separables (NBSP) o puntuación pegada (coma/punto final, típico al copiar de PDF/Excel) quedaban guardados literalmente. Lo mismo pasaba al parsear el textarea de la Búsqueda Voraz (`SearchController::search()`). Los códigos auto-extraídos de PDF sí se limpiaban (`clean_extracted_code()`), por eso el bug era inconsistente: solo afectaba entrada manual.

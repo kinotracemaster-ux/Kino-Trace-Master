@@ -28,6 +28,8 @@ No hay `composer.json` con scripts de lint/build; `composer install` solo trae d
 
 ⚠️ `optimize_db.php` **no existe** en el repo pese a haber sido documentado antes como comando. La optimización de índices real es automática y vive en `ensure_client_schema()` (`helpers/tenant.php`), que corre en cada `open_client_db()` — no requiere ejecutar nada manualmente.
 
+**Al empezar una sesión, leer `CONTEXTO.md`** (resumen de una página: qué hace la app, flujos clave, reglas, bugs conocidos y qué doc leer para cada cosa).
+
 Para un mapa exhaustivo y verificado del código real (todas las acciones de `api.php`, esquema SQLite completo, inventario de helpers/módulos, inconsistencias conocidas), ver `MAPA_TECNICO.md`.
 
 ## Architecture
