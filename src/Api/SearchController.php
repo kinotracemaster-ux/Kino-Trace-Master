@@ -82,8 +82,10 @@ class SearchController extends BaseController
 
         $results = [];
         foreach ($rows as $r) {
-            $data = json_decode($r['datos_extraidos'], true);
-            $text = $data['text'] ?? '';
+            // Documentos nunca indexados tienen datos_extraidos NULL (p. ej. importados por SQL
+            // sin PDF): json_decode(null) es "deprecated" en PHP 8.1+ y rompía la búsqueda
+            $data = json_decode((string) ($r['datos_extraidos'] ?? ''), true);
+            $text = (is_array($data) && is_string($data['text'] ?? null)) ? $data['text'] : '';
             $snippet = '';
 
             if (!empty($text)) {
@@ -95,6 +97,9 @@ class SearchController extends BaseController
                         substr($text, $start, $end - $start) .
                         ($end < strlen($text) ? '...' : '');
                     $snippet = preg_replace('/\s+/', ' ', trim($snippet));
+                    // substr() corta por bytes y puede partir una letra con tilde; con UTF-8 roto
+                    // json_encode() falla y la búsqueda respondía vacío
+                    $snippet = mb_scrub($snippet, 'UTF-8');
                 }
             }
 

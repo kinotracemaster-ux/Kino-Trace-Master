@@ -18,8 +18,9 @@ class AiController extends BaseController
         if ($documentId) {
             $stmt = $this->db->prepare("SELECT datos_extraidos FROM documentos WHERE id = ?");
             $stmt->execute([$documentId]);
-            $data = json_decode($stmt->fetchColumn(), true);
-            $text = $data['text'] ?? '';
+            // Sin indexar = NULL; json_decode(null) es "deprecated" en PHP 8.1+
+            $data = json_decode((string) ($stmt->fetchColumn() ?: ''), true);
+            $text = (is_array($data) && is_string($data['text'] ?? null)) ? $data['text'] : '';
         } else {
             $text = $post['text'] ?? '';
         }
