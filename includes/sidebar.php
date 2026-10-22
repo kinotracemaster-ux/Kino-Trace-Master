@@ -649,6 +649,20 @@ $currentSection = $currentSection ?? 'voraz';
         // Evitar recargar si ya tiene contenido
         if (backupSection.dataset.loaded === 'true') return;
 
+        <?php if (defined('KT_MODO_LOCAL')): ?>
+        // Modo local: el Backup de la nube (Admin-gestor) no viaja en el paquete; la copia
+        // de seguridad es la carpeta del programa
+        backupSection.innerHTML = `
+            <div class="backup-hero">
+                <h1>💾 Respaldo de Datos (modo local)</h1>
+                <p>Sus datos están solo en este equipo. Al terminar el día: cierre el programa y copie
+                   la carpeta completa del programa (por ejemplo <strong>C:\\KinoTrace</strong>) a un USB o disco externo.</p>
+                <p>Para mandarlos a la nube use <a href="local/sincronizar.php">Sincronizar con la nube</a>.</p>
+            </div>`;
+        backupSection.dataset.loaded = 'true';
+        return;
+        <?php endif; ?>
+
         backupSection.innerHTML = '<div class="loading"><div class="spinner"></div><p>Cargando backup...</p></div>';
 
         fetch('Admin-gestor/backup.php?partial=1')

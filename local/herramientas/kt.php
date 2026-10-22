@@ -405,7 +405,7 @@ function cmd_paquete(array $a): void
     $rt = "$dest/runtime";
     @mkdir("$rt/sesiones", 0775, true);
     @mkdir("$rt/logs", 0775, true);
-    file_put_contents("$rt/puerto.php", "<?php\n// Primer puerto libre para el servidor local\nfor (\$p = 8765; \$p < 8800; \$p++) {\n    \$s = @stream_socket_server('tcp://127.0.0.1:' . \$p);\n    if (\$s) {\n        fclose(\$s);\n        echo \$p;\n        exit;\n    }\n}\necho 8765;\n");
+    file_put_contents("$rt/preparar.php", KT_PREPARAR_PHP);
     if (empty($a['sin-runtime'])) {
         $cache = is_string($a['cache'] ?? null) ? $a['cache'] : sys_get_temp_dir() . '/kinotrace_descargas';
         @mkdir($cache, 0775, true);
@@ -439,7 +439,7 @@ function cmd_paquete(array $a): void
             }
         }
         kt_escribir_crlf("$rt/php/php.ini", "; PHP del modo local de KINO TRACE (generado por kt.php)\n"
-            . "; extension_dir y rutas absolutas se pasan con -d desde INICIAR KINO TRACE.bat\n"
+            . "; Base: runtime/preparar.php le agrega las rutas absolutas y escribe php-local.ini\n"
             . implode("\n", $exts) . "\n"
             . "memory_limit = 1024M\nupload_max_filesize = 1024M\npost_max_size = 1100M\nmax_execution_time = 600\nmax_input_time = 600\n"
             . "display_errors = Off\nlog_errors = On\ndate.timezone = America/Bogota\nsession.use_strict_mode = 1\nexpose_php = Off\n");
@@ -482,6 +482,16 @@ function cmd_paquete(array $a): void
             kt_descargar('https://curl.se/ca/cacert.pem', $cacert, $sha ?: null);
         }
         copy($cacert, "$rt/cacert.pem");
+
+        // PHP para Windows necesita el Visual C++ 2015-2022 (x64). Muchos PC ya lo tienen;
+        // si falta, el lanzador ofrece instalarlo desde aquí (pide permiso de administrador).
+        if (empty($a['sin-vcredist'])) {
+            $vc = is_string($a['vcredist'] ?? null) ? $a['vcredist'] : "$cache/vc_redist.x64.exe";
+            if (!is_file($vc)) {
+                kt_descargar('https://aka.ms/vs/17/release/vc_redist.x64.exe', $vc);
+            }
+            copy($vc, "$rt/vc_redist.x64.exe");
+        }
     } else {
         kt_info('    (--sin-runtime: no se incluyen PHP/Poppler; solo para pruebas)');
     }
@@ -513,9 +523,8 @@ function kt_plantilla_iniciar(string $nube): string
 setlocal
 title KINO TRACE - Modo local
 cd /d "%~dp0"
-set "KT_RAIZ=%~dp0"
 set "KT_NUBE_URL={$nube}"
-set "PATH=%KT_RAIZ%runtime\\poppler\\bin;%KT_RAIZ%runtime\\php;%ProgramFiles%\\Tesseract-OCR;%PATH%"
+set "PATH=%~dp0runtime\\poppler\\bin;%~dp0runtime\\php;%ProgramFiles%\\Tesseract-OCR;%PATH%"
 
 if not exist "runtime\\php\\php.exe" (
     echo No se encuentra runtime\\php\\php.exe
@@ -523,11 +532,23 @@ if not exist "runtime\\php\\php.exe" (
     pause
     exit /b 1
 )
+
+rem PHP necesita el Visual C++ 2015-2022. Si falta, ofrecer instalarlo.
+rem (si falta una DLL el código de salida es NEGATIVO: "if errorlevel 1" no lo detecta)
+runtime\\php\\php.exe -n -v >nul 2>&1
+if %errorlevel% neq 0 goto :sin_vcredist
+
 if not exist "runtime\\sesiones" mkdir "runtime\\sesiones"
 if not exist "runtime\\logs" mkdir "runtime\\logs"
 
-for /f "delims=" %%p in ('runtime\\php\\php.exe -n runtime\\puerto.php') do set "KT_PUERTO=%%p"
-if not defined KT_PUERTO set "KT_PUERTO=8765"
+rem preparar.php escribe php-local.ini (rutas absolutas) y devuelve un puerto libre
+set "KT_PUERTO="
+for /f "delims=" %%p in ('runtime\\php\\php.exe -n runtime\\preparar.php') do set "KT_PUERTO=%%p"
+if not defined KT_PUERTO (
+    echo No se pudo preparar el programa. Revise que la carpeta no sea de solo lectura.
+    pause
+    exit /b 1
+)
 set "KT_URL=http://127.0.0.1:%KT_PUERTO%/"
 
 echo.
@@ -542,20 +563,68 @@ echo.
 
 start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; try { Start-Process msedge -ArgumentList '--app=%KT_URL%' -ErrorAction Stop } catch { Start-Process '%KT_URL%' }"
 
-runtime\\php\\php.exe -c runtime\\php\\php.ini ^
-  -d "extension_dir=%KT_RAIZ%runtime\\php\\ext" ^
-  -d "curl.cainfo=%KT_RAIZ%runtime\\cacert.pem" ^
-  -d "openssl.cafile=%KT_RAIZ%runtime\\cacert.pem" ^
-  -d "session.save_path=%KT_RAIZ%runtime\\sesiones" ^
-  -d "error_log=%KT_RAIZ%runtime\\logs\\php_errores.log" ^
-  -S 127.0.0.1:%KT_PUERTO% -t app app\\local\\router.php
+runtime\\php\\php.exe -c runtime\\php\\php-local.ini -S 127.0.0.1:%KT_PUERTO% -t app app\\local\\router.php
 
 echo.
 echo El servidor se detuvo. Si fue un error, revise runtime\\logs\\php_errores.log
 pause
+exit /b 0
+
+:sin_vcredist
+echo.
+echo  Falta un componente de Windows (Microsoft Visual C++ 2015-2022) que PHP necesita.
+if exist "runtime\\vc_redist.x64.exe" (
+    echo  Se abrira el instalador de Microsoft. Acepte el permiso de administrador.
+    pause
+    start /wait "" "runtime\\vc_redist.x64.exe" /install /passive /norestart
+    echo  Listo. Vuelva a abrir INICIAR KINO TRACE.
+) else (
+    echo  Descarguelo de https://aka.ms/vs/17/release/vc_redist.x64.exe e instalelo.
+)
+pause
+exit /b 1
 
 BAT;
 }
+
+/**
+ * Se copia a runtime/preparar.php. Escribe php-local.ini con las rutas absolutas del
+ * paquete ENTRE COMILLAS y con "/" (así una carpeta con espacios, paréntesis, &, ~ o
+ * acentos no rompe el INI) y devuelve un puerto libre.
+ */
+const KT_PREPARAR_PHP = <<<'PHP'
+<?php
+// Generado por kt.php — lo ejecuta INICIAR KINO TRACE.bat en cada arranque.
+$raiz = str_replace('\\', '/', dirname(__DIR__));
+$rt = $raiz . '/runtime';
+$q = fn($v) => '"' . str_replace(['"', '$'], '', $v) . '"';
+$ini = (string) @file_get_contents($rt . '/php/php.ini') . "\r\n"
+    . 'extension_dir = ' . $q($rt . '/php/ext') . "\r\n"
+    . 'curl.cainfo = ' . $q($rt . '/cacert.pem') . "\r\n"
+    . 'openssl.cafile = ' . $q($rt . '/cacert.pem') . "\r\n"
+    . 'session.save_path = ' . $q($rt . '/sesiones') . "\r\n"
+    . 'error_log = ' . $q($rt . '/logs/php_errores.log') . "\r\n";
+if (@file_put_contents($rt . '/php/php-local.ini', $ini) === false) {
+    exit(1);
+}
+// Puerto libre: nadie debe responder al conectar Y debe poder abrirse. En Windows abrir un
+// puerto puede "funcionar" aunque otro programa ya lo use, por eso se prueba conectando.
+for ($p = 8765; $p < 8800; $p++) {
+    $c = @fsockopen('127.0.0.1', $p, $errno, $errstr, 0.3);
+    if ($c) {
+        fclose($c);
+        continue;
+    }
+    $s = @stream_socket_server('tcp://127.0.0.1:' . $p);
+    if ($s) {
+        fclose($s);
+        echo $p;
+        exit(0);
+    }
+}
+exit(1);
+
+PHP;
 
 function kt_plantilla_acceso(): string
 {

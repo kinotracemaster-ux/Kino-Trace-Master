@@ -162,6 +162,12 @@ $hayCambios = array_sum(array_map(fn($t) => array_sum(array_map('count', $t)), a
                     </ul>
                 <?php endif; ?>
             </div>
+            <?php if (($resultado['modo'] ?? '') === 'fusion'): ?>
+                <div class="kt-warn">
+                    La nube también tenía cambios propios, así que solo se agregaron los documentos nuevos de este equipo.
+                    Para seguir trabajando aquí sin perder ediciones futuras, pida a Kino un paquete nuevo (o vuelva a trabajar en la nube).
+                </div>
+            <?php endif; ?>
             <?php if (!empty($resultado['informe']['conflictos'])): ?>
                 <div class="kt-warn">
                     <strong>Revisar en la nube (no se aplicaron solos):</strong>

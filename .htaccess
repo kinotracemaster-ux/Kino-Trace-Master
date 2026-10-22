@@ -7,7 +7,15 @@ php_value max_input_time 600
 # Bloquear acceso a archivos sensibles
 # md: la documentación (docs/, MAPA_TECNICO.md...) describe la arquitectura y hallazgos de seguridad
 # ps1/ktdata/ktsync/lock: herramientas y paquetes del modo local
-<FilesMatch "\.(db|sql|zip|env|log|json|md|ps1|ktdata|ktsync|lock)$">
+# db-wal/db-shm/db-journal: SQLite en modo WAL deja junto a cada base un archivo con los
+#   cambios recientes; sin esto se podía descargar con solo conocer el código del cliente
+# jsonl/nuevo: historial de sincronización y copia temporal durante un reemplazo
+<FilesMatch "\.(db|db-wal|db-shm|db-journal|sql|zip|env|log|json|jsonl|md|ps1|ktdata|ktsync|lock|nuevo)$">
     Order Allow,Deny
     Deny from all
 </FilesMatch>
+
+# Modo local: historial, paquetes recibidos y respaldos automáticos de cada cliente
+<IfModule mod_alias.c>
+    RedirectMatch 404 ^/clients/[^/]+/(_sync|_respaldos)(/|$)
+</IfModule>

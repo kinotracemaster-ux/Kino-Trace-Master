@@ -33,7 +33,17 @@ const KT_COLUMNAS_HUELLA = [
         'ruta_archivo', 'original_path', 'hash_archivo', 'estado', 'notas', 'requiere_revision'],
     'codigos' => ['id', 'documento_id', 'codigo', 'descripcion', 'cantidad', 'valor_unitario', 'validado', 'alerta'],
     'vinculos' => ['id', 'documento_origen_id', 'documento_destino_id', 'tipo_vinculo'],
+    // Configuración que el cliente puede cambiar: si cambió en la nube, un REEMPLAZO la revertiría
+    'tipos_documento' => ['id', 'codigo', 'nombre', 'activo'],
+    'configuracion_extraccion' => ['id', 'prefix', 'terminator', 'min_length', 'max_length'],
 ];
+
+/** Respaldos y paquetes recibidos que se conservan por cliente (el volumen es compartido). */
+const KT_RETENER = 15;
+
+/** Límites al descomprimir un .ktsync (protección contra "zip bombs"). */
+const KT_MAX_BD_BYTES = 2147483648;        // 2 GiB
+const KT_MAX_PAQUETE_BYTES = 8589934592;   // 8 GiB en total
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -134,6 +144,18 @@ function kt_ext_permitida(string $ruta): bool
 function kt_ahora(): string
 {
     return gmdate('Y-m-d\TH:i:s\Z');
+}
+
+/**
+ * Conserva los $mantener elementos más nuevos (los nombres empiezan con AAAAMMDD_HHMMSS)
+ * y borra el resto (archivos o carpetas).
+ */
+function kt_podar(array $rutas, int $mantener): void
+{
+    rsort($rutas);
+    foreach (array_slice($rutas, $mantener) as $r) {
+        is_dir($r) ? kt_borrar_dir($r) : @unlink($r);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,8 +303,12 @@ function kt_zip_agregar_archivo(ZipArchive $zip, string $rutaFs, string $nombreZ
     }
 }
 
-/** Extrae una entrada del zip por nombre exacto (sin depender del wrapper zip://). */
-function kt_zip_extraer(ZipArchive $zip, string $nombre, string $destino): bool
+/**
+ * Extrae una entrada del zip por nombre exacto (sin depender del wrapper zip://).
+ * Con $maxBytes, falla si la entrada descomprimida pasa ese tamaño (no confía en el
+ * tamaño declarado en el zip, que se puede falsear).
+ */
+function kt_zip_extraer(ZipArchive $zip, string $nombre, string $destino, ?int $maxBytes = null): bool
 {
     $in = $zip->getStream($nombre);
     if (!$in) {
@@ -293,10 +319,14 @@ function kt_zip_extraer(ZipArchive $zip, string $nombre, string $destino): bool
         fclose($in);
         return false;
     }
-    $ok = stream_copy_to_stream($in, $out) !== false;
+    $copiados = $maxBytes === null ? stream_copy_to_stream($in, $out) : stream_copy_to_stream($in, $out, $maxBytes + 1);
     fclose($in);
     fclose($out);
-    return $ok;
+    if ($copiados === false || ($maxBytes !== null && $copiados > $maxBytes)) {
+        @unlink($destino);
+        return false;
+    }
+    return true;
 }
 
 function kt_zip_agregar_dir(ZipArchive $zip, string $dirFs, string $prefijo): int
@@ -432,6 +462,35 @@ function kt_exportar_datos(string $clientsDir, string $codigo, string $zipSalida
 // ---------------------------------------------------------------------------
 
 /**
+ * Ruta relativa a uploads/ donde está realmente el archivo de un documento, o null.
+ * Los módulos guardan ruta_archivo de formas distintas: "declaracion/x.pdf" (Subir),
+ * solo "x.pdf" con el archivo en uploads/<tipo>/ (Subida en lote) o con prefijo
+ * "uploads/..." (importaciones antiguas).
+ */
+function kt_ubicar_archivo(string $uploads, string $ruta, string $tipo): ?string
+{
+    $ruta = ltrim(str_replace('\\', '/', $ruta), '/');
+    $base = basename($ruta);
+    $candidatos = [$ruta, preg_replace('#^uploads/#', '', $ruta), ($tipo !== '' ? $tipo . '/' : '') . $base];
+    foreach (array_unique($candidatos) as $c) {
+        if ($c !== '' && kt_ruta_segura($c) && is_file($uploads . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $c))) {
+            return $c;
+        }
+    }
+    if ($base === '' || !is_dir($uploads)) {
+        return null;
+    }
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($uploads, FilesystemIterator::SKIP_DOTS));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getFilename() === $base) {
+            $rel = str_replace('\\', '/', substr($f->getPathname(), strlen($uploads) + 1));
+            return kt_ruta_segura($rel) ? $rel : null;
+        }
+    }
+    return null;
+}
+
+/**
  * Crea el .ktsync con la BD local completa y SOLO los archivos de documentos
  * nuevos o modificados desde el corte.
  *
@@ -443,40 +502,54 @@ function kt_crear_paquete_sync(string $clientsDir, string $codigo, string $zipSa
     $dbCliente = $dirCliente . DIRECTORY_SEPARATOR . $codigo . '.db';
     $uploads = $dirCliente . DIRECTORY_SEPARATOR . 'uploads';
 
+    $paqueteId = bin2hex(random_bytes(12));
+    // Se anota en la base REAL qué paquetes salieron de esta copia: así la nube puede saber
+    // que un paquete posterior desciende de uno que ya aplicó (ver kt_previsualizar_sync).
+    $viva = kt_abrir_sqlite($dbCliente);
+    if (kt_estado_get($viva, 'cliente') !== $codigo) {
+        throw new RuntimeException('Esta base no fue exportada para modo local (falta kt_estado).');
+    }
+    $generados = json_decode((string) kt_estado_get($viva, 'paquetes_generados', '[]'), true) ?: [];
+    $generados = array_slice(array_merge($generados, [$paqueteId]), -50);
+    kt_estado_set($viva, 'paquetes_generados', json_encode($generados));
+    $viva = null;
+
     $tmp = kt_tmp_dir('ktsync');
     try {
         $copia = $tmp . DIRECTORY_SEPARATOR . $codigo . '.db';
         kt_copia_consistente($dbCliente, $copia);
         $db = kt_abrir_sqlite($copia);
-        if (kt_estado_get($db, 'cliente') !== $codigo) {
-            throw new RuntimeException('Esta base no fue exportada para modo local (falta kt_estado).');
-        }
         $resumen = kt_resumen_cambios($db);
         $huellaLocal = kt_huella($db);
 
         // Archivos de documentos nuevos/modificados
         $archivos = [];
+        $ubicaciones = [];
         $faltantes = [];
         $ids = array_merge($resumen['documentos']['nuevos'], $resumen['documentos']['modificados']);
-        $st = $db->prepare('SELECT ruta_archivo FROM documentos WHERE id = ?');
+        $st = $db->prepare('SELECT ruta_archivo, tipo FROM documentos WHERE id = ?');
         foreach ($ids as $id) {
             $st->execute([$id]);
-            $ruta = str_replace('\\', '/', (string) $st->fetchColumn());
-            if ($ruta === '' || $ruta === 'pending' || isset($archivos[$ruta])) {
+            $fila = $st->fetch(PDO::FETCH_ASSOC) ?: ['ruta_archivo' => '', 'tipo' => ''];
+            $ruta = str_replace('\\', '/', (string) $fila['ruta_archivo']);
+            if ($ruta === '' || $ruta === 'pending' || isset($ubicaciones[$ruta])) {
                 continue;
             }
-            $fs = $uploads . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $ruta);
-            if (!kt_ruta_segura($ruta) || !kt_ext_permitida($ruta) || !is_file($fs)) {
+            $rel = kt_ubicar_archivo($uploads, $ruta, (string) $fila['tipo']);
+            if ($rel === null || !kt_ext_permitida($rel)) {
                 $faltantes[] = $ruta;
                 continue;
             }
-            $archivos[$ruta] = ['fs' => $fs, 'sha256' => hash_file('sha256', $fs), 'bytes' => filesize($fs)];
+            $ubicaciones[$ruta] = $rel;
+            $fs = $uploads . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $rel);
+            $archivos[$rel] = ['fs' => $fs, 'sha256' => hash_file('sha256', $fs), 'bytes' => filesize($fs)];
         }
+        $st = null; // en Windows un statement abierto mantiene bloqueado el archivo temporal
 
         $manifiesto = [
             'tipo' => 'ktsync',
             'version' => KT_SYNC_VERSION,
-            'paquete_id' => bin2hex(random_bytes(12)),
+            'paquete_id' => $paqueteId,
             'cliente' => $codigo,
             'snapshot_id' => kt_estado_get($db, 'snapshot_id'),
             'huella_base' => kt_estado_get($db, 'huella_base'),
@@ -487,6 +560,8 @@ function kt_crear_paquete_sync(string $clientsDir, string $codigo, string $zipSa
             'equipo' => $licencia['equipo'] ?? null,
             'resumen' => array_map(fn($t) => is_array($t) ? array_map('count', $t) : $t, $resumen),
             'archivos' => array_map(fn($a) => ['sha256' => $a['sha256'], 'bytes' => $a['bytes']], $archivos),
+            // ruta_archivo del documento → ruta real bajo uploads/ (cuando difieren)
+            'ubicaciones' => array_filter($ubicaciones, fn($rel, $ruta) => $rel !== $ruta, ARRAY_FILTER_USE_BOTH),
             'archivos_faltantes' => $faltantes,
         ];
         $db = null;
@@ -566,6 +641,12 @@ function kt_leer_paquete_sync(string $zipRuta, string $tmp): array
             }
             $esperados['uploads/' . $ruta] = true;
         }
+        foreach ((array) ($m['ubicaciones'] ?? []) as $rel) {
+            if (!isset($m['archivos'][$rel])) {
+                throw new RuntimeException('Manifiesto con ubicaciones inválidas.');
+            }
+        }
+        $total = 0;
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $nombre = $zip->getNameIndex($i);
             if (substr($nombre, -1) === '/') {
@@ -574,12 +655,24 @@ function kt_leer_paquete_sync(string $zipRuta, string $tmp): array
             if (!isset($esperados[$nombre])) {
                 throw new RuntimeException("Entrada inesperada en el paquete: $nombre");
             }
+            $total += (int) ($zip->statIndex($i)['size'] ?? 0);
+        }
+        // Tamaños declarados: se revisan ANTES de descomprimir nada (y luego se vuelven a
+        // controlar al extraer, porque el zip puede mentir)
+        if ($total > KT_MAX_PAQUETE_BYTES) {
+            throw new RuntimeException('El paquete es demasiado grande una vez descomprimido.');
+        }
+        foreach ($m['archivos'] ?? [] as $ruta => $info) {
+            $st = $zip->statName('uploads/' . $ruta);
+            if (!$st || (int) $st['size'] !== (int) ($info['bytes'] ?? -1)) {
+                throw new RuntimeException("El tamaño de $ruta no coincide con el manifiesto.");
+            }
         }
 
         // BD
         $dbTmp = $tmp . DIRECTORY_SEPARATOR . $codigo . '.db';
-        if (!kt_zip_extraer($zip, "db/$codigo.db", $dbTmp)) {
-            throw new RuntimeException('El paquete no trae la base de datos.');
+        if (!kt_zip_extraer($zip, "db/$codigo.db", $dbTmp, KT_MAX_BD_BYTES)) {
+            throw new RuntimeException('El paquete no trae la base de datos o es demasiado grande.');
         }
         $db = kt_abrir_sqlite($dbTmp);
         if ($db->query('PRAGMA quick_check')->fetchColumn() !== 'ok') {
@@ -599,7 +692,7 @@ function kt_leer_paquete_sync(string $zipRuta, string $tmp): array
         foreach ($m['archivos'] ?? [] as $ruta => $info) {
             $destino = $tmp . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $ruta);
             @mkdir(dirname($destino), 0700, true);
-            if (!kt_zip_extraer($zip, 'uploads/' . $ruta, $destino)
+            if (!kt_zip_extraer($zip, 'uploads/' . $ruta, $destino, (int) ($info['bytes'] ?? 0))
                 || !hash_equals((string) ($info['sha256'] ?? ''), hash_file('sha256', $destino))) {
                 throw new RuntimeException("Archivo dañado o alterado en el paquete: $ruta");
             }
@@ -658,10 +751,18 @@ function kt_previsualizar_sync(string $clientsDir, array $paquete): array
     if (!is_file($dbNube)) {
         throw new RuntimeException("El cliente '$codigo' no tiene base en este servidor.");
     }
+    // Solo cuenta lo aplicado DESPUÉS de la última restauración (restaurar deshace lo anterior
+    // y debe poder reaplicarse el mismo paquete)
+    $aplicados = [];
     foreach (kt_registro_leer($clientsDir, $codigo) as $r) {
-        if (($r['paquete_id'] ?? '') === $m['paquete_id'] && ($r['resultado'] ?? '') === 'aplicado') {
-            return ['modo' => 'ya_aplicado', 'motivo' => 'Este paquete ya se aplicó el ' . $r['fecha'], 'informe' => []];
+        if (($r['modo'] ?? '') === 'restauracion') {
+            $aplicados = [];
+        } elseif (($r['resultado'] ?? '') === 'aplicado' && !empty($r['paquete_id'])) {
+            $aplicados[$r['paquete_id']] = $r;
         }
+    }
+    if (isset($aplicados[$m['paquete_id']])) {
+        return ['modo' => 'ya_aplicado', 'motivo' => 'Este paquete ya se aplicó el ' . $aplicados[$m['paquete_id']]['fecha'], 'informe' => []];
     }
 
     $nube = kt_abrir_sqlite($dbNube);
@@ -670,17 +771,33 @@ function kt_previsualizar_sync(string $clientsDir, array $paquete): array
         return ['modo' => 'ya_aplicado', 'motivo' => 'La nube ya tiene exactamente estos datos.', 'informe' => []];
     }
     $local = kt_abrir_sqlite($paquete['db']);
-    if ($huellaNube === $m['huella_base']) {
+
+    // La nube "no cambió" si está igual al corte, o igual al resultado de un REEMPLAZO hecho
+    // con un paquete anterior de ESTA MISMA copia (el PC no se enteró: respuesta perdida o
+    // paquete enviado a mano). La copia lo demuestra listando ese paquete como generado por ella.
+    $bases = [$m['huella_base']];
+    $generados = json_decode((string) kt_estado_get($local, 'paquetes_generados', '[]'), true) ?: [];
+    foreach ($aplicados as $pid => $r) {
+        if (($r['modo'] ?? '') === 'reemplazo' && !empty($r['huella_resultante']) && in_array($pid, $generados, true)) {
+            $bases[] = $r['huella_resultante'];
+        }
+    }
+    $faltantes = count($m['archivos_faltantes'] ?? []);
+
+    if (in_array($huellaNube, $bases, true)) {
         $res = kt_resumen_cambios($local);
         return [
             'modo' => 'reemplazo',
             'motivo' => 'La nube no cambió desde que se sacó la copia local: se reemplaza por la versión del PC.',
+            'huella_nube' => $huellaNube,
             'informe' => [
                 'docs_nuevos' => count($res['documentos']['nuevos']),
                 'docs_modificados' => count($res['documentos']['modificados']),
                 'docs_eliminados' => count($res['documentos']['eliminados']),
                 'codigos_nuevos' => count($res['codigos']['nuevos']),
                 'archivos' => count($paquete['archivos']),
+                'archivos_faltantes' => $faltantes,
+                'conflictos' => $faltantes ? ["$faltantes documento(s) llegan sin su PDF (no estaba en el equipo): " . implode(', ', array_slice($m['archivos_faltantes'], 0, 5))] : [],
             ],
         ];
     }
@@ -693,6 +810,10 @@ function kt_previsualizar_sync(string $clientsDir, array $paquete): array
         $nube->exec('ROLLBACK');
     }
     unset($informe['copias']);
+    if ($faltantes) {
+        $informe['archivos_faltantes'] = $faltantes;
+        $informe['conflictos'][] = "$faltantes documento(s) llegan sin su PDF (no estaba en el equipo): " . implode(', ', array_slice($m['archivos_faltantes'], 0, 5));
+    }
     return [
         'modo' => 'fusion',
         'motivo' => 'La nube también cambió desde la copia local: solo se agregan altas; lo modificado/borrado en el PC queda como conflicto.',
@@ -732,9 +853,14 @@ function kt_fusionar(PDO $nube, PDO $local, array $paquete, string $uploadsNube)
     // --- Documentos nuevos ---
     $cols = array_values(array_diff(array_intersect(kt_columnas($local, 'documentos'), kt_columnas($nube, 'documentos')), ['id']));
     $ins = $nube->prepare('INSERT INTO documentos (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')');
-    $porHash = $nube->prepare("SELECT id FROM documentos WHERE hash_archivo = ? AND hash_archivo <> '' LIMIT 1");
-    $porRuta = $nube->prepare("SELECT id FROM documentos WHERE ruta_archivo = ? AND ruta_archivo NOT IN ('', 'pending') LIMIT 1");
+    // "Ya está en la nube" = mismo documento ya enviado antes (reenvío), no solo el mismo PDF:
+    // dos documentos distintos pueden compartir archivo. Solo se compara contra lo que había
+    // antes de esta fusión, para no juntar entre sí dos altas del propio paquete.
+    $maxAntes = (int) $nube->query('SELECT COALESCE(MAX(id), 0) FROM documentos')->fetchColumn();
+    $igual = $nube->prepare("SELECT id FROM documentos WHERE id <= ? AND tipo IS ? AND numero IS ? AND fecha IS ?
+        AND ruta_archivo IS ? AND COALESCE(hash_archivo, '') = COALESCE(?, '') LIMIT 1");
     $leer = $local->prepare('SELECT * FROM documentos WHERE id = ?');
+    $ubicaciones = (array) ($paquete['manifiesto']['ubicaciones'] ?? []);
 
     foreach ($res['documentos']['nuevos'] as $idLocal) {
         $leer->execute([$idLocal]);
@@ -742,28 +868,24 @@ function kt_fusionar(PDO $nube, PDO $local, array $paquete, string $uploadsNube)
         if (!$fila) {
             continue;
         }
-        $dup = false;
-        if (!empty($fila['hash_archivo'])) {
-            $porHash->execute([$fila['hash_archivo']]);
-            $dup = $porHash->fetchColumn();
-        }
-        if (!$dup) {
-            $porRuta->execute([$fila['ruta_archivo']]);
-            $dup = $porRuta->fetchColumn();
-        }
+        $igual->execute([$maxAntes, $fila['tipo'] ?? null, $fila['numero'] ?? null, $fila['fecha'] ?? null,
+            $fila['ruta_archivo'] ?? null, $fila['hash_archivo'] ?? null]);
+        $dup = $igual->fetchColumn();
         if ($dup) {
             $mapa[$idLocal] = (int) $dup;
             $informe['docs_duplicados']++;
+            $informe['conflictos'][] = "Documento '" . ($fila['numero'] ?: 's/n') . "' ya estaba en la nube (#$dup, enviado antes): no se duplicó; si lo cambió en el PC después de enviarlo, revise a mano.";
             continue;
         }
 
         $ruta = str_replace('\\', '/', (string) $fila['ruta_archivo']);
-        if (isset($paquete['archivos'][$ruta])) {
-            $origen = $paquete['archivos'][$ruta];
-            $destino = $uploadsNube . '/' . $ruta;
+        $rel = $ubicaciones[$ruta] ?? $ruta;
+        if (isset($paquete['archivos'][$rel])) {
+            $origen = $paquete['archivos'][$rel];
+            $destino = $uploadsNube . '/' . $rel;
             // Si ya existe un archivo distinto con ese nombre en la nube, usar otro nombre
             if (is_file($destino) && hash_file('sha256', $destino) !== hash_file('sha256', $origen)) {
-                $info = pathinfo($ruta);
+                $info = pathinfo($rel);
                 $base = ($info['dirname'] !== '.' ? $info['dirname'] . '/' : '') . $info['filename'];
                 $n = 1;
                 do {
@@ -861,6 +983,7 @@ function kt_respaldar_cliente(string $clientsDir, string $codigo, string $etique
         throw new RuntimeException('No se pudo crear la carpeta de respaldo.');
     }
     kt_copia_consistente($dirCliente . DIRECTORY_SEPARATOR . $codigo . '.db', $dir . DIRECTORY_SEPARATOR . $codigo . '.db');
+    kt_podar(glob(dirname($dir) . DIRECTORY_SEPARATOR . '*', GLOB_ONLYDIR) ?: [], KT_RETENER);
     return $dir;
 }
 
@@ -931,13 +1054,37 @@ function kt_aplicar_sync(string $clientsDir, array $paquete, ?string $modoConfir
                     throw new RuntimeException("No se pudo copiar $ruta (la base no se tocó).");
                 }
             }
-            // BD: quitar rastreo y reemplazar
+            // BD: quitar rastreo y conservar el texto ya indexado en la nube para los documentos
+            // que en el PC no lo tienen (el índice no es parte de la huella; sin esto, indexar
+            // en la nube mientras el cliente estaba en local se perdía)
             $limpia = dirname($paquete['db']) . DIRECTORY_SEPARATOR . 'limpia.db';
             @unlink($limpia);
             $l = kt_abrir_sqlite($paquete['db']);
             kt_quitar_rastreo($l);
+            $l->exec('ATTACH DATABASE ' . $l->quote($dbNube) . ' AS nube');
+            // datos_extraidos va AL FINAL: la condición la mira, y si se copiara primero las otras no se copiarían
+            foreach (['texto_extraido', 'estado_extraccion', 'datos_extraidos'] as $col) {
+                if (!in_array($col, kt_columnas($l, 'documentos'), true)
+                    || !in_array($col, $l->query('PRAGMA nube.table_info(documentos)')->fetchAll(PDO::FETCH_COLUMN, 1), true)) {
+                    continue;
+                }
+                $l->exec("UPDATE documentos SET $col = (SELECT n.$col FROM nube.documentos n
+                        WHERE n.id = documentos.id AND n.ruta_archivo IS documentos.ruta_archivo)
+                    WHERE (datos_extraidos IS NULL OR datos_extraidos NOT LIKE '%\"text\":%')
+                      AND EXISTS (SELECT 1 FROM nube.documentos n WHERE n.id = documentos.id
+                        AND n.ruta_archivo IS documentos.ruta_archivo AND n.datos_extraidos LIKE '%\"text\":%')");
+            }
+            $l->exec('DETACH DATABASE nube');
             $l->exec('VACUUM INTO ' . $l->quote($limpia));
             $l = null;
+            // Última comprobación justo antes de reemplazar: si alguien escribió en la nube
+            // durante la copia de archivos, no se pisa (los archivos copiados no estorban)
+            $n = kt_abrir_sqlite($dbNube);
+            $huellaAhora = kt_huella($n);
+            $n = null;
+            if ($huellaAhora !== ($prev['huella_nube'] ?? null)) {
+                throw new RuntimeException('La nube cambió mientras se aplicaba el paquete; no se reemplazó nada. Intente de nuevo.');
+            }
             kt_reemplazar_bd($dbNube, $limpia);
             $informe = $prev['informe'];
         } else {
@@ -968,6 +1115,10 @@ function kt_aplicar_sync(string $clientsDir, array $paquete, ?string $modoConfir
         kt_registro_agregar($clientsDir, $codigo, [
             'fecha' => kt_ahora(),
             'paquete_id' => $m['paquete_id'],
+            'snapshot_id' => $m['snapshot_id'] ?? null,
+            'huella_local' => $m['huella_local'],
+            // Estado de la nube tras aplicar: tras un reemplazo es el del PC (permite encadenar envíos)
+            'huella_resultante' => $prev['modo'] === 'reemplazo' ? $m['huella_local'] : null,
             'modo' => $prev['modo'],
             'resultado' => 'aplicado',
             'licencia_id' => $m['licencia_id'] ?? null,

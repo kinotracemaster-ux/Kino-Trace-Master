@@ -3,8 +3,12 @@
 ## Requisitos
 
 **PC del cliente (Windows 10/11, 64 bits):** nada instalado previamente. ~200 MB + el tamaño de sus
-PDFs. Sin permisos de administrador. Microsoft Edge (viene con Windows) para abrir en "modo app";
-si no está, usa el navegador predeterminado.
+PDFs. Sin permisos de administrador, **salvo** que el PC no tenga el *Microsoft Visual C++ 2015-2022*
+(PHP lo necesita; la mayoría de los PC ya lo tienen): el paquete trae el instalador oficial
+(`runtime\vc_redist.x64.exe`) y el lanzador lo ofrece solo si hace falta. Microsoft Edge (viene con
+Windows) para abrir en "modo app"; si no está, usa el navegador predeterminado.
+El **visor/resaltador de PDF** carga PDF.js desde internet (cdnjs): sin conexión, buscar y consultar
+funcionan, pero el visor no abre.
 OCR opcional: [Tesseract para Windows (UB Mannheim)](https://github.com/UB-Mannheim/tesseract/wiki)
 con el idioma **Spanish** marcado al instalar; el lanzador lo detecta en `C:\Program Files\Tesseract-OCR`.
 
@@ -53,10 +57,12 @@ El paquete es **para Windows** aunque se arme en Linux/Mac (descarga los binario
 3. Extrae los datos del `.ktdata` en `app/clients/` validando cada ruta.
 4. Descarga **PHP para Windows x64 NTS** (versión 8.3/8.2 desde `releases.json`, **verifica SHA-256**),
    **Poppler** (último release de `oschwartz10612/poppler-windows`, verifica SHA-256 si GitHub lo publica)
-   y **cacert.pem** (verifica su `.sha256`). Se guardan en caché (`--cache`).
-   Sin internet: `--php-zip`, `--poppler-zip`, `--cacert` con archivos bajados a mano.
-5. Escribe `php.ini` (solo extensiones presentes), `INICIAR KINO TRACE.bat`, `CREAR ACCESO DIRECTO.bat`,
-   `LEAME.txt` (con saltos de línea de Windows).
+   **cacert.pem** (verifica su `.sha256`) y el **Visual C++ 2015-2022 x64** de Microsoft
+   (`aka.ms/vs/17/release/vc_redist.x64.exe`, firmado por Microsoft). Se guardan en caché (`--cache`).
+   Sin internet: `--php-zip`, `--poppler-zip`, `--cacert`, `--vcredist` con archivos bajados a mano
+   (`--sin-vcredist` para no incluirlo).
+5. Escribe `php.ini` base (solo extensiones presentes), `runtime/preparar.php`, `INICIAR KINO TRACE.bat`,
+   `CREAR ACCESO DIRECTO.bat`, `LEAME.txt` (con saltos de línea de Windows).
 6. Comprime todo en `KinoTrace_<cliente>_<fecha>.zip`.
 
 Opciones: `--nube https://…` (dirección por defecto para sincronizar), `--forzar` (rehacer),
@@ -71,10 +77,14 @@ Opciones: `--nube https://…` (dirección por defecto para sincronizar), `--for
 
 ### Qué hace el lanzador
 - Agrega al `PATH` (solo para esa ventana) `runtime\poppler\bin`, `runtime\php` y `Tesseract-OCR`.
-- Busca un puerto libre entre 8765 y 8799 (`runtime\puerto.php`).
+- Comprueba que `php.exe` arranca; si falta el Visual C++ (código de salida negativo), ofrece
+  instalarlo con `runtime\vc_redist.x64.exe` (pide permiso de administrador una vez).
+- `runtime\preparar.php` escribe `runtime\php\php-local.ini` con las rutas absolutas del paquete
+  **entre comillas y con `/`** (extensiones, certificados, sesiones, log): así una carpeta con espacios,
+  paréntesis, `&`, `~` o acentos no rompe el arranque. Y devuelve el primer puerto libre entre 8765 y
+  8799, comprobando también que nadie responda en él (en Windows abrir un puerto ocupado puede "funcionar").
 - Abre `http://127.0.0.1:<puerto>/` en Edge modo app tras 2 segundos.
-- Corre `php -S 127.0.0.1:<puerto> -t app app\local\router.php` en primer plano con rutas absolutas
-  para extensiones, certificados, sesiones (`runtime\sesiones`) y log (`runtime\logs\php_errores.log`).
+- Corre `php -c runtime\php\php-local.ini -S 127.0.0.1:<puerto> -t app app\local\router.php` en primer plano.
 
 ## Prueba local en Linux (desarrollo)
 ```bash
@@ -96,3 +106,7 @@ cd /tmp/p/KinoTrace_kino/app && php -S 127.0.0.1:8781 -t . local/router.php
 | "No se pudo conectar con la nube" al sincronizar | Sin internet o nube caída: usar *Descargar paquete*. Si dice error de certificado, falta `runtime\cacert.pem` (rearmar paquete). |
 | Lento con muchos usuarios | `php -S` atiende de a una petición; es para 1 usuario por PC. |
 | Antivirus bloquea `php.exe` | Agregar excepción para la carpeta `C:\KinoTrace\runtime`. |
+| "Falta un componente de Windows (Visual C++)" | Aceptar el instalador que abre el lanzador (necesita permiso de administrador) y volver a abrir el programa. |
+| Ventana trabada al indexar un PDF | En Windows el límite de tiempo de `pdftotext` no corta un PDF que lo cuelga: cerrar la ventana negra, reabrir y quitar/reemplazar ese PDF. |
+| El visor de PDF no abre | Usa PDF.js desde internet: revisar la conexión. Buscar y consultar funcionan sin internet. |
+| Error de certificado al sincronizar | Falta `runtime\cacert.pem` o `php-local.ini` no se regeneró: cerrar y reabrir el programa; si sigue, rearmar el paquete. |

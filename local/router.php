@@ -29,18 +29,38 @@ if (!in_array($ip, ['127.0.0.1', '::1'], true) || !in_array($host, ['127.0.0.1',
     return kt_router_cortar(403, 'Acceso permitido solo desde este equipo.');
 }
 
-// 2. Normalizar la ruta pedida
-$uri = rawurldecode((string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH));
+// 2. Normalizar la ruta pedida.
+//    NO usar parse_url(): con "//clients/..." toma "clients" como host y con "///..."
+//    devuelve false, y el servidor igual entregaba el archivo (BD, licencia, PDFs).
+//    Se corta en "?" o "#", se decodifica y se colapsan barras repetidas y "." .
+$uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+$uri = rawurldecode(substr($uri, 0, strcspn($uri, '?#')));
 if (strpos($uri, "\0") !== false) {
     return kt_router_cortar(400, 'Solicitud inválida.');
 }
-$rel = ltrim(str_replace('\\', '/', $uri), '/');
+$crudos = explode('/', str_replace('\\', '/', $uri));
+// ".." se revisa ANTES de recortar puntos (rtrim("..", ". ") daría "" y se escaparía)
+foreach ($crudos as $s) {
+    if (trim($s) === '..' || preg_match('/^\.{2,}\s*$/', $s)) {
+        return kt_router_cortar(400, 'Solicitud inválida.');
+    }
+}
 // Windows ignora puntos y espacios al final de cada carpeta ("Admin-gestor./" = "Admin-gestor/")
-$segs = array_map(fn($s) => rtrim($s, '. '), explode('/', $rel));
-if (in_array('..', $segs, true)) {
+$segs = array_values(array_filter(array_map(fn($s) => rtrim($s, '. '), $crudos), fn($s) => $s !== ''));
+$rel = implode('/', $segs);
+$relN = strtolower($rel);
+// ":" solo sirve para trucos de Windows (flujos alternativos "archivo::$DATA", unidades)
+if (strpos($rel, ':') !== false) {
     return kt_router_cortar(400, 'Solicitud inválida.');
 }
-$relN = strtolower(implode('/', $segs));
+// Solo se atienden rutas canónicas: así el servidor nunca resuelve una ruta distinta de
+// la que se revisó aquí ("//x", "/x./", "/./x" se redirigen a su forma normal).
+$canonica = '/' . $rel . ($rel !== '' && substr($uri, -1) === '/' ? '/' : '');
+if ($uri !== $canonica) {
+    $qs = (string) ($_SERVER['QUERY_STRING'] ?? '');
+    header('Location: ' . implode('/', array_map('rawurlencode', explode('/', $canonica))) . ($qs !== '' ? '?' . $qs : ''), true, 301);
+    return true;
+}
 
 // 3. Carpetas y archivos que nunca se sirven
 $prohibidos = ['admin-gestor', 'local/herramientas', 'local/construir', 'database_initial', 'backups', 'tests',
