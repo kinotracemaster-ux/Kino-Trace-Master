@@ -28,6 +28,11 @@ function apiErrorHandler($errno, $errstr, $errfile, $errline)
     if (!(error_reporting() & $errno)) {
         return false;
     }
+    // Avisos de "función obsoleta" (cambios de PHP 8.x) no son errores: se dejan en el log
+    // (log_errors=1) y la petición sigue. Antes cortaban la respuesta con "PHP Error".
+    if ($errno === E_DEPRECATED || $errno === E_USER_DEPRECATED) {
+        return false;
+    }
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'error' => 'PHP Error',
