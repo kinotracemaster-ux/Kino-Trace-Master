@@ -79,16 +79,30 @@ if (!function_exists('kt_linker_indices')) {
      * Índices de los documentos SIN PDF ("pending"): clave → lista de ids (puede haber
      * repetidos). Los usan processZipAndLink() y relinkFromServer(), así ambos emparejan
      * con exactamente las mismas reglas.
+     *
+     * $rotos: ids de documentos con enlace roto (su archivo ya no está) que se tratan
+     * también como sin PDF; para ellos sirve además el nombre del archivo que tenían.
+     * 'esperado' es id → nombres de archivo que le corresponden.
      */
-    function kt_linker_indices(PDO $db): array
+    function kt_linker_indices(PDO $db, array $rotos = []): array
     {
         $idx = ['archivo' => [], 'sin_fecha' => [], 'nombre' => [], 'esperado' => []];
-        $q = $db->query("SELECT id, numero, original_path FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = '' ORDER BY id");
+        $sql = "SELECT id, numero, original_path, ruta_archivo FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = ''";
+        if ($rotos) {
+            $sql .= ' OR id IN (' . implode(',', array_map('intval', $rotos)) . ')';
+        }
+        $q = $db->query($sql . ' ORDER BY id');
         while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
             $id = (int) $row['id'];
+            $nombres = [];
+            if (!in_array($row['ruta_archivo'], [null, '', 'pending'], true)) {
+                $nombres[] = basename(str_replace('\\', '/', $row['ruta_archivo']));
+            }
             if (!empty($row['original_path'])) {
-                $orig = kt_linker_clave(basename(str_replace('\\', '/', $row['original_path'])));
-                $idx['esperado'][$id] = $orig;
+                $nombres[] = basename(str_replace('\\', '/', $row['original_path']));
+            }
+            foreach (array_unique(array_map('kt_linker_clave', $nombres)) as $orig) {
+                $idx['esperado'][$id][] = $orig;
                 foreach (array_unique([$orig, kt_linker_sin_pdf($orig)]) as $k) {
                     $idx['archivo'][$k][] = $id;
                 }
@@ -284,6 +298,45 @@ if (!function_exists('processZipAndLink')) {
     }
 }
 
+if (!function_exists('kt_linker_rotos')) {
+    /**
+     * Documentos con enlace roto: tienen ruta_archivo, pero el PDF no está en el servidor.
+     * Mismo criterio que resolve_pdf_path() (helpers/tenant.php), que como último recurso
+     * busca el nombre del archivo en todo uploads/; aquí ese recorrido se hace una sola vez.
+     */
+    function kt_linker_rotos(PDO $db, string $clientCode): array
+    {
+        $uploadsDir = CLIENTS_DIR . '/' . $clientCode . '/uploads';
+        $enDisco = [];
+        if (is_dir($uploadsDir)) {
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($uploadsDir, FilesystemIterator::SKIP_DOTS));
+            foreach ($it as $f) {
+                if ($f->isFile()) {
+                    $enDisco[$f->getFilename()] = true;
+                }
+            }
+        }
+        $ids = [];
+        foreach ($db->query("SELECT id, ruta_archivo FROM documentos WHERE ruta_archivo IS NOT NULL AND ruta_archivo NOT IN ('', 'pending')") as $d) {
+            $r = $d['ruta_archivo'];
+            if (isset($enDisco[basename($r)]) || is_file($uploadsDir . '/' . $r)) {
+                continue;
+            }
+            // Ruta absoluta o con prefijo de una importación antigua: que decida resolve_pdf_path()
+            if (preg_match('#^(/|[A-Za-z]:|uploads/client_)#', str_replace('\\', '/', $r)) && resolve_pdf_path($clientCode, $d)) {
+                continue;
+            }
+            $ids[] = (int) $d['id'];
+        }
+        if (!$ids) {
+            return [];
+        }
+        return $db->query("SELECT d.id, d.numero, d.tipo, d.original_path, d.ruta_archivo,
+                (SELECT COUNT(*) FROM codigos c WHERE c.documento_id = d.id) AS num_codes
+            FROM documentos d WHERE d.id IN (" . implode(',', $ids) . ") ORDER BY d.numero")->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
+
 if (!function_exists('relinkFromServer')) {
     /**
      * Re-enlaza documentos huérfanos con PDF que YA están en el servidor (sin subir nada).
@@ -297,12 +350,16 @@ if (!function_exists('relinkFromServer')) {
      *   - Además, las mismas reglas que al subir un ZIP (sin fecha / nombre, si es único).
      *
      * Con $aplicar = false solo informa qué haría.
+     * $rotos: ids con enlace roto (ver kt_linker_rotos()) que también se buscan.
+     * $soloId: limita el resultado (y lo que se aplica) a ese documento.
      *
      * @return array{enlaces: array, cruces: array, sin_archivo: array, conflictos: array, aplicado: bool}
      */
-    function relinkFromServer(PDO $db, string $uploadsDir, bool $aplicar = false): array
+    function relinkFromServer(PDO $db, string $uploadsDir, bool $aplicar = false, array $rotos = [], ?int $soloId = null): array
     {
         $uploadsDir = rtrim(str_replace('\\', '/', $uploadsDir), '/');
+        $rotos = array_map('intval', $rotos);
+        $esRoto = array_flip($rotos);
         $numeros = $db->query("SELECT id, numero FROM documentos")->fetchAll(PDO::FETCH_KEY_PAIR);
 
         // 1. PDF en el disco (ruta relativa a uploads/), por nombre y por nombre reparado
@@ -330,6 +387,9 @@ if (!function_exists('relinkFromServer')) {
         $usadoPorBase = []; // rutas sin carpeta (Subida en lote guarda solo el nombre)
         $rutaDe = [];
         foreach ($db->query("SELECT id, ruta_archivo, original_path FROM documentos WHERE ruta_archivo IS NOT NULL AND ruta_archivo NOT IN ('', 'pending')") as $d) {
+            if (isset($esRoto[(int) $d['id']])) {
+                continue; // su archivo ya no está: no ocupa nada
+            }
             $r = str_replace('\\', '/', $d['ruta_archivo']);
             if (strpos($r, $uploadsDir . '/') === 0) {
                 $r = substr($r, strlen($uploadsDir) + 1); // ruta absoluta dentro de uploads/
@@ -350,7 +410,7 @@ if (!function_exists('relinkFromServer')) {
             return $usadoPor[$k] ?? ($usadoPorBase[kt_linker_clave(basename($rel))] ?? null);
         };
 
-        $idx = kt_linker_indices($db);
+        $idx = kt_linker_indices($db, $rotos);
         $linkedIds = [];
         $enlaces = [];
         $cruces = [];
@@ -362,8 +422,14 @@ if (!function_exists('relinkFromServer')) {
         };
 
         // 3. Cada huérfano con el archivo de su nombre exacto (o su nombre mal leído)
-        foreach ($idx['esperado'] as $id => $esperado) {
-            $claves = array_unique([$esperado, kt_linker_sin_pdf($esperado) . '.pdf']);
+        foreach ($idx['esperado'] as $id => $esperados) {
+            $esperado = end($esperados); // el nombre original (o el del archivo que tenía)
+            $claves = [];
+            foreach ($esperados as $e) {
+                $claves[] = $e;
+                $claves[] = kt_linker_sin_pdf($e) . '.pdf';
+            }
+            $claves = array_unique($claves);
             $exactos = [];
             foreach ($claves as $k) {
                 $exactos = array_merge($exactos, $porNombre[$k] ?? []);
@@ -396,7 +462,7 @@ if (!function_exists('relinkFromServer')) {
                 if ($otroId !== $id && !isset($linkedIds[$otroId]) && $otroOrig === $familia && count($gemelos) === 1) {
                     $cruces[] = [
                         'id_otro' => $otroId, 'numero_otro' => $numeros[$otroId] ?? '',
-                        'de' => $rel, 'a' => $gemelos[0],
+                        'de' => $rel, 'a' => $gemelos[0], 'para' => $id,
                     ];
                     $linkedIds[$otroId] = true;
                     $reservados[kt_linker_clave($gemelos[0])] = $otroId;
@@ -441,14 +507,29 @@ if (!function_exists('relinkFromServer')) {
 
         // 5. Huérfanos que siguen sin archivo en el servidor
         $sinArchivo = [];
-        foreach ($db->query("SELECT id, numero, original_path FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = '' ORDER BY numero") as $d) {
+        $sql = "SELECT id, numero, original_path, ruta_archivo FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = ''"
+            . ($rotos ? ' OR id IN (' . implode(',', $rotos) . ')' : '');
+        foreach ($db->query($sql . ' ORDER BY numero') as $d) {
             if (!isset($linkedIds[(int) $d['id']])) {
-                $sinArchivo[] = ['id' => (int) $d['id'], 'numero' => $d['numero'], 'esperado' => $d['original_path']];
+                $roto = isset($esRoto[(int) $d['id']]);
+                $sinArchivo[] = ['id' => (int) $d['id'], 'numero' => $d['numero'],
+                    'esperado' => $roto ? basename(str_replace('\\', '/', $d['ruta_archivo'])) : $d['original_path'], 'roto' => $roto];
             }
         }
 
+        if ($soloId !== null) {
+            $enlaces = array_values(array_filter($enlaces, fn($e) => $e['id'] === $soloId));
+            $cruces = array_values(array_filter($cruces, fn($c) => $c['para'] === $soloId));
+            $sinArchivo = array_values(array_filter($sinArchivo, fn($d) => $d['id'] === $soloId));
+            $conflictos = array_values(array_filter($conflictos, fn($c) => strpos($c, "Documento #$soloId ") === 0));
+        }
+
         if ($aplicar && ($enlaces || $cruces)) {
-            $upd = $db->prepare("UPDATE documentos SET ruta_archivo = ? WHERE id = ?");
+            // Si el indexador lo había marcado "Archivo no encontrado", se limpia la marca
+            // para que "Indexar pendientes" lo vuelva a tomar
+            $upd = $db->prepare("UPDATE documentos SET ruta_archivo = ?,
+                datos_extraidos = CASE WHEN datos_extraidos LIKE '%\"error\":%' AND datos_extraidos NOT LIKE '%\"text\":%' THEN NULL ELSE datos_extraidos END
+                WHERE id = ?");
             $db->beginTransaction();
             try {
                 foreach ($cruces as $c) {
