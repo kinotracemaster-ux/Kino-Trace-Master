@@ -47,16 +47,9 @@ function search_by_code(PDO $db, string $searchTerm): array
         return [];
     }
 
-    $clientCode = $_SESSION['client_code'] ?? 'default';
-    $cacheKey = 'search_by_code_' . md5($searchTerm);
-
-    if (class_exists('CacheManager')) {
-        $cached = CacheManager::get($clientCode, $cacheKey);
-        if ($cached !== null) {
-            return $cached;
-        }
-    }
-
+    // Sin caché a propósito: guardaba el resultado 5 min y nada lo borraba al subir,
+    // editar, borrar o re-enlazar documentos, así que un PDF recién subido "no
+    // aparecía" y uno borrado seguía saliendo. La consulta usa idx_codigos_codigo.
     $stmt = $db->prepare("
         SELECT
             d.id,
@@ -84,10 +77,6 @@ function search_by_code(PDO $db, string $searchTerm): array
         return strtotime($b['fecha']) - strtotime($a['fecha']);
     });
 
-    if (class_exists('CacheManager')) {
-        CacheManager::set($clientCode, $cacheKey, $result, 300); // 5 min
-    }
-
     return $result;
 }
 
@@ -106,16 +95,7 @@ function greedy_search(PDO $db, array $codes): array
         return ['documents' => [], 'covered' => [], 'not_found' => []];
     }
 
-    $clientCode = $_SESSION['client_code'] ?? 'default';
-    $cacheKey = 'greedy_search_' . md5(implode(',', $codes));
-
-    // if (class_exists('CacheManager')) {
-    //     $cached = CacheManager::get($clientCode, $cacheKey);
-    //     if ($cached !== null) {
-    //         return $cached;
-    //     }
-    // }
-
+    // Sin caché: misma razón que search_by_code()
     // Construir condición para buscar cualquiera de los códigos
     $placeholders = implode(',', array_fill(0, count($codes), '?'));
     $params = array_map('strtoupper', $codes);
@@ -193,10 +173,6 @@ function greedy_search(PDO $db, array $codes): array
         'total_searched' => count($codes),
         'total_covered' => count($codes) - count($remaining)
     ];
-
-    if (class_exists('CacheManager')) {
-        CacheManager::set($clientCode, $cacheKey, $result, 600); // 10 min
-    }
 
     return $result;
 }
