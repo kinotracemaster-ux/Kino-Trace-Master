@@ -916,8 +916,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                 const p1 = document.getElementById('page-1');
                 if (p1) { p1.dataset.rendered = 'true'; renderPage(1, p1); }
 
-                // RADAR: buscar en todas las páginas de inmediato
-                scanAllPagesForSummary();
+                // RADAR: arranca cuando la página 1 ya tiene su búsqueda en marcha.
+                // El worker de PDF.js es uno solo y atiende en orden: si el radar
+                // encola todo primero, el resaltado de lo visible espera detrás.
+                const firstSearch = allTerms.length > 0 ? getHighlightsForPage(1).catch(() => null) : Promise.resolve();
+                firstSearch.then(() => scanAllPagesForSummary());
 
             } catch (err) {
                 console.error("Error loadPDF:", err);
@@ -978,7 +981,9 @@ $docIdForOcr = $documentId; // For OCR fallback
                     await processPage(nextPage++);
                 }
             };
-            await Promise.all(Array.from({ length: Math.min(8, totalPages) }, worker));
+            // 3 bastan: el worker de PDF.js procesa uno a la vez; más solo
+            // retrasa las páginas que el usuario está mirando
+            await Promise.all(Array.from({ length: Math.min(3, totalPages) }, worker));
 
             renderStatus(true);
         }
@@ -1101,6 +1106,11 @@ $docIdForOcr = $documentId; // For OCR fallback
             pagesBeingRendered.add(pageNum);
 
             try {
+                // Pedir la búsqueda ANTES de dibujar: queda primera en la cola del worker
+                const highlightsPromise = allTerms.length > 0
+                    ? getHighlightsForPage(pageNum).catch(e => { console.warn('Highlight error:', e); return null; })
+                    : null;
+
                 const page = await pdfDoc.getPage(pageNum);
                 const viewport = page.getViewport({ scale });
 
@@ -1124,10 +1134,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                 wrapper.style.color = "inherit";
 
                 // 2. Resaltados como overlay, sin bloquear la página ya visible
-                if (allTerms.length > 0) {
-                    getHighlightsForPage(pageNum)
-                        .then(result => paintHighlights(wrapper, pageNum, result))
-                        .catch(e => console.warn('Highlight error:', e));
+                if (highlightsPromise) {
+                    highlightsPromise.then(result => paintHighlights(wrapper, pageNum, result));
                 }
 
             } catch (err) {
