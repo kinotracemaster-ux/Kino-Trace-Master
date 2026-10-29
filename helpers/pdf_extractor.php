@@ -353,6 +353,9 @@ function extract_with_ocr_coordinates(string $pdfPath, int $pageNum = 1): array
         $escapedImage = escapeshellarg($imagePath);
         $escapedHocr = escapeshellarg($hocrOutput);
 
+        // 1 hilo por proceso: corren varias páginas en paralelo (semáforo en
+        // ocr_highlight.php) y el multihilo interno de Tesseract solo compite por CPU
+        putenv('OMP_THREAD_LIMIT=1');
         $cmdOcr = "$tesseractPath $escapedImage $escapedHocr -l spa --oem 1 hocr";
         exec($cmdOcr, $ocrOutput, $ocrReturnCode);
 

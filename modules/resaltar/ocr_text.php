@@ -2,10 +2,9 @@
 /**
  * OCR Text Extraction Endpoint for Scanned PDFs with Coordinates
  * 
- * SOLO se llama cuando PDF.js no encuentra texto en una página.
- * Usa Tesseract OCR con HOCR para extraer texto Y coordenadas.
- * 
- * OPTIMIZACIÓN: Cache de resultados OCR para evitar re-procesamiento.
+ * El visor lo llama solo para páginas sin capa de texto (escaneadas).
+ * Lógica compartida en helpers/ocr_highlight.php: cache por archivo, luego
+ * pdftotext -bbox y, si la página no trae texto, Tesseract HOCR.
  */
 
 ini_set('display_errors', 0);
@@ -17,6 +16,7 @@ require_once __DIR__ . '/../../config.php';
 require_once __DIR__ . '/../../helpers/tenant.php';
 require_once __DIR__ . '/../../helpers/pdf_extractor.php';
 require_once __DIR__ . '/../../helpers/cache_manager.php';
+require_once __DIR__ . '/../../helpers/ocr_highlight.php';
 
 header('Content-Type: application/json');
 
@@ -40,6 +40,7 @@ try {
     $filePath = isset($_GET['file']) ? $_GET['file'] : '';
     $termsParam = isset($_GET['terms']) ? $_GET['terms'] : '';
     $pageNum = isset($_GET['page']) ? (int) $_GET['page'] : 1;
+    $forceOcr = !empty($_GET['force_ocr']);
 
     // Parse terms to search
     $terms = array_filter(array_map('trim', explode(',', $termsParam)));
@@ -48,55 +49,6 @@ try {
         echo json_encode(['success' => true, 'matches' => [], 'text' => '', 'highlights' => []]);
         exit;
     }
-
-    // OPTIMIZACIÓN: Verificar cache antes de OCR
-    // ============================================
-    // V5: Invalidar tras cambiar DPI de 150 a 96 en extract_with_ocr_coordinates
-    $cacheKey = "ocr_v5_doc{$documentId}_p{$pageNum}";
-    $cachedOcr = CacheManager::get($clientCode, $cacheKey);
-
-    if ($cachedOcr && !empty($cachedOcr['words'])) {
-        // Usar datos cacheados - aplicar búsqueda de términos
-        $matches = [];
-        $highlights = [];
-
-        foreach ($cachedOcr['words'] as $word) {
-            foreach ($terms as $term) {
-                // Buscar si el término está contenido en la palabra
-                if (mb_stripos($word['text'], $term, 0, 'UTF-8') !== false) {
-                    $matches[] = [
-                        'term' => $term,
-                        'word' => $word['text'],
-                        'x' => $word['x'],
-                        'y' => $word['y'],
-                        'w' => $word['w'],
-                        'h' => $word['h']
-                    ];
-                    $highlights[] = [
-                        'x' => $word['x'],
-                        'y' => $word['y'],
-                        'w' => $word['w'],
-                        'h' => $word['h'],
-                        'term' => $term
-                    ];
-                }
-            }
-        }
-
-        echo json_encode([
-            'success' => true,
-            'matches' => $matches,
-            'match_count' => count($matches),
-            'highlights' => $highlights,
-            'image_width' => $cachedOcr['image_width'] ?? 0,
-            'image_height' => $cachedOcr['image_height'] ?? 0,
-            'text' => $cachedOcr['text'] ?? '',
-            'terms_searched' => $terms,
-            'source' => 'cache' // Indica que vino del cache
-        ]);
-        exit;
-    }
-    // ============================================
 
     // Resolve PDF path
     $uploadsDir = CLIENTS_DIR . "/{$clientCode}/uploads/";
@@ -112,159 +64,24 @@ try {
             $pdfPath = resolve_pdf_path($clientCode, $document);
         }
     } elseif (!empty($filePath)) {
-        $pdfPath = $uploadsDir . $filePath;
+        // Mismo saneamiento que viewer.php (evitar path traversal)
+        $filePath = str_replace('\\', '/', $filePath);
+        $filePath = preg_replace('#(^|/)\.\.(/|$)#', '', $filePath);
+        $pdfPath = $uploadsDir . ltrim($filePath, '/');
     }
 
     if (!$pdfPath || !file_exists($pdfPath)) {
         throw new Exception('Archivo PDF no encontrado');
     }
 
-    // Usar nueva función con coordenadas
-    if (function_exists('extract_with_ocr_coordinates')) {
-        // SEMÁFORO DE CONCURRENCIA: Máx 3 procesos OCR simultáneos
-        $lockDir = sys_get_temp_dir();
-        $lockAcquired = false;
-        $lockHandle = null;
-        for ($slot = 0; $slot < 3; $slot++) {
-            $lockFile = $lockDir . "/ocr_slot_{$slot}.lock";
-            $lockHandle = @fopen($lockFile, 'c');
-            if ($lockHandle && flock($lockHandle, LOCK_EX | LOCK_NB)) {
-                $lockAcquired = true;
-                break;
-            }
-            if ($lockHandle)
-                fclose($lockHandle);
-        }
-        // Si no hay slot libre, esperar uno (máx 30s)
-        if (!$lockAcquired) {
-            $lockFile = $lockDir . '/ocr_slot_0.lock';
-            $lockHandle = @fopen($lockFile, 'c');
-            if (!$lockHandle || !flock($lockHandle, LOCK_EX)) {
-                echo json_encode(['success' => false, 'error' => 'Servidor OCR ocupado, intenta en unos segundos']);
-                exit;
-            }
-            $lockAcquired = true;
-        }
-
-        try {
-            $ocrResult = extract_with_ocr_coordinates($pdfPath, $pageNum);
-        } finally {
-            // Liberar slot siempre
-            if ($lockHandle) {
-                flock($lockHandle, LOCK_UN);
-                fclose($lockHandle);
-            }
-        }
-
-        // ============================================
-        // OPTIMIZACIÓN: Guardar resultado en cache (7 días)
-        // ============================================
-        if ($ocrResult['success'] && !empty($ocrResult['words'])) {
-            CacheManager::set($clientCode, $cacheKey, [
-                'words' => $ocrResult['words'],
-                'text' => $ocrResult['text'] ?? '',
-                'image_width' => $ocrResult['image_width'] ?? 0,
-                'image_height' => $ocrResult['image_height'] ?? 0
-            ], 604800); // 7 días
-        }
-        // ============================================
-    } else {
-        // Fallback a función anterior sin coordenadas
-        $text = extract_text_from_pdf($pdfPath);
-        $ocrResult = ['success' => !empty($text), 'text' => $text, 'words' => []];
-    }
-
-
-    if (!$ocrResult['success'] || empty($ocrResult['words'])) {
-        // Reutilizar texto que OCR ya extrajo (si existe), evitando doble extracción
-        $text = !empty($ocrResult['text']) ? $ocrResult['text'] : '';
-
-        // Solo intentar extracción completa si OCR no devolvió nada de texto
-        if (empty(trim($text))) {
-            $text = extract_text_from_pdf($pdfPath);
-        }
-
-        if (empty(trim($text))) {
-            echo json_encode([
-                'success' => true,
-                'matches' => [],
-                'highlights' => [],
-                'text' => '',
-                'message' => 'No se pudo extraer texto del documento (OCR no disponible)'
-            ]);
-            exit;
-        }
-
-        // Sin coordenadas, solo buscar coincidencias en texto
-        $matches = [];
-        foreach ($terms as $term) {
-            $termLower = mb_strtolower($term, 'UTF-8');
-            $textLower = mb_strtolower($text, 'UTF-8');
-            $offset = 0;
-            while (($pos = mb_strpos($textLower, $termLower, $offset, 'UTF-8')) !== false) {
-                $matches[] = [
-                    'term' => $term,
-                    'position' => $pos,
-                    'context' => mb_substr($text, max(0, $pos - 20), mb_strlen($term) + 40, 'UTF-8')
-                ];
-                $offset = $pos + 1;
-            }
-        }
-
-        echo json_encode([
-            'success' => true,
-            'matches' => $matches,
-            'match_count' => count($matches),
-            'highlights' => [], // Sin coordenadas
-            'text' => $text,
-            'terms_searched' => $terms
-        ]);
+    // Cache por archivo → capa de texto del PDF → OCR solo si la página es escaneada
+    $pageWords = ocr_hl_get_page_words($clientCode, $pdfPath, $pageNum, $forceOcr);
+    if (!$pageWords['success']) {
+        echo json_encode(['success' => false, 'error' => $pageWords['error'] ?? 'Error de OCR']);
         exit;
     }
 
-    // Tenemos palabras con coordenadas - buscar coincidencias
-    $matches = [];
-    $highlights = []; // Coordenadas para resaltar
-    $text = $ocrResult['text'] ?? '';
-    $imageWidth = $ocrResult['image_width'] ?? 0;
-    $imageHeight = $ocrResult['image_height'] ?? 0;
-
-    foreach ($ocrResult['words'] as $word) {
-        $wordText = $word['text'];
-
-        foreach ($terms as $term) {
-            // Buscar si el término está contenido en la palabra
-            if (mb_stripos($wordText, $term, 0, 'UTF-8') !== false) {
-                $matches[] = [
-                    'term' => $term,
-                    'word' => $wordText,
-                    'x' => $word['x'],
-                    'y' => $word['y'],
-                    'w' => $word['w'],
-                    'h' => $word['h']
-                ];
-
-                $highlights[] = [
-                    'x' => $word['x'],
-                    'y' => $word['y'],
-                    'w' => $word['w'],
-                    'h' => $word['h'],
-                    'term' => $term
-                ];
-            }
-        }
-    }
-
-    echo json_encode([
-        'success' => true,
-        'matches' => $matches,
-        'match_count' => count($matches),
-        'highlights' => $highlights,
-        'image_width' => $imageWidth,
-        'image_height' => $imageHeight,
-        'text' => $text,
-        'terms_searched' => $terms
-    ]);
+    echo json_encode(ocr_hl_build_response($pageWords, $terms));
 
 } catch (Exception $e) {
     error_log("OCR Error in ocr_text.php: " . $e->getMessage());

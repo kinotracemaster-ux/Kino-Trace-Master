@@ -739,6 +739,26 @@ if (!empty($searchTerm)) {
             }
         }
 
+        // ── PRE-CHEQUEO DE TEXTO ──────────────────────────────────────
+        // Mismo umbral que OCR_HL_MIN_TEXT_CHARS (helpers/ocr_highlight.php):
+        // menos caracteres = hoja escaneada.
+        const MIN_TEXT_CHARS = 150;
+        const normalizeForSearch = str => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, '');
+        const normalizedTerms = termsToHighlight.map(normalizeForSearch).filter(Boolean);
+
+        // Más permisivo que Mark.js (ignora espacios, tildes y saltos de línea),
+        // así nunca se salta una hoja donde Mark.js sí encontraría el código
+        async function getPageTextInfo(pageNum) {
+            try {
+                const page = await pdfDoc.getPage(pageNum);
+                const tc = await page.getTextContent();
+                const text = normalizeForSearch(tc.items.map(i => i.str || '').join(''));
+                return { chars: text.length, hasMatch: normalizedTerms.some(t => text.includes(t)) };
+            } catch (e) {
+                return { chars: 0, hasMatch: false }; // Ante la duda, tratar como escaneada
+            }
+        }
+
         // ── RESALTADO PRINCIPAL ───────────────────────────────────────
         async function highlightCode() {
             if (!pdfDoc || termsToHighlight.length === 0) return;
@@ -760,6 +780,12 @@ if (!empty($searchTerm)) {
 
                 const wrapper = document.getElementById(`pub-page-${pageNum}`);
                 if (!wrapper) { setProgress(pageNum, numPages); continue; }
+
+                // Pre-chequeo barato en el texto del PDF (sin dibujar la hoja):
+                // una hoja con texto y sin el código se salta sin canvas ni servidor
+                const info = await getPageTextInfo(pageNum);
+                const isScanned = info.chars < MIN_TEXT_CHARS;
+                if (!isScanned && !info.hasMatch) { setProgress(pageNum, numPages); continue; }
 
                 // Asegurar que la página esté renderizada
                 if (!wrapper.dataset.rendered || wrapper.dataset.rendered === 'placeholder') {
@@ -795,7 +821,8 @@ if (!empty($searchTerm)) {
                     }
                 }
 
-                // ── Capa 2: OCR fallback si no encontró con text-layer ──
+                // ── Capa 2: servidor si no encontró con text-layer ──
+                // (hoja escaneada, o código partido entre líneas que Mark.js no une)
                 if (!foundInTextLayer) {
                     try {
                         const termsStr = encodeURIComponent(termsToHighlight.join(','));
