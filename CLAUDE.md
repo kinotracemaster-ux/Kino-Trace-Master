@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 KINO TRACE — sistema PHP multi-cliente (multi-tenant) de gestión documental para rastreo aduanero: sube manifiestos/declaraciones en PDF, extrae códigos automáticamente, permite búsqueda voraz (mínimo conjunto de documentos que cubre una lista de códigos) y valida cruces entre manifiestos y declaraciones. Sin frontend framework: PHP renderiza HTML server-side con JS embebido; PDF.js para el visor/resaltador de PDFs.
 
+## Workflow (leer primero)
+
+- Usuario escribe en español: responder en español, explicaciones simples (está aprendiendo git).
+- **Una rama por tarea, PR a `main`, nunca commit directo a `main`.** Guía completa: `docs/FLUJO_RAMAS.md`.
+- Este archivo es la memoria del proyecto: leerlo antes de explorar el código y actualizarlo en el mismo PR si algo aquí deja de ser cierto. Para detalle, `MAPA_TECNICO.md` en vez de recorrer el repo.
+- Prioridades actuales: 1) velocidad del resaltado (`modules/resaltar/`, PR #12), 2) responsive, 3) seguridad.
+
 ## Commands
 
 ```bash
