@@ -671,61 +671,195 @@ $docIdForOcr = $documentId; // For OCR fallback
         const scale = 1.5;
         let pdfDoc = null;
 
-        // Variables Radar y Scroll
-        let hasScrollToPage = false; // Scroll general a la página (Radar)
-        let hasScrollToMark = false; // Scroll preciso al texto (Render)
-
-        // OPTIMIZACIÓN: Cache de resultados OCR en memoria para evitar peticiones duplicadas
-        const ocrResultsCache = new Map();
+        // Scroll al primer resaltado (una sola vez)
+        let hasScrollToMark = false;
 
         // LOCK: Páginas actualmente en proceso de renderizado (evitar duplicados)
         const pagesBeingRendered = new Set();
 
-        // ============================================
-        // OPTIMIZACIÓN v2: Sistema centralizado de fetch OCR
-        // ============================================
-        const ocrFetchPromises = new Map(); // Promesas en curso (evita duplicados)
-        const ocrAbortController = new AbortController(); // Para cancelar al salir
-        let radarComplete = false; // Flag: radar terminó de escanear
+        const allTerms = [...hits, ...context];
 
-        // Única puerta de entrada para obtener datos OCR de una página
-        async function getOcrForPage(pageNum) {
-            // 1. Cache hit → retorno inmediato
-            if (ocrResultsCache.has(pageNum)) {
-                console.log(`OCR página ${pageNum}: cache hit`);
-                return ocrResultsCache.get(pageNum);
-            }
-            // 2. Fetch ya en curso → esperar la promesa existente
-            if (ocrFetchPromises.has(pageNum)) {
-                console.log(`OCR página ${pageNum}: esperando fetch en curso`);
-                return ocrFetchPromises.get(pageNum);
-            }
-            // 3. Nuevo fetch (con signal para poder abortar)
-            const allTerms = [...hits, ...context];
-            const termsStr = encodeURIComponent(allTerms.join(','));
-            const fileFallback = docIdForOcr === 0 && fileForOcr
-                ? `&file=${encodeURIComponent(fileForOcr)}` : '';
-            console.log(`OCR página ${pageNum}: nuevo fetch`);
-            const promise = fetch(
-                `ocr_text.php?doc=${docIdForOcr}&page=${pageNum}&terms=${termsStr}${fileFallback}`,
-                { signal: ocrAbortController.signal }
-            )
-                .then(r => r.json())
-                .then(result => {
-                    if (result.success) ocrResultsCache.set(pageNum, result);
-                    ocrFetchPromises.delete(pageNum);
-                    return result;
-                })
-                .catch(e => {
-                    ocrFetchPromises.delete(pageNum);
-                    if (e.name === 'AbortError') return null; // Silenciar abortos
+        // ============================================
+        // RESALTADO v3: texto del PDF primero, OCR solo para páginas escaneadas
+        // ============================================
+        // La mayoría de PDFs traen capa de texto: PDF.js la lee en el navegador
+        // en milisegundos (sin servidor). Solo las páginas con menos de
+        // MIN_TEXT_CHARS caracteres se consideran escaneadas y van a OCR.
+        // Mismo umbral que OCR_HL_MIN_TEXT_CHARS en helpers/ocr_highlight.php.
+        const MIN_TEXT_CHARS = 150;
+        const SERVER_CONCURRENCY = 4;
+
+        const highlightCache = new Map(); // pageNum -> Promise<resultado>
+        const ocrAbortController = new AbortController(); // Para cancelar al salir
+        const textPages = new Set();      // Páginas resueltas con la capa de texto
+        const measureCtx = document.createElement('canvas').getContext('2d');
+        const termIndexMap = new Map();
+        allTerms.forEach((t, idx) => {
+            if (!termIndexMap.has(t.toLowerCase())) termIndexMap.set(t.toLowerCase(), idx);
+        });
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        // Limita peticiones simultáneas al servidor (el OCR es costoso)
+        function createLimiter(max) {
+            let active = 0;
+            const queue = [];
+            const next = () => {
+                if (active >= max || queue.length === 0) return;
+                active++;
+                const { fn, resolve, reject } = queue.shift();
+                fn().then(resolve, reject).finally(() => { active--; next(); });
+            };
+            return fn => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
+        }
+        const serverLimit = createLimiter(SERVER_CONCURRENCY);
+
+        // Única puerta de entrada para obtener los resaltados de una página
+        function getHighlightsForPage(pageNum) {
+            if (!highlightCache.has(pageNum)) {
+                const promise = computeHighlights(pageNum).catch(e => {
+                    highlightCache.delete(pageNum);
                     throw e;
                 });
-            ocrFetchPromises.set(pageNum, promise);
-            return promise;
+                highlightCache.set(pageNum, promise);
+            }
+            return highlightCache.get(pageNum);
         }
 
-        // Cancelar TODAS las peticiones OCR al salir de la página
+        async function computeHighlights(pageNum) {
+            const textResult = await findInTextLayer(pageNum, allTerms);
+            if (textResult.textChars >= MIN_TEXT_CHARS) {
+                textPages.add(pageNum);
+                return textResult;
+            }
+            // Página escaneada → OCR en servidor
+            return fetchServerHighlights(pageNum, allTerms, false);
+        }
+
+        // Busca los términos en la capa de texto de PDF.js.
+        // Coordenadas en puntos PDF (escala 1) → mismo formato que el servidor.
+        async function findInTextLayer(pageNum, terms) {
+            const page = await pdfDoc.getPage(pageNum);
+            const vp = page.getViewport({ scale: 1 });
+            const tc = await page.getTextContent();
+
+            // Texto continuo en minúsculas + mapa carácter → (item, posición).
+            // Los espacios se colapsan a uno; los saltos de línea (hasEOL) se unen
+            // SIN espacio porque estos PDFs parten códigos al final de línea
+            // (ej. "M:" + "8278").
+            let stream = '';
+            const map = [];
+            let textChars = 0;
+            tc.items.forEach((item, idx) => {
+                const s = item.str || '';
+                for (let k = 0; k < s.length; k++) {
+                    const ch = s[k];
+                    if (/\s/.test(ch)) {
+                        if (stream.length && stream[stream.length - 1] !== ' ') {
+                            stream += ' ';
+                            map.push(null);
+                        }
+                    } else {
+                        const low = ch.toLowerCase();
+                        stream += low.length === 1 ? low : ch;
+                        map.push([idx, k]);
+                        textChars++;
+                    }
+                }
+            });
+
+            const highlights = [];
+            const matches = [];
+            for (const term of terms) {
+                const needle = term.toLowerCase().replace(/\s+/g, ' ').trim();
+                if (!needle) continue;
+                let from = 0, pos;
+                while ((pos = stream.indexOf(needle, from)) !== -1) {
+                    from = pos + needle.length;
+                    // Agrupar los caracteres del match por item (un rect por fragmento)
+                    const segments = [];
+                    for (let c = pos; c < pos + needle.length; c++) {
+                        const m = map[c];
+                        if (!m) continue;
+                        const last = segments[segments.length - 1];
+                        if (last && last.idx === m[0]) last.end = m[1] + 1;
+                        else segments.push({ idx: m[0], start: m[1], end: m[1] + 1 });
+                    }
+                    for (const seg of segments) {
+                        const box = itemSubstringBox(tc, tc.items[seg.idx], seg.start, seg.end, vp);
+                        if (box) highlights.push({ ...box, term });
+                    }
+                    matches.push({ term });
+                }
+            }
+
+            return {
+                success: true,
+                source: 'text',
+                textChars,
+                matches,
+                match_count: matches.length,
+                highlights,
+                image_width: vp.width,
+                image_height: vp.height
+            };
+        }
+
+        // Caja (en puntos) de item.str[start:end], proporcional al ancho medido con su fuente
+        function itemSubstringBox(tc, item, start, end, vp) {
+            const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+            const fontHeight = Math.hypot(tx[2], tx[3]);
+            if (!fontHeight || !item.width) return null;
+            const style = tc.styles[item.fontName] || {};
+            const ascent = style.ascent ? style.ascent : (style.descent ? 1 + style.descent : 0.8);
+            const itemWidth = item.width * vp.scale;
+
+            const s = item.str;
+            measureCtx.font = `100px ${style.fontFamily || 'sans-serif'}`;
+            const full = measureCtx.measureText(s).width || s.length;
+            const pre = start > 0 ? measureCtx.measureText(s.slice(0, start)).width : 0;
+            const sub = measureCtx.measureText(s.slice(start, end)).width;
+
+            return {
+                x: tx[4] + itemWidth * (pre / full),
+                y: tx[5] - fontHeight * ascent,
+                w: Math.max(itemWidth * (sub / full), 2),
+                h: fontHeight
+            };
+        }
+
+        // Petición al servidor (OCR). Reintenta si el servidor está ocupado o limita (429).
+        function fetchServerHighlights(pageNum, terms, forceOcr) {
+            return serverLimit(async () => {
+                const params = new URLSearchParams({ doc: docIdForOcr, page: pageNum, terms: terms.join(',') });
+                if (docIdForOcr === 0 && fileForOcr) params.set('file', fileForOcr);
+                if (forceOcr) params.set('force_ocr', '1');
+
+                for (let attempt = 0; attempt < 4; attempt++) {
+                    let resp;
+                    try {
+                        resp = await fetch(`ocr_text.php?${params}`, { signal: ocrAbortController.signal });
+                    } catch (e) {
+                        if (e.name === 'AbortError') return null; // Salió de la página
+                        throw e;
+                    }
+                    if (resp.status === 429) {
+                        const wait = parseInt(resp.headers.get('Retry-After'), 10) || 5;
+                        await sleep(Math.min(wait, 60) * 1000);
+                        continue;
+                    }
+                    const result = await resp.json();
+                    if (!result.success && attempt < 3) {
+                        await sleep(1500 * (attempt + 1));
+                        continue;
+                    }
+                    return result;
+                }
+                return { success: false, error: 'Servidor ocupado' };
+            });
+        }
+
+        // Cancelar TODAS las peticiones al servidor al salir de la página
         window.addEventListener('beforeunload', () => {
             ocrAbortController.abort();
         });
@@ -753,44 +887,37 @@ $docIdForOcr = $documentId; // For OCR fallback
         }
 
         // --- CARGA DEL PDF ---
+        let pageObserver = null;
+
         async function loadPDF() {
             try {
                 pdfDoc = await pdfjsLib.getDocument(pdfUrl).promise;
                 const numPages = pdfDoc.numPages;
                 container.innerHTML = '';
 
-                // Crear esqueletos de páginas
-                for (let i = 1; i <= numPages; i++) createPagePlaceholder(i);
+                // Esqueletos con el tamaño real de la página 1 (evita saltos de scroll)
+                const firstPage = await pdfDoc.getPage(1);
+                const baseViewport = firstPage.getViewport({ scale });
+                for (let i = 1; i <= numPages; i++) createPagePlaceholder(i, baseViewport);
 
                 // Configurar Lazy Load
-                const observer = new IntersectionObserver((entries) => {
+                pageObserver = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
-                        if (entry.isIntersecting) {
-                            const pNum = parseInt(entry.target.dataset.pageNum);
-                            if (!entry.target.dataset.rendered) {
-                                renderPage(pNum, entry.target);
-                                entry.target.dataset.rendered = 'true';
-                            }
+                        if (entry.isIntersecting && !entry.target.dataset.rendered) {
+                            entry.target.dataset.rendered = 'true';
+                            renderPage(parseInt(entry.target.dataset.pageNum), entry.target);
                         }
                     });
                 }, { root: null, rootMargin: '1200px', threshold: 0.05 });
 
-                document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
+                document.querySelectorAll('.pdf-page-wrapper').forEach(el => pageObserver.observe(el));
 
-                // Carga inicial forzada (SOLO PRIMERA PÁGINA) para evitar bloqueo
-                /* for (let i = 1; i <= Math.min(numPages, 3); i++) {
-                    const el = document.getElementById('page-' + i);
-                    if (el) { renderPage(i, el); el.dataset.rendered = 'true'; }
-                } */
-                // Solo página 1 inmediata
+                // Página 1 inmediata
                 const p1 = document.getElementById('page-1');
-                if (p1) { renderPage(1, p1); p1.dataset.rendered = 'true'; }
+                if (p1) { p1.dataset.rendered = 'true'; renderPage(1, p1); }
 
-                // INICIAR RADAR (Búsqueda silenciosa) CON RETRASO MÍNIMO
-                // 400ms: suficiente para que la 1ra página sea visible, luego escanear
-                setTimeout(() => {
-                    scanAllPagesForSummary();
-                }, 400);
+                // RADAR: buscar en todas las páginas de inmediato
+                scanAllPagesForSummary();
 
             } catch (err) {
                 console.error("Error loadPDF:", err);
@@ -799,147 +926,168 @@ $docIdForOcr = $documentId; // For OCR fallback
         }
 
         // --- RADAR DE FONDO (ESCANEO PROGRESIVO) ---
+        let scanState = null;
+
         async function scanAllPagesForSummary() {
             const statusDiv = document.getElementById('simpleStatus');
             if (!statusDiv) return;
 
-            const termsToFind = [...hits, ...context];
-            if (termsToFind.length === 0) {
+            if (allTerms.length === 0) {
                 statusDiv.innerHTML = ''; return;
             }
 
             const totalPages = pdfDoc.numPages;
-            let missingMap = new Map();
-            termsToFind.forEach(t => missingMap.set(t.replace(/[^a-zA-Z0-9]/g, '').toLowerCase(), t));
-
-            let pagesWithMatches = [];
-            let foundTermsSet = new Set();
-            let firstMatchScrolled = false;
-
-            // M9: Función para actualizar status con barra de progreso visual
+            const pagesWithMatches = new Set();
+            const foundTermsSet = new Set();
             let pagesScanned = 0;
-            function updateStatus(currentPage, isComplete = false) {
-                pagesScanned = Math.max(pagesScanned, currentPage);
-                const missingTerms = termsToFind.filter(t => !foundTermsSet.has(t));
-                const pct = Math.round((pagesScanned / totalPages) * 100);
-                let html = '';
+            let firstMatchHandled = false;
+            scanState = { pagesWithMatches, foundTermsSet, totalPages };
 
-                if (!isComplete) {
-                    html += `<div class="scanning-status-box">
-                        <div style="flex:1;">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-                                <span><span class="spinner-mini"></span> Escaneando...</span>
-                                <span style="font-size:12px;">${pagesScanned}/${totalPages} (${pct}%)</span>
-                            </div>
-                            <div style="background:rgba(255,255,255,0.3); border-radius:4px; height:6px; overflow:hidden;">
-                                <div style="background:white; height:100%; width:${pct}%; border-radius:4px; transition:width 0.3s ease;"></div>
-                            </div>
-                        </div>
-                    </div>`;
-                }
+            const renderStatus = (isComplete) => updateScanStatus(isComplete, pagesScanned);
 
-                if (pagesWithMatches.length > 0) {
-                    html += `<div style="background:#dcfce7; color:#166534; padding:8px; border-radius:6px; font-size:0.9em; margin-bottom:5px;">
-                        ✅ Encontrado en hojas: ${pagesWithMatches.join(', ')}
-                    </div>`;
-                }
-
-                if (isComplete && missingTerms.length > 0) {
-                    html += `<div style="background:#fee2e2; color:#991b1b; padding:8px; border-radius:6px; font-size:0.9em;">
-                        ⚠️ Faltan: ${missingTerms.join(', ')}
-                    </div>`;
-                } else if (isComplete && missingTerms.length === 0) {
-                    html = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:0.9em;">
-                        ✅ <strong>Completo:</strong> Todo encontrado (${foundTermsSet.size} término${foundTermsSet.size > 1 ? 's' : ''}).
-                    </div>
-                    <div style="margin-top:8px; background:#eff6ff; color:#1e40af; padding:8px; border-radius:6px; font-size:0.9em;">
-                        📄 Resaltado en hojas: ${pagesWithMatches.join(', ')}
-                    </div>`;
-                }
-
-                statusDiv.innerHTML = html;
-            }
-
-            // ESCANEO PROGRESIVO: Escanea y resalta en lotes paralelos (Velocidad x6)
-            console.log(`Iniciando escaneo de ${totalPages} páginas (Concurrencia: 6)...`);
-
-            // Función individual para procesar una página
             const processPage = async (i) => {
-                updateStatus(i);
                 try {
-                    // OPTIMIZACIÓN v2: Usar función centralizada (evita duplicados)
-                    const ocrResult = await getOcrForPage(i);
-                    if (!ocrResult) return; // Abortado (return, no continue — estamos en arrow function)
+                    const result = await getHighlightsForPage(i);
+                    if (result && result.success && result.match_count > 0) {
+                        (result.matches || []).forEach(m => foundTermsSet.add(m.term));
+                        pagesWithMatches.add(i);
 
-                    // CORRECCIÓN: Usar match_count del servidor en lugar de búsqueda manual en cliente
-                    if (ocrResult.success && ocrResult.match_count > 0) {
-
-                        // Añadir términos encontrados al set de encontrados
-                        if (ocrResult.matches && ocrResult.matches.length > 0) {
-                            ocrResult.matches.forEach(m => {
-                                // Normalizar para el set (aunque el servidor ya lo hizo)
-                                foundTermsSet.add(m.term);
-                            });
-                        }
-
-                        // Si el servidor dice que hay matches, es página positiva
-                        console.log(`✓ Página ${i}: ${ocrResult.match_count} coincidencias encontradas (Server verify)`);
-                        pagesWithMatches.push(i);
-                        // Ordenar para mostrar bonito
-                        pagesWithMatches.sort((a, b) => a - b);
-
-                        // RESALTAR INMEDIATAMENTE esta página (SIN reconstruir canvas)
                         const wrapper = document.getElementById('page-' + i);
-                        if (wrapper && wrapper.dataset.rendered !== 'ocr-complete') {
-                            if (wrapper.querySelector('canvas')) {
-                                // Página ya renderizada: solo agregar highlights encima (ligero)
-                                await applyHighlightsOnly(wrapper, i);
-                                wrapper.dataset.rendered = 'ocr-complete';
-                            }
-                            // Si NO tiene canvas, el IntersectionObserver renderizará con highlights via cache
+                        if (wrapper && wrapper.querySelector('canvas')) {
+                            paintHighlights(wrapper, i, result);
+                        } else if (wrapper && !firstMatchHandled && !hasScrollToMark) {
+                            // Llevar la vista a la primera hoja con coincidencias:
+                            // el lazy load la renderiza y paintHighlights centra el resaltado
+                            wrapper.scrollIntoView({ block: 'start' });
                         }
-
-                        // Scroll a primera coincidencia
-                        if (!firstMatchScrolled) {
-                            firstMatchScrolled = true;
-                            if (wrapper) wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }
-
-                        updateStatus(i);
+                        firstMatchHandled = true;
                     }
                 } catch (e) {
                     console.warn(`⚠ Error en página ${i}, continuando...`, e);
+                } finally {
+                    pagesScanned++;
+                    renderStatus(false);
                 }
             };
 
-            // Procesar en lotes de 6 (Parallel Batching - máxima concurrencia sin saturar servidor)
-            const BATCH_SIZE = 6;
-            for (let i = 1; i <= totalPages; i += BATCH_SIZE) {
-                const batch = [];
-                for (let j = i; j < i + BATCH_SIZE && j <= totalPages; j++) {
-                    batch.push(processPage(j));
+            // Cola en orden de página con varios trabajadores: el texto se resuelve
+            // al instante y las páginas escaneadas no frenan a las demás
+            let nextPage = 1;
+            const worker = async () => {
+                while (nextPage <= totalPages) {
+                    await processPage(nextPage++);
                 }
+            };
+            await Promise.all(Array.from({ length: Math.min(8, totalPages) }, worker));
 
-                // Esperar a que todo el lote termine antes de lanzar el siguiente
-                await Promise.all(batch);
+            renderStatus(true);
+        }
 
-                // Micro-pausa para no congelar UI
-                await new Promise(r => setTimeout(r, 10));
+        function updateScanStatus(isComplete, pagesScanned) {
+            const statusDiv = document.getElementById('simpleStatus');
+            if (!statusDiv || !scanState) return;
+            const { pagesWithMatches, foundTermsSet, totalPages } = scanState;
+            const pages = [...pagesWithMatches].sort((a, b) => a - b);
+            const missingTerms = allTerms.filter(t => !foundTermsSet.has(t));
+            const pct = Math.round((pagesScanned / totalPages) * 100);
+            let html = '';
+
+            if (!isComplete) {
+                html += `<div class="scanning-status-box">
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                            <span><span class="spinner-mini"></span> Escaneando...</span>
+                            <span style="font-size:12px;">${pagesScanned}/${totalPages} (${pct}%)</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.3); border-radius:4px; height:6px; overflow:hidden;">
+                            <div style="background:white; height:100%; width:${pct}%; border-radius:4px; transition:width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                </div>`;
+                if (pages.length > 0) {
+                    html += `<div style="background:#dcfce7; color:#166534; padding:8px; border-radius:6px; font-size:0.9em; margin-bottom:5px;">
+                        ✅ Encontrado en hojas: ${pages.join(', ')}
+                    </div>`;
+                }
+            } else if (missingTerms.length === 0) {
+                html = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:0.9em;">
+                    ✅ <strong>Completo:</strong> Todo encontrado (${foundTermsSet.size} término${foundTermsSet.size > 1 ? 's' : ''}).
+                </div>
+                <div style="margin-top:8px; background:#eff6ff; color:#1e40af; padding:8px; border-radius:6px; font-size:0.9em;">
+                    📄 Resaltado en hojas: ${pages.join(', ')}
+                </div>`;
+            } else {
+                if (pages.length > 0) {
+                    html += `<div style="background:#dcfce7; color:#166534; padding:8px; border-radius:6px; font-size:0.9em; margin-bottom:5px;">
+                        ✅ Encontrado en hojas: ${pages.join(', ')}
+                    </div>`;
+                }
+                html += `<div style="background:#fee2e2; color:#991b1b; padding:8px; border-radius:6px; font-size:0.9em;">
+                    ⚠️ Faltan: ${missingTerms.join(', ')}
+                </div>`;
+                // Los PDFs digitales pueden tener códigos dentro de imágenes:
+                // ofrecer OCR solo para lo que falta y solo en las hojas de texto
+                if (textPages.size > 0) {
+                    html += `<button type="button" id="btnDeepOcr" class="btn btn-secondary" style="width:100%; margin-top:8px;"
+                        onclick="deepOcrMissing()">🔍 Buscar faltantes con OCR (más lento)</button>`;
+                }
             }
 
-            console.log(`✓ Escaneo completado. Total: ${totalPages} páginas, Coincidencias: ${pagesWithMatches.length}`);
+            statusDiv.innerHTML = html;
+        }
 
-            // Resultado final
-            updateStatus(totalPages, true);
-            radarComplete = true;
+        // OCR profundo: solo términos faltantes, solo en hojas que se resolvieron por texto
+        async function deepOcrMissing() {
+            if (!scanState) return;
+            const { pagesWithMatches, foundTermsSet } = scanState;
+            const missing = allTerms.filter(t => !foundTermsSet.has(t));
+            const pages = [...textPages].sort((a, b) => a - b);
+            if (missing.length === 0 || pages.length === 0) return;
+
+            const btn = document.getElementById('btnDeepOcr');
+            let done = 0;
+            const setBtn = () => { if (btn) { btn.disabled = true; btn.textContent = `⏳ OCR ${done}/${pages.length} hojas...`; } };
+            setBtn();
+
+            await Promise.all(pages.map(async (pageNum) => {
+                try {
+                    const ocr = await fetchServerHighlights(pageNum, missing, true);
+                    if (ocr && ocr.success && ocr.match_count > 0 && ocr.image_width > 0) {
+                        const base = await getHighlightsForPage(pageNum);
+                        // Llevar las cajas OCR (píxeles) a la escala del resultado base
+                        const sx = base.image_width / ocr.image_width;
+                        const sy = base.image_height / ocr.image_height;
+                        const merged = {
+                            ...base,
+                            matches: [...base.matches, ...ocr.matches],
+                            match_count: base.match_count + ocr.match_count,
+                            highlights: [...base.highlights, ...ocr.highlights.map(h => ({
+                                x: h.x * sx, y: h.y * sy, w: h.w * sx, h: h.h * sy, term: h.term
+                            }))]
+                        };
+                        highlightCache.set(pageNum, Promise.resolve(merged));
+                        ocr.matches.forEach(m => foundTermsSet.add(m.term));
+                        pagesWithMatches.add(pageNum);
+                        const wrapper = document.getElementById('page-' + pageNum);
+                        if (wrapper && wrapper.querySelector('canvas')) paintHighlights(wrapper, pageNum, merged);
+                    }
+                } catch (e) {
+                    console.warn(`OCR profundo error en página ${pageNum}:`, e);
+                }
+                done++;
+                setBtn();
+            }));
+
+            textPages.clear(); // Ya se pasó OCR: no volver a ofrecerlo
+            updateScanStatus(true, scanState.totalPages);
         }
 
         // --- RENDERIZADO VISUAL ---
-        function createPagePlaceholder(pageNum) {
+        function createPagePlaceholder(pageNum, viewport) {
             const div = document.createElement('div');
             div.className = "page-outer-wrapper print-hide"; // Hidden by default for print
             div.innerHTML = `
-                <div id="page-${pageNum}" class="pdf-page-wrapper" data-page-num="${pageNum}" style="min-height:800px; display:flex; align-items:center; justify-content:center;">
+                <div id="page-${pageNum}" class="pdf-page-wrapper" data-page-num="${pageNum}" style="width:${viewport.width}px; height:${viewport.height}px; display:flex; align-items:center; justify-content:center;">
                     <span class="loading-placeholder" style="color:#999;">Cargando pág ${pageNum}...</span>
                 </div>
                 <div class="page-number">Página ${pageNum}</div>
@@ -949,10 +1097,7 @@ $docIdForOcr = $documentId; // For OCR fallback
 
         async function renderPage(pageNum, wrapper) {
             // LOCK: Evitar renders duplicados de la misma página
-            if (pagesBeingRendered.has(pageNum)) {
-                console.log(`Página ${pageNum}: ya está en proceso, ignorando llamada duplicada`);
-                return;
-            }
+            if (pagesBeingRendered.has(pageNum)) return;
             pagesBeingRendered.add(pageNum);
 
             try {
@@ -978,152 +1123,85 @@ $docIdForOcr = $documentId; // For OCR fallback
                 wrapper.style.minHeight = "auto";
                 wrapper.style.color = "inherit";
 
-                // 2. Aplicar highlights OCR de forma NO BLOQUEANTE
-                // La página ya es visible — highlights se agregan encima como overlay
-                const allTerms = [...hits, ...context];
+                // 2. Resaltados como overlay, sin bloquear la página ya visible
                 if (allTerms.length > 0) {
-                    // Fire-and-forget: no bloquea el renderizado de la página
-                    applyOcrHighlight(wrapper, null, pageNum, allTerms).then(() => {
-                        wrapper.dataset.rendered = 'ocr-complete';
-                        // Auto-scroll al primer resaltado encontrado
-                        if (!hasScrollToMark) {
-                            const firstMark = wrapper.querySelector('.ocr-highlight');
-                            if (firstMark) {
-                                hasScrollToMark = true;
-                                setTimeout(() => {
-                                    firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                }, 300);
-                            }
-                        }
-                    }).catch(e => console.warn('OCR highlight error:', e));
+                    getHighlightsForPage(pageNum)
+                        .then(result => paintHighlights(wrapper, pageNum, result))
+                        .catch(e => console.warn('Highlight error:', e));
                 }
 
             } catch (err) {
                 console.error("Render err pg " + pageNum, err);
             } finally {
-                // Liberar lock
                 pagesBeingRendered.delete(pageNum);
             }
         }
 
-        // FUNCIÓN LIGERA: Aplica highlights sobre canvas existente sin reconstruir la página
-        // Usada por el radar cuando la página ya fue renderizada por el IntersectionObserver
-        async function applyHighlightsOnly(wrapper, pageNum) {
-            // Remover highlights previos si existen
-            const oldOverlay = wrapper.querySelector('.ocr-highlights-overlay');
-            if (oldOverlay) oldOverlay.remove();
-            const oldBadge = wrapper.querySelector('[style*="z-index: 100"]');
-            if (oldBadge) oldBadge.remove();
+        // Dibuja los rectángulos de resaltado sobre el canvas. Idempotente: reemplaza
+        // el overlay anterior, así radar y lazy load pueden llamarla sin duplicar.
+        function paintHighlights(wrapper, pageNum, result) {
+            if (!result || !result.success || !result.highlights || result.highlights.length === 0) return;
+            if (!(result.image_width > 0)) return;
+            if (wrapper._hlResult === result) return; // Ya pintado con este resultado
+            const canvas = wrapper.querySelector('canvas');
+            if (!canvas) return;
+            wrapper._hlResult = result;
 
-            const allTerms = [...hits, ...context];
-            if (allTerms.length > 0) {
-                await applyOcrHighlight(wrapper, null, pageNum, allTerms);
+            wrapper.querySelectorAll('.ocr-highlights-overlay, .hl-badge').forEach(el => el.remove());
+
+            const badge = document.createElement('div');
+            badge.className = 'hl-badge';
+            badge.style.cssText = `
+                position: absolute; top: 10px; right: 10px; z-index: 100;
+                background: #166534; color: white; padding: 8px 15px; border-radius: 8px;
+                font-family: system-ui, sans-serif; font-size: 13px; font-weight: bold;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            `;
+            badge.textContent = `✅ ${result.match_count} encontrado(s)`;
+            wrapper.appendChild(badge);
+
+            const canvasWidth = canvas.width;
+            const canvasHeight = canvas.height;
+            const scaleX = canvasWidth / result.image_width;
+            const scaleY = canvasHeight / result.image_height;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'ocr-highlights-overlay';
+            overlay.style.cssText = `
+                position: absolute; top: 0; left: 0;
+                width: ${canvasWidth}px; height: ${canvasHeight}px;
+                pointer-events: none; z-index: 5;
+            `;
+
+            // Todo en un fragmento: un solo reflow por página
+            const frag = document.createDocumentFragment();
+            for (const hl of result.highlights) {
+                // Padding proporcional al alto de la palabra
+                const padX = Math.max(hl.h * 0.15, 1.5);
+                const padY = Math.max(hl.h * 0.20, 1.5);
+                const termIdx = termIndexMap.get((hl.term || '').toLowerCase()) ?? 0;
+
+                const rect = document.createElement('div');
+                rect.className = 'ocr-highlight';
+                rect.setAttribute('data-term-index', Math.min(termIdx, 4));
+                rect.style.cssText = `
+                    position: absolute;
+                    left: ${(hl.x - padX) * scaleX}px;
+                    top: ${(hl.y - padY) * scaleY}px;
+                    width: ${(hl.w + padX * 2) * scaleX}px;
+                    height: ${(hl.h + padY * 2) * scaleY}px;
+                `;
+                rect.title = hl.term;
+                frag.appendChild(rect);
             }
-        }
+            overlay.appendChild(frag);
+            wrapper.appendChild(overlay);
 
-        // OCR Highlight: dibuja rectángulos de resaltado usando datos OCR (cache o servidor)
-        async function applyOcrHighlight(wrapper, textDiv, pageNum, allTerms) {
-            try {
-                // OPTIMIZACIÓN v2: Usar función centralizada (evita duplicados y race conditions)
-                const result = await getOcrForPage(pageNum);
-                if (!result) return; // Abortado
-
-                if (result.success && result.matches && result.matches.length > 0) {
-                    // Mostrar badge pequeño con resultado
-                    const ocrBadge = document.createElement('div');
-                    ocrBadge.style.cssText = `
-                        position: absolute;
-                        top: 10px;
-                        right: 10px;
-                        background: #166534;
-                        color: white;
-                        padding: 8px 15px;
-                        border-radius: 8px;
-                        z-index: 100;
-                        font-family: system-ui, sans-serif;
-                        font-size: 13px;
-                        font-weight: bold;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-                    `;
-                    ocrBadge.innerHTML = `✅ OCR: ${result.match_count} encontrado(s)`;
-                    wrapper.appendChild(ocrBadge);
-
-                    // Dibujar rectángulos de resaltado si tenemos coordenadas
-                    if (result.highlights && result.highlights.length > 0 && result.image_width > 0) {
-                        // Obtener canvas para calcular escala
-                        const canvas = wrapper.querySelector('canvas');
-                        if (canvas) {
-                            const canvasWidth = canvas.width;
-                            const canvasHeight = canvas.height;
-                            const scaleX = canvasWidth / result.image_width;
-                            const scaleY = canvasHeight / result.image_height;
-
-                            // Crear overlay para los rectángulos
-                            const overlay = document.createElement('div');
-                            overlay.className = 'ocr-highlights-overlay';
-                            overlay.style.cssText = `
-                                position: absolute;
-                                top: 0;
-                                left: 0;
-                                width: ${canvasWidth}px;
-                                height: ${canvasHeight}px;
-                                pointer-events: none;
-                                z-index: 5;
-                            `;
-
-                            // Construir mapa de índices de términos para colores distintos
-                            const termIndexMap = new Map();
-                            allTerms.forEach((t, idx) => termIndexMap.set(t.toLowerCase(), idx));
-
-                            // Dibujar cada rectángulo PROGRESIVAMENTE (uno por uno)
-                            // Esto da la percepción visual de "escaneando y resaltando"
-                            const highlights = result.highlights;
-                            for (let i = 0; i < highlights.length; i++) {
-                                const hl = highlights[i];
-                                // Padding dinámico proporcional al alto de la palabra
-                                const padX = Math.max(hl.h * 0.15, 2); // 15% del alto, mín 2px
-                                const padY = Math.max(hl.h * 0.20, 2); // 20% del alto, mín 2px
-
-                                const termIdx = termIndexMap.get((hl.term || '').toLowerCase()) ?? 0;
-
-                                const rect = document.createElement('div');
-                                rect.className = 'ocr-highlight';
-                                rect.setAttribute('data-term-index', Math.min(termIdx, 4));
-                                rect.style.cssText = `
-                                    position: absolute;
-                                    left: ${(hl.x - padX) * scaleX}px;
-                                    top: ${(hl.y - padY) * scaleY}px;
-                                    width: ${(hl.w + padX * 2) * scaleX}px;
-                                    height: ${(hl.h + padY * 2) * scaleY}px;
-                                    opacity: 0;
-                                `;
-                                rect.title = hl.term;
-                                overlay.appendChild(rect);
-
-                                // Efecto progresivo: aparición rápida (>30 = instantáneo)
-                                ((el, delay) => {
-                                    if (delay === 0) {
-                                        el.style.opacity = '1';
-                                    } else {
-                                        setTimeout(() => {
-                                            el.style.opacity = '1';
-                                            el.style.animation = 'highlightFadeIn 0.2s ease-out';
-                                        }, delay);
-                                    }
-                                })(rect, highlights.length > 30 ? 0 : i * 15); // 15ms, instantáneo si >30
-                            }
-
-                            wrapper.appendChild(overlay);
-                        }
-                    }
-
-                    console.log(`OCR: ${result.match_count} coincidencias en página ${pageNum}`);
-                } else {
-                    // M3: Solo log silencioso — sin badge rojo para páginas sin coincidencias
-                    console.log(`OCR: Sin coincidencias en página ${pageNum}`);
-                }
-            } catch (e) {
-                console.warn(`OCR fallback error en página ${pageNum}:`, e);
+            // Auto-scroll al primer resaltado (una sola vez)
+            if (!hasScrollToMark) {
+                hasScrollToMark = true;
+                const firstMark = overlay.firstElementChild;
+                if (firstMark) firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
 
@@ -1178,16 +1256,14 @@ $docIdForOcr = $documentId; // For OCR fallback
                         background: 'white'
                     }).promise;
 
-                    const allTerms = [...hits, ...context];
-
-                    // Dibujar resaltados OCR sobre el canvas de impresión
+                    // Dibujar resaltados sobre el canvas de impresión
                     if (allTerms.length > 0) {
                         ctx.globalAlpha = 0.45; // Opacidad óptima para impresión
                         ctx.fillStyle = '#558c2d'; // Verde amarillento
 
                         try {
-                            // OPTIMIZACIÓN v2: Usar función centralizada (reutiliza cache del radar)
-                            const ocrResult = await getOcrForPage(pageNum);
+                            // Reutiliza el cache del radar (texto u OCR)
+                            const ocrResult = await getHighlightsForPage(pageNum);
 
                             if (ocrResult && ocrResult.success && ocrResult.highlights && ocrResult.highlights.length > 0) {
                                 const scaleX = tempCanvas.width / ocrResult.image_width;
@@ -1196,7 +1272,6 @@ $docIdForOcr = $documentId; // For OCR fallback
                                 for (const hl of ocrResult.highlights) {
                                     ctx.fillRect(hl.x * scaleX, hl.y * scaleY, hl.w * scaleX, hl.h * scaleY);
                                 }
-                                console.log(`Print: ${ocrResult.highlights.length} resaltados OCR en página ${pageNum}`);
                             }
                         } catch (ocrErr) {
                             console.warn(`Print OCR error página ${pageNum}:`, ocrErr);
