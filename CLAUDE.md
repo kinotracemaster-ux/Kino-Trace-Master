@@ -61,7 +61,7 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 
 ### Motor de búsqueda voraz (`helpers/search_engine.php`)
 
-`greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`.
+`greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`. `search_by_code()` y `greedy_search()` van **sin caché** a propósito (antes cacheaban 5–10 min sin invalidar al subir/borrar/re-enlazar: un PDF recién subido "no aparecía"). No volver a cachearlas sin borrar la caché en cada escritura.
 
 ### Extracción de PDFs
 
