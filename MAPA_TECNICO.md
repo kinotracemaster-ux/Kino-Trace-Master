@@ -188,7 +188,7 @@ Todos extienden `BaseController` (`__construct($db,$clientCode)`, `jsonExit($dat
 ## 5. Motor de búsqueda voraz (`helpers/search_engine.php`)
 
 - `normalize_code_token(string $code): string` — limpia NBSP/zero-width space y puntuación residual final (`, . ; : |`). Se aplica tanto a códigos buscados como a códigos tipeados a mano al guardar un documento (ver `TROUBLESHOOTING.md` #8).
-- `search_by_code($db, $searchTerm)` — match exacto `UPPER(codigo)=UPPER(?)`, sin caché (antes 5 min sin invalidar: ocultaba PDFs recién subidos).
+- `search_by_code($db, $searchTerm)` — match por clave `code_match_sql(codigo)=code_match_key(?)` (ignora espacios, guiones, puntos, comas…; índice `idx_codigos_match`), sin caché (antes 5 min sin invalidar: ocultaba PDFs recién subidos).
 - `greedy_search($db, array $codes)` — algoritmo voraz real: en cada iteración selecciona el documento que cubre más códigos restantes (empate → doc más reciente por fecha), hasta cubrir todos o agotar candidatos. Devuelve `{documents, covered, not_found, total_searched, total_covered}`. Sin caché.
 - `fulltext_search($db, $query)` — `LIKE` case-insensitive sobre `datos_extraidos`/`numero`, límite 200.
 - `search_in_pdf_content($db, $searchTerm, $clientCode)` — extrae texto en vivo de cada PDF y busca coincidencias con snippet (no usado por `api.php`, es de uso interno/legacy).

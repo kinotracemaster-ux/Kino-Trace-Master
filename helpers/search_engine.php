@@ -43,7 +43,7 @@ function normalize_code_token(string $code): string
 function search_by_code(PDO $db, string $searchTerm): array
 {
     $searchTerm = normalize_code_token($searchTerm);
-    if ($searchTerm === '') {
+    if (code_match_key($searchTerm) === '') {
         return [];
     }
 
@@ -62,12 +62,12 @@ function search_by_code(PDO $db, string $searchTerm): array
             (SELECT GROUP_CONCAT(codigo, ',') FROM codigos WHERE documento_id = d.id) as all_codes
         FROM documentos d
         JOIN codigos c ON d.id = c.documento_id
-        WHERE UPPER(c.codigo) = UPPER(?)
+        WHERE " . code_match_sql('c.codigo') . " = ?
         GROUP BY d.id
         ORDER BY d.fecha DESC
     ");
 
-    $stmt->execute([$searchTerm]);
+    $stmt->execute([code_match_key($searchTerm)]);
     $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // ✨ FIX DE ORDENAMIENTO DE FECHAS ✨
@@ -90,15 +90,22 @@ function search_by_code(PDO $db, string $searchTerm): array
  */
 function greedy_search(PDO $db, array $codes): array
 {
-    $codes = array_filter(array_map('normalize_code_token', $codes));
+    $codes = array_values(array_filter(array_map('normalize_code_token', $codes), function ($c) {
+        return code_match_key($c) !== '';
+    }));
     if (empty($codes)) {
         return ['documents' => [], 'covered' => [], 'not_found' => []];
     }
 
     // Sin caché: misma razón que search_by_code()
-    // Construir condición para buscar cualquiera de los códigos
-    $placeholders = implode(',', array_fill(0, count($codes), '?'));
-    $params = array_map('strtoupper', $codes);
+    // Se compara por clave (code_match_key): "BL1258" encuentra "BL-1258".
+    // $inputByKey guarda cómo lo escribió el usuario, para covered/not_found.
+    $inputByKey = [];
+    foreach ($codes as $c) {
+        $inputByKey[code_match_key($c)] ??= strtoupper($c);
+    }
+    $keys = array_keys($inputByKey);
+    $placeholders = implode(',', array_fill(0, count($keys), '?'));
 
     $stmt = $db->prepare("
         SELECT
@@ -111,18 +118,23 @@ function greedy_search(PDO $db, array $codes): array
             GROUP_CONCAT(c.codigo, '||') AS codigos
         FROM documentos d
         JOIN codigos c ON d.id = c.documento_id
-        WHERE UPPER(c.codigo) IN ($placeholders)
+        WHERE " . code_match_sql('c.codigo') . " IN ($placeholders)
         GROUP BY d.id
         ORDER BY d.fecha DESC
     ");
 
-    $stmt->execute($params);
+    $stmt->execute(array_map('strval', $keys));
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Convertir a estructura de documentos con array de códigos
     $documents = [];
     foreach ($rows as $row) {
-        $docCodes = array_filter(explode('||', $row['codigos']));
+        $docCodes = array_values(array_unique(array_filter(explode('||', $row['codigos']))));
+        // clave => código tal como está guardado (lo que hay que resaltar en el PDF)
+        $byKey = [];
+        foreach ($docCodes as $dc) {
+            $byKey[code_match_key($dc)] ??= $dc;
+        }
         $documents[$row['id']] = [
             'id' => (int) $row['id'],
             'tipo' => $row['tipo'],
@@ -130,12 +142,13 @@ function greedy_search(PDO $db, array $codes): array
             'fecha' => $row['fecha'],
             'proveedor' => $row['proveedor'],
             'ruta_archivo' => $row['ruta_archivo'],
-            'codes' => $docCodes
+            'codes' => $docCodes,
+            'keys' => $byKey
         ];
     }
 
     // Algoritmo voraz: seleccionar documentos que cubran más códigos
-    $remaining = array_map('strtoupper', $codes);
+    $remaining = array_map('strval', $keys);
     $selected = [];
 
     while (!empty($remaining) && !empty($documents)) {
@@ -143,8 +156,7 @@ function greedy_search(PDO $db, array $codes): array
         $bestCover = [];
 
         foreach ($documents as $doc) {
-            $docCodesUpper = array_unique(array_map('strtoupper', $doc['codes']));
-            $cover = array_intersect($docCodesUpper, $remaining);
+            $cover = array_intersect(array_map('strval', array_keys($doc['keys'])), $remaining);
 
             if ($best === null || count($cover) > count($bestCover)) {
                 $best = $doc;
@@ -160,18 +172,27 @@ function greedy_search(PDO $db, array $codes): array
             break;
         }
 
-        $best['matched_codes'] = array_values($bestCover);
+        $best['matched_codes'] = array_values(array_map(fn($k) => $best['keys'][$k], $bestCover));
+        unset($best['keys']);
         $selected[] = $best;
         $remaining = array_diff($remaining, $bestCover);
         unset($documents[$best['id']]);
     }
 
+    $notFound = array_values(array_map(fn($k) => $inputByKey[$k], $remaining));
+    $covered = [];
+    foreach ($codes as $c) {
+        if (!in_array(code_match_key($c), $remaining, true)) {
+            $covered[] = strtoupper($c);
+        }
+    }
+
     $result = [
         'documents' => $selected,
-        'covered' => array_diff(array_map('strtoupper', $codes), $remaining),
-        'not_found' => array_values($remaining),
+        'covered' => $covered,
+        'not_found' => $notFound,
         'total_searched' => count($codes),
-        'total_covered' => count($codes) - count($remaining)
+        'total_covered' => count($covered)
     ];
 
     return $result;

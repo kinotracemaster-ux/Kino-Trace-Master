@@ -45,7 +45,7 @@ $action = $_GET['action'] ?? '';
 switch ($action) {
     case 'search_by_code':
         $code = strtoupper(trim($_GET['code'] ?? ''));
-        if ($code === '') {
+        if (code_match_key($code) === '') {
             echo json_encode(['documents' => []]);
             exit;
         }
@@ -61,11 +61,12 @@ switch ($action) {
                 MAX(c.codigo) AS codigo_encontrado
             FROM documentos d
             JOIN codigos c ON d.id = c.documento_id
-            WHERE UPPER(c.codigo) = UPPER(?)
+            WHERE " . code_match_sql('c.codigo') . " = ?
             GROUP BY d.id
             ORDER BY d.fecha DESC
         ");
-        $stmt->execute([$code]);
+        // Igual que search_by_code(): "BL1258" encuentra "BL-1258"
+        $stmt->execute([code_match_key($code)]);
         $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode(['documents' => $docs]);

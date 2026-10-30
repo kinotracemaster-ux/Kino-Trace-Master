@@ -681,7 +681,7 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                         </div>
                         <div class="result-title">${doc.numero || 'Sin nombre'}</div>
                         <div class="result-actions">
-                            <a href="viewer_publico.php?cliente=${clientCode}&doc=${doc.id}&term=${encodeURIComponent(codigo)}" 
+                            <a href="viewer_publico.php?cliente=${clientCode}&doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || codigo)}" 
                                target="_blank" 
                                class="btn-ver-pdf">
                                 📄 VER PDF

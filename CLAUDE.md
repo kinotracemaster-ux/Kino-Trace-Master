@@ -61,7 +61,7 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 
 ### Motor de búsqueda voraz (`helpers/search_engine.php`)
 
-`greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`. `search_by_code()` y `greedy_search()` van **sin caché** a propósito (antes cacheaban 5–10 min sin invalidar al subir/borrar/re-enlazar: un PDF recién subido "no aparecía"). No volver a cachearlas sin borrar la caché en cada escritura.
+`greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`. `search_by_code()` y `greedy_search()` van **sin caché** a propósito (antes cacheaban 5–10 min sin invalidar al subir/borrar/re-enlazar: un PDF recién subido "no aparecía"). No volver a cachearlas sin borrar la caché en cada escritura. Comparan códigos **ignorando espacios, guiones, puntos, comas, `;`, `:`, `_` y `/`** (`code_match_key()` / `code_match_sql()` en `helpers/tenant.php`, índice por expresión `idx_codigos_match`): en Los Montañeros el mismo código está guardado como "BL-1258" y "BL1258", "DS 230166" y "DS230166", o "NS377675,". Cualquier consulta nueva por código debe usar esas dos funciones (también `Buscador/api_public.php`).
 
 ### Extracción de PDFs
 
