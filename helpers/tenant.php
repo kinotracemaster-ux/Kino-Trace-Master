@@ -526,7 +526,12 @@ function ensure_client_schema(PDO $db): void
         $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
         // Búsqueda por código ignorando espacios/guiones/etc. (ver code_match_sql)
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_match ON codigos(" . code_match_sql('codigo') . ")");
+        // Si no se pudiera crear, la búsqueda funciona igual (más lenta): no bloquear la BD
+        try {
+            $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_match ON codigos(" . code_match_sql('codigo') . ")");
+        } catch (PDOException $e) {
+            error_log('idx_codigos_match: ' . $e->getMessage());
+        }
     }
     $vinculosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='vinculos'")->fetchColumn();
     if ($vinculosExists) {
