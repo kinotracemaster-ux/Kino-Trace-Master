@@ -1115,6 +1115,18 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                             <span class="result-meta">${doc.fecha} · ${doc.occurrences} coincidencia(s)</span>
                         </div>
                         <div class="result-title">${doc.numero}</div>
+                        ${(() => {
+                            const m = doc.motivo || {};
+                            const lines = [];
+                            if (m.codigos && m.codigos.length) lines.push({ text: `🏷️ Tiene registrado el código ${m.codigos.map(c => `<b>${escapeForAttr(c)}</b>`).join(', ')}` });
+                            if (m.nombre) lines.push({ text: '📝 Lo buscado está en el nombre del documento' });
+                            if (m.texto > 0) lines.push({
+                                text: `📄 Aparece ${m.texto} ${m.texto == 1 ? 'vez' : 'veces'} en el texto del PDF` + ((m.codigos && m.codigos.length) ? '' : ', pero no es un código registrado de este documento'),
+                                aviso: !(m.codigos && m.codigos.length)
+                            });
+                            if (lines.length === 0) lines.push({ text: '📄 Aparece en los datos extraídos del PDF', aviso: true });
+                            return motivoBox(lines);
+                        })()}
                         <!-- Snippet oculto para usuario final 
                         ${doc.snippet ? `<div class="result-meta" style="margin-top: 0.5rem; font-style: italic; background: rgba(255,235,59,0.1); padding: 0.5rem; border-radius: 4px;">"${doc.snippet}"</div>` : ''}
                         -->
@@ -1293,7 +1305,9 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                                 <span class="result-meta">${doc.fecha}</span>
                             </div>
                             <div class="result-title">${doc.numero}</div>
-                            ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Escrito en el documento como: ${String(doc.codigo_encontrado).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')}</div>` : ''}
+                            ${motivoBox([doc.exacta == 0
+                                ? { text: `🏷️ Tiene registrado el código <b>${escapeForAttr(doc.codigo_encontrado)}</b>, escrito distinto a lo que buscaste (${escapeForAttr(code)})`, aviso: true }
+                                : { text: `🏷️ Tiene registrado el código <b>${escapeForAttr(doc.codigo_encontrado)}</b>` }])}
                             <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
                                 <button onclick="openHighlighter('modules/resaltar/viewer.php?doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || code)}')" class="btn btn-success" style="padding: 0.5rem 1rem; background: #038802;">🖍️ Resaltar</button>
                                 <a href="modules/resaltar/download.php?doc=${doc.id}" target="_blank" class="btn btn-secondary" style="padding: 0.5rem 1rem;">📄 Ver PDF</a>
@@ -1507,6 +1521,10 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                             <small style="color: #6b7280; display: block; margin-bottom: 0.25rem;">Códigos encontrados:</small>
                             ${docCodes.map(c => `<span class="code-tag" style="display: inline-block; background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-right: 4px; margin-bottom: 4px;">${c}</span>`).join('')}
                         </div>
+                        ${motivoBox((doc.match_info || []).filter(mi => !mi.exacto).map(mi => ({
+                            text: `≈ Buscaste <b>${escapeForAttr(mi.buscado)}</b>: aquí está registrado como <b>${escapeForAttr(mi.codigo)}</b>`,
+                            aviso: true
+                        })))}
                         
                         <div style="display: flex; gap: 0.75rem;">
                             <!-- Botón reconstruido para resaltar TODOS -->
@@ -1542,6 +1560,15 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                 .replace(/"/g, '&quot;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
+        }
+
+        // Recuadro "Por qué aparece": lines = [{ text, aviso }] (text ya escapado)
+        function motivoBox(lines) {
+            if (!lines || lines.length === 0) return '';
+            return `<div style="margin: 0.5rem 0; font-size: 0.85rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 0.4rem 0.6rem;">
+                <strong style="color: #166534;">Por qué aparece:</strong>
+                ${lines.map(l => `<div style="color: ${l.aviso ? '#b45309' : '#166534'};">${l.text}</div>`).join('')}
+            </div>`;
         }
 
         function escapeForJSON(obj) {

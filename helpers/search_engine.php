@@ -202,6 +202,12 @@ function greedy_search(PDO $db, array $codes): array
         }
 
         $best['matched_codes'] = array_values(array_map(fn($k) => $best['keys'][$k], $bestCover));
+        // Por qué se eligió: cada código encontrado, cómo se buscó y si coincide exacto
+        $best['match_info'] = array_values(array_map(fn($k) => [
+            'codigo' => $best['keys'][$k],
+            'buscado' => $inputByKey[$k],
+            'exacto' => strtoupper($best['keys'][$k]) === $inputByKey[$k],
+        ], $bestCover));
         unset($best['keys']);
         $selected[] = $best;
         $remaining = array_diff($remaining, $bestCover);
