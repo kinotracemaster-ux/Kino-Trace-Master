@@ -680,7 +680,7 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                             <span class="result-date">${doc.fecha || ''}</span>
                         </div>
                         <div class="result-title">${doc.numero || 'Sin nombre'}</div>
-                        ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Escrito en el documento como: ${String(doc.codigo_encontrado).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')}</div>` : ''}
+                        ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Registrado en este documento como ${String(doc.codigo_encontrado).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')} (escrito distinto a lo que buscaste)</div>` : ''}
                         <div class="result-actions">
                             <a href="viewer_publico.php?cliente=${clientCode}&doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || codigo)}" 
                                target="_blank" 

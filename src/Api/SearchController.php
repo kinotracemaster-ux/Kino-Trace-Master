@@ -142,6 +142,21 @@ class SearchController extends BaseController
             unset($res);
         }
 
+        // Por qué apareció cada documento (se muestra en el resultado):
+        // códigos registrados que contienen lo buscado, nombre del documento, texto del PDF
+        $queryKey = code_match_key($query);
+        foreach ($results as &$res) {
+            $res['motivo'] = [
+                'codigos' => $queryKey === '' ? [] : array_values(array_filter(
+                    $res['codes'],
+                    fn($c) => strpos(code_match_key($c), $queryKey) !== false
+                )),
+                'nombre' => stripos((string) $res['numero'], $query) !== false,
+                'texto' => $res['occurrences'],
+            ];
+        }
+        unset($res);
+
         $this->jsonExit([
             'query' => $query,
             'count' => count($results),
