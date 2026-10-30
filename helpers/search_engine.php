@@ -49,7 +49,12 @@ function search_by_code(PDO $db, string $searchTerm): array
 
     // Sin caché a propósito: guardaba el resultado 5 min y nada lo borraba al subir,
     // editar, borrar o re-enlazar documentos, así que un PDF recién subido "no
-    // aparecía" y uno borrado seguía saliendo. La consulta usa idx_codigos_codigo.
+    // aparecía" y uno borrado seguía saliendo.
+    //
+    // Se compara por clave (code_match_key): "BL1258" también trae "BL-1258". Los
+    // códigos se guardan y se muestran tal como el cliente los escribió (puntos,
+    // guiones, espacios); si alguno coincide EXACTO con lo buscado, esos documentos
+    // salen primero y con exacta = 1, y las variantes después con exacta = 0.
     $stmt = $db->prepare("
         SELECT
             d.id,
@@ -58,7 +63,8 @@ function search_by_code(PDO $db, string $searchTerm): array
             d.fecha,
             d.proveedor,
             d.ruta_archivo,
-            MAX(c.codigo) AS codigo_encontrado,
+            COALESCE(MAX(CASE WHEN UPPER(c.codigo) = UPPER(?) THEN c.codigo END), MAX(c.codigo)) AS codigo_encontrado,
+            MAX(CASE WHEN UPPER(c.codigo) = UPPER(?) THEN 1 ELSE 0 END) AS exacta,
             (SELECT GROUP_CONCAT(codigo, ',') FROM codigos WHERE documento_id = d.id) as all_codes
         FROM documentos d
         JOIN codigos c ON d.id = c.documento_id
@@ -67,14 +73,15 @@ function search_by_code(PDO $db, string $searchTerm): array
         ORDER BY d.fecha DESC
     ");
 
-    $stmt->execute([code_match_key($searchTerm)]);
+    $stmt->execute([$searchTerm, $searchTerm, code_match_key($searchTerm)]);
     $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // ✨ FIX DE ORDENAMIENTO DE FECHAS ✨
     // Como las fechas suelen ser strings (DD-MM-YYYY), el ordenamiento SQL falla.
     // Ordenamos en PHP usando timestamps reales.
+    // Exactos primero.
     usort($result, function ($a, $b) {
-        return strtotime($b['fecha']) - strtotime($a['fecha']);
+        return ($b['exacta'] <=> $a['exacta']) ?: strtotime($b['fecha']) - strtotime($a['fecha']);
     });
 
     return $result;
@@ -128,12 +135,22 @@ function greedy_search(PDO $db, array $codes): array
 
     // Convertir a estructura de documentos con array de códigos
     $documents = [];
+    $exactKeys = []; // claves con algún documento que tiene el código escrito exacto
     foreach ($rows as $row) {
         $docCodes = array_values(array_unique(array_filter(explode('||', $row['codigos']))));
         // clave => código tal como está guardado (lo que hay que resaltar en el PDF)
         $byKey = [];
         foreach ($docCodes as $dc) {
-            $byKey[code_match_key($dc)] ??= $dc;
+            $k = code_match_key($dc);
+            // Si el documento tiene varias escrituras, quedarse con la exacta
+            if (!isset($byKey[$k]) || (isset($inputByKey[$k]) && strtoupper($dc) === $inputByKey[$k])) {
+                $byKey[$k] = $dc;
+            }
+        }
+        foreach ($byKey as $k => $dc) {
+            if (isset($inputByKey[$k]) && strtoupper($dc) === $inputByKey[$k]) {
+                $exactKeys[$k] = true;
+            }
         }
         $documents[$row['id']] = [
             'id' => (int) $row['id'],
@@ -145,6 +162,18 @@ function greedy_search(PDO $db, array $codes): array
             'codes' => $docCodes,
             'keys' => $byKey
         ];
+    }
+
+    // Si un código existe escrito EXACTO como lo buscó el usuario, solo cuentan los
+    // documentos con esa escritura ("103-3" no se cubre con "1033" si "103-3" existe):
+    // el cliente puede usar puntos/guiones/espacios para distinguir productos.
+    // Las variantes solo se usan cuando no hay ninguna coincidencia exacta.
+    foreach ($documents as $id => $doc) {
+        foreach ($doc['keys'] as $k => $dc) {
+            if (isset($exactKeys[$k]) && strtoupper($dc) !== $inputByKey[$k]) {
+                unset($documents[$id]['keys'][$k]);
+            }
+        }
     }
 
     // Algoritmo voraz: seleccionar documentos que cubran más códigos

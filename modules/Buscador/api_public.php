@@ -58,15 +58,16 @@ switch ($action) {
                 d.fecha,
                 d.proveedor,
                 d.ruta_archivo,
-                MAX(c.codigo) AS codigo_encontrado
+                COALESCE(MAX(CASE WHEN UPPER(c.codigo) = ? THEN c.codigo END), MAX(c.codigo)) AS codigo_encontrado,
+                MAX(CASE WHEN UPPER(c.codigo) = ? THEN 1 ELSE 0 END) AS exacta
             FROM documentos d
             JOIN codigos c ON d.id = c.documento_id
             WHERE " . code_match_sql('c.codigo') . " = ?
             GROUP BY d.id
-            ORDER BY d.fecha DESC
+            ORDER BY exacta DESC, d.fecha DESC
         ");
-        // Igual que search_by_code(): "BL1258" encuentra "BL-1258"
-        $stmt->execute([code_match_key($code)]);
+        // Igual que search_by_code(): "BL1258" encuentra "BL-1258"; los escritos exacto primero
+        $stmt->execute([$code, $code, code_match_key($code)]);
         $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode(['documents' => $docs]);
