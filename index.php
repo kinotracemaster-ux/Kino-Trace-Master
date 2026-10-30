@@ -1293,8 +1293,9 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                                 <span class="result-meta">${doc.fecha}</span>
                             </div>
                             <div class="result-title">${doc.numero}</div>
+                            ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Escrito en el documento como: ${String(doc.codigo_encontrado).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')}</div>` : ''}
                             <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                <button onclick="openHighlighter('modules/resaltar/viewer.php?doc=${doc.id}&term=${encodeURIComponent(code)}')" class="btn btn-success" style="padding: 0.5rem 1rem; background: #038802;">🖍️ Resaltar</button>
+                                <button onclick="openHighlighter('modules/resaltar/viewer.php?doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || code)}')" class="btn btn-success" style="padding: 0.5rem 1rem; background: #038802;">🖍️ Resaltar</button>
                                 <a href="modules/resaltar/download.php?doc=${doc.id}" target="_blank" class="btn btn-secondary" style="padding: 0.5rem 1rem;">📄 Ver PDF</a>
                             </div>
                         </div>

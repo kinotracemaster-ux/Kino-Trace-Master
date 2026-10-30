@@ -680,8 +680,9 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                             <span class="result-date">${doc.fecha || ''}</span>
                         </div>
                         <div class="result-title">${doc.numero || 'Sin nombre'}</div>
+                        ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Escrito en el documento como: ${String(doc.codigo_encontrado).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')}</div>` : ''}
                         <div class="result-actions">
-                            <a href="viewer_publico.php?cliente=${clientCode}&doc=${doc.id}&term=${encodeURIComponent(codigo)}" 
+                            <a href="viewer_publico.php?cliente=${clientCode}&doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || codigo)}" 
                                target="_blank" 
                                class="btn-ver-pdf">
                                 📄 VER PDF

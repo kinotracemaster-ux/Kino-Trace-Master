@@ -45,7 +45,7 @@ $action = $_GET['action'] ?? '';
 switch ($action) {
     case 'search_by_code':
         $code = strtoupper(trim($_GET['code'] ?? ''));
-        if ($code === '') {
+        if (code_match_key($code) === '') {
             echo json_encode(['documents' => []]);
             exit;
         }
@@ -58,14 +58,16 @@ switch ($action) {
                 d.fecha,
                 d.proveedor,
                 d.ruta_archivo,
-                MAX(c.codigo) AS codigo_encontrado
+                COALESCE(MAX(CASE WHEN UPPER(c.codigo) = ? THEN c.codigo END), MAX(c.codigo)) AS codigo_encontrado,
+                MAX(CASE WHEN UPPER(c.codigo) = ? THEN 1 ELSE 0 END) AS exacta
             FROM documentos d
             JOIN codigos c ON d.id = c.documento_id
-            WHERE UPPER(c.codigo) = UPPER(?)
+            WHERE " . code_match_sql('c.codigo') . " = ?
             GROUP BY d.id
-            ORDER BY d.fecha DESC
+            ORDER BY exacta DESC, d.fecha DESC
         ");
-        $stmt->execute([$code]);
+        // Igual que search_by_code(): "BL1258" encuentra "BL-1258"; los escritos exacto primero
+        $stmt->execute([$code, $code, code_match_key($code)]);
         $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode(['documents' => $docs]);

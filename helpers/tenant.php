@@ -405,6 +405,40 @@ function get_client_config(string $code): ?array
 }
 
 /**
+ * Caracteres que NO cuentan al comparar códigos: el mismo producto aparece como
+ * "BL-1258" en un documento y "BL1258" en otro, o "DS 9147" en el PDF y "DS9147"
+ * guardado, o "NS377675," con la coma pegada al importar. Para encontrarlos todos
+ * se comparan sin espacios, guiones, puntos, comas, punto y coma, dos puntos,
+ * guion bajo ni barra, y sin mayúsculas/minúsculas.
+ */
+const CODE_MATCH_IGNORED = [' ', '-', '.', ',', ';', ':', '_', '/', "\t", "\r", "\n", "\xC2\xA0"];
+
+/**
+ * Clave de comparación de un código (lado PHP). Debe dar lo mismo que code_match_sql().
+ */
+function code_match_key(string $code): string
+{
+    return strtoupper(str_replace(CODE_MATCH_IGNORED, '', $code));
+}
+
+/**
+ * Misma clave en SQL, para la columna $column. Es también la expresión del índice
+ * idx_codigos_match (ensure_client_schema). SQLite solo usa el índice si la consulta
+ * trae la expresión idéntica, así que siempre construirla con esta función. Si se
+ * cambia CODE_MATCH_IGNORED, cambiar también el nombre del índice (_v2...) para que
+ * se cree de nuevo en las bases existentes.
+ */
+function code_match_sql(string $column): string
+{
+    $sql = "UPPER($column)";
+    foreach (CODE_MATCH_IGNORED as $ch) {
+        $hex = strtoupper(bin2hex($ch));
+        $sql = "REPLACE($sql, X'$hex', '')";
+    }
+    return $sql;
+}
+
+/**
  * Asegura que el esquema de la base de datos del cliente esté actualizado.
  * Se ejecuta automáticamente al abrir la conexión para garantizar que todas las tablas existan.
  * Esto permite desplegar actualizaciones de esquema sin migraciones manuales complejas.
@@ -491,6 +525,13 @@ function ensure_client_schema(PDO $db): void
     if ($codigosExists) {
         $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
+        // Búsqueda por código ignorando espacios/guiones/etc. (ver code_match_sql)
+        // Si no se pudiera crear, la búsqueda funciona igual (más lenta): no bloquear la BD
+        try {
+            $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_match ON codigos(" . code_match_sql('codigo') . ")");
+        } catch (PDOException $e) {
+            error_log('idx_codigos_match: ' . $e->getMessage());
+        }
     }
     $vinculosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='vinculos'")->fetchColumn();
     if ($vinculosExists) {

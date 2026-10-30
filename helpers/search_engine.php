@@ -43,13 +43,18 @@ function normalize_code_token(string $code): string
 function search_by_code(PDO $db, string $searchTerm): array
 {
     $searchTerm = normalize_code_token($searchTerm);
-    if ($searchTerm === '') {
+    if (code_match_key($searchTerm) === '') {
         return [];
     }
 
     // Sin caché a propósito: guardaba el resultado 5 min y nada lo borraba al subir,
     // editar, borrar o re-enlazar documentos, así que un PDF recién subido "no
-    // aparecía" y uno borrado seguía saliendo. La consulta usa idx_codigos_codigo.
+    // aparecía" y uno borrado seguía saliendo.
+    //
+    // Se compara por clave (code_match_key): "BL1258" también trae "BL-1258". Los
+    // códigos se guardan y se muestran tal como el cliente los escribió (puntos,
+    // guiones, espacios); si alguno coincide EXACTO con lo buscado, esos documentos
+    // salen primero y con exacta = 1, y las variantes después con exacta = 0.
     $stmt = $db->prepare("
         SELECT
             d.id,
@@ -58,23 +63,25 @@ function search_by_code(PDO $db, string $searchTerm): array
             d.fecha,
             d.proveedor,
             d.ruta_archivo,
-            MAX(c.codigo) AS codigo_encontrado,
+            COALESCE(MAX(CASE WHEN UPPER(c.codigo) = UPPER(?) THEN c.codigo END), MAX(c.codigo)) AS codigo_encontrado,
+            MAX(CASE WHEN UPPER(c.codigo) = UPPER(?) THEN 1 ELSE 0 END) AS exacta,
             (SELECT GROUP_CONCAT(codigo, ',') FROM codigos WHERE documento_id = d.id) as all_codes
         FROM documentos d
         JOIN codigos c ON d.id = c.documento_id
-        WHERE UPPER(c.codigo) = UPPER(?)
+        WHERE " . code_match_sql('c.codigo') . " = ?
         GROUP BY d.id
         ORDER BY d.fecha DESC
     ");
 
-    $stmt->execute([$searchTerm]);
+    $stmt->execute([$searchTerm, $searchTerm, code_match_key($searchTerm)]);
     $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // ✨ FIX DE ORDENAMIENTO DE FECHAS ✨
     // Como las fechas suelen ser strings (DD-MM-YYYY), el ordenamiento SQL falla.
     // Ordenamos en PHP usando timestamps reales.
+    // Exactos primero.
     usort($result, function ($a, $b) {
-        return strtotime($b['fecha']) - strtotime($a['fecha']);
+        return ($b['exacta'] <=> $a['exacta']) ?: strtotime($b['fecha']) - strtotime($a['fecha']);
     });
 
     return $result;
@@ -90,15 +97,22 @@ function search_by_code(PDO $db, string $searchTerm): array
  */
 function greedy_search(PDO $db, array $codes): array
 {
-    $codes = array_filter(array_map('normalize_code_token', $codes));
+    $codes = array_values(array_filter(array_map('normalize_code_token', $codes), function ($c) {
+        return code_match_key($c) !== '';
+    }));
     if (empty($codes)) {
         return ['documents' => [], 'covered' => [], 'not_found' => []];
     }
 
     // Sin caché: misma razón que search_by_code()
-    // Construir condición para buscar cualquiera de los códigos
-    $placeholders = implode(',', array_fill(0, count($codes), '?'));
-    $params = array_map('strtoupper', $codes);
+    // Se compara por clave (code_match_key): "BL1258" encuentra "BL-1258".
+    // $inputByKey guarda cómo lo escribió el usuario, para covered/not_found.
+    $inputByKey = [];
+    foreach ($codes as $c) {
+        $inputByKey[code_match_key($c)] ??= strtoupper($c);
+    }
+    $keys = array_keys($inputByKey);
+    $placeholders = implode(',', array_fill(0, count($keys), '?'));
 
     $stmt = $db->prepare("
         SELECT
@@ -111,18 +125,33 @@ function greedy_search(PDO $db, array $codes): array
             GROUP_CONCAT(c.codigo, '||') AS codigos
         FROM documentos d
         JOIN codigos c ON d.id = c.documento_id
-        WHERE UPPER(c.codigo) IN ($placeholders)
+        WHERE " . code_match_sql('c.codigo') . " IN ($placeholders)
         GROUP BY d.id
         ORDER BY d.fecha DESC
     ");
 
-    $stmt->execute($params);
+    $stmt->execute(array_map('strval', $keys));
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Convertir a estructura de documentos con array de códigos
     $documents = [];
+    $exactKeys = []; // claves con algún documento que tiene el código escrito exacto
     foreach ($rows as $row) {
-        $docCodes = array_filter(explode('||', $row['codigos']));
+        $docCodes = array_values(array_unique(array_filter(explode('||', $row['codigos']))));
+        // clave => código tal como está guardado (lo que hay que resaltar en el PDF)
+        $byKey = [];
+        foreach ($docCodes as $dc) {
+            $k = code_match_key($dc);
+            // Si el documento tiene varias escrituras, quedarse con la exacta
+            if (!isset($byKey[$k]) || (isset($inputByKey[$k]) && strtoupper($dc) === $inputByKey[$k])) {
+                $byKey[$k] = $dc;
+            }
+        }
+        foreach ($byKey as $k => $dc) {
+            if (isset($inputByKey[$k]) && strtoupper($dc) === $inputByKey[$k]) {
+                $exactKeys[$k] = true;
+            }
+        }
         $documents[$row['id']] = [
             'id' => (int) $row['id'],
             'tipo' => $row['tipo'],
@@ -130,12 +159,25 @@ function greedy_search(PDO $db, array $codes): array
             'fecha' => $row['fecha'],
             'proveedor' => $row['proveedor'],
             'ruta_archivo' => $row['ruta_archivo'],
-            'codes' => $docCodes
+            'codes' => $docCodes,
+            'keys' => $byKey
         ];
     }
 
+    // Si un código existe escrito EXACTO como lo buscó el usuario, solo cuentan los
+    // documentos con esa escritura ("103-3" no se cubre con "1033" si "103-3" existe):
+    // el cliente puede usar puntos/guiones/espacios para distinguir productos.
+    // Las variantes solo se usan cuando no hay ninguna coincidencia exacta.
+    foreach ($documents as $id => $doc) {
+        foreach ($doc['keys'] as $k => $dc) {
+            if (isset($exactKeys[$k]) && strtoupper($dc) !== $inputByKey[$k]) {
+                unset($documents[$id]['keys'][$k]);
+            }
+        }
+    }
+
     // Algoritmo voraz: seleccionar documentos que cubran más códigos
-    $remaining = array_map('strtoupper', $codes);
+    $remaining = array_map('strval', $keys);
     $selected = [];
 
     while (!empty($remaining) && !empty($documents)) {
@@ -143,8 +185,7 @@ function greedy_search(PDO $db, array $codes): array
         $bestCover = [];
 
         foreach ($documents as $doc) {
-            $docCodesUpper = array_unique(array_map('strtoupper', $doc['codes']));
-            $cover = array_intersect($docCodesUpper, $remaining);
+            $cover = array_intersect(array_map('strval', array_keys($doc['keys'])), $remaining);
 
             if ($best === null || count($cover) > count($bestCover)) {
                 $best = $doc;
@@ -160,18 +201,27 @@ function greedy_search(PDO $db, array $codes): array
             break;
         }
 
-        $best['matched_codes'] = array_values($bestCover);
+        $best['matched_codes'] = array_values(array_map(fn($k) => $best['keys'][$k], $bestCover));
+        unset($best['keys']);
         $selected[] = $best;
         $remaining = array_diff($remaining, $bestCover);
         unset($documents[$best['id']]);
     }
 
+    $notFound = array_values(array_map(fn($k) => $inputByKey[$k], $remaining));
+    $covered = [];
+    foreach ($codes as $c) {
+        if (!in_array(code_match_key($c), $remaining, true)) {
+            $covered[] = strtoupper($c);
+        }
+    }
+
     $result = [
         'documents' => $selected,
-        'covered' => array_diff(array_map('strtoupper', $codes), $remaining),
-        'not_found' => array_values($remaining),
+        'covered' => $covered,
+        'not_found' => $notFound,
         'total_searched' => count($codes),
-        'total_covered' => count($codes) - count($remaining)
+        'total_covered' => count($covered)
     ];
 
     return $result;
