@@ -76,6 +76,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row || !password_verify($password, $row['password_hash'])) {
             $error = 'Credenciales inválidas.';
+        } elseif ($subdomainClient && $row['codigo'] !== $subdomainClient) {
+            // SEGURIDAD: en el subdominio de un cliente (ej. losmonte.kino-trace.com)
+            // solo puede entrar ESE cliente. Así la dirección del navegador siempre
+            // corresponde a los datos que se ven.
+            $error = 'Credenciales inválidas.';
         } else {
             session_reopen();
             $_SESSION['client_code'] = $row['codigo'];

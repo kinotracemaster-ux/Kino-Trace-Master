@@ -246,23 +246,61 @@ function clone_client(
     if (!$exists) {
         throw new Exception("El cliente origen no existe: $sourceCode");
     }
+    if ($sourceCode === $newCode) {
+        throw new Exception('El cliente nuevo debe tener un código distinto al de origen.');
+    }
+    // Nunca pisar un cliente existente (ni su carpeta)
+    $stmt->execute([$newCode]);
+    if ((int) $stmt->fetchColumn() > 0 || file_exists(CLIENTS_DIR . DIRECTORY_SEPARATOR . $newCode)) {
+        throw new Exception("Ya existe un cliente o carpeta con el código: $newCode");
+    }
     // Crear estructura del nuevo cliente (directorios y tablas vacías)
     create_client_structure($newCode, $newName, $password_hash);
-    // Copiar archivos del cliente origen al nuevo (incluyendo base de datos)
+
     $srcDir = CLIENTS_DIR . DIRECTORY_SEPARATOR . $sourceCode;
     $dstDir = CLIENTS_DIR . DIRECTORY_SEPARATOR . $newCode;
-    copy_dir_files_only($srcDir, $dstDir);
-    // Reemplazar el registro en central para asegurarnos de que el nombre y colores se conserven del origen
-    // Obtenemos info del origen
-    $infoStmt = $centralDb->prepare('SELECT titulo, color_primario, color_secundario FROM control_clientes WHERE codigo = ?');
+
+    // Base de datos: copia consistente con el NOMBRE del cliente nuevo.
+    // Antes se copiaba "{origen}.db" tal cual dentro de la carpeta nueva (quedaba
+    // la base del otro cliente con su nombre y la del nuevo vacía).
+    $srcDbPath = client_db_path($sourceCode);
+    $dstDbPath = client_db_path($newCode);
+    if (file_exists($srcDbPath)) {
+        if (file_exists($dstDbPath)) {
+            unlink($dstDbPath);
+        }
+        foreach (['-wal', '-shm'] as $suf) {
+            if (file_exists($dstDbPath . $suf)) {
+                unlink($dstDbPath . $suf);
+            }
+        }
+        $src = new PDO('sqlite:' . $srcDbPath);
+        $src->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $src->exec('VACUUM INTO ' . $src->quote($dstDbPath));
+        $src = null;
+        @chmod($dstDbPath, 0666);
+        // El estado de sincronización (modo local) dice a qué cliente pertenece la base:
+        // en la copia no debe seguir diciendo el código del origen.
+        $dst = new PDO('sqlite:' . $dstDbPath);
+        $dst->exec('DROP TABLE IF EXISTS kt_estado');
+        $dst = null;
+    }
+
+    // Solo los PDFs (uploads). No se copian la base del origen, su logo, ni su
+    // historial de sincronización / respaldos, que identifican al otro cliente.
+    if (is_dir($srcDir . DIRECTORY_SEPARATOR . 'uploads')) {
+        copy_dir_files_only($srcDir . DIRECTORY_SEPARATOR . 'uploads', $dstDir . DIRECTORY_SEPARATOR . 'uploads');
+    }
+
+    // La marca (título) es la del cliente NUEVO: antes se heredaba el título del
+    // origen y el cliente nuevo aparecía con el nombre de otra empresa.
+    $infoStmt = $centralDb->prepare('SELECT color_primario, color_secundario FROM control_clientes WHERE codigo = ?');
     $infoStmt->execute([$sourceCode]);
-    $info = $infoStmt->fetch(PDO::FETCH_ASSOC);
-    $titulo = $info['titulo'] ?? '';
+    $info = $infoStmt->fetch(PDO::FETCH_ASSOC) ?: [];
     $colorP = $info['color_primario'] ?? '#2563eb';
     $colorS = $info['color_secundario'] ?? '#F87171';
-    // Actualizamos los colores y título del nuevo cliente en la central
     $updateStmt = $centralDb->prepare('UPDATE control_clientes SET titulo = ?, color_primario = ?, color_secundario = ? WHERE codigo = ?');
-    $updateStmt->execute([$titulo, $colorP, $colorS, $newCode]);
+    $updateStmt->execute([$newName, $colorP, $colorS, $newCode]);
 }
 
 /**
@@ -314,35 +352,43 @@ function get_available_folders(string $clientCode): array
  */
 function resolve_pdf_path(string $clientCode, array $document): ?string
 {
-    $filename = basename($document['ruta_archivo']);
+    $clientCode = sanitize_code($clientCode);
+    $ruta = (string) ($document['ruta_archivo'] ?? '');
+    if ($clientCode === '' || $ruta === '') {
+        return null;
+    }
+    $filename = basename($ruta);
     $uploadsDir = CLIENTS_DIR . DIRECTORY_SEPARATOR . $clientCode . DIRECTORY_SEPARATOR . 'uploads';
 
+    // SEGURIDAD (aislamiento entre clientes): cualquier ruta que salga de aquí debe
+    // quedar DENTRO de la carpeta del propio cliente. Antes, una ruta absoluta o con
+    // "../" guardada en la BD (p. ej. al clonar/copiar la base de otro cliente) hacía
+    // que un cliente abriera los PDFs de OTRO cliente.
+    $ok = fn(string $p): ?string => pdf_path_belongs_to_client($p, $clientCode) ? $p : null;
+
     // 1. Verificar si la ruta en BD funciona directamente
-    // Caso A: Ruta absoluta
-    if (file_exists($document['ruta_archivo'])) {
-        return $document['ruta_archivo'];
+    // Caso A: Ruta absoluta (solo si apunta a la carpeta de este cliente)
+    if (file_exists($ruta) && ($r = $ok($ruta))) {
+        return $r;
     }
 
     // Caso B: Ruta relativa a uploads
-    $candidate = $uploadsDir . DIRECTORY_SEPARATOR . $document['ruta_archivo'];
-    if (file_exists($candidate)) {
-        return $candidate;
+    $candidate = $uploadsDir . DIRECTORY_SEPARATOR . $ruta;
+    if (file_exists($candidate) && ($r = $ok($candidate))) {
+        return $r;
     }
 
-    // Caso B2: ruta_archivo con prefijo erróneo de importación antigua
-    // Ej: "uploads/client_kino/csv_import/file.pdf" → buscar en ../../uploads/client_kino/csv_import/
-    $ruta = $document['ruta_archivo'];
-    if (preg_match('#^uploads/client_[^/]+/#', $ruta)) {
-        $legacyPath = dirname($uploadsDir, 2) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $ruta);
-        if (file_exists($legacyPath)) {
-            return $legacyPath;
+    // Caso B2: ruta_archivo con prefijo de importación antigua
+    // Ej: "uploads/client_kino/csv_import/file.pdf" → clients/uploads/client_kino/...
+    // Solo se acepta la carpeta antigua que lleva el código de ESTE cliente.
+    if (preg_match('#^uploads/client_' . preg_quote($clientCode, '#') . '/#', $ruta)) {
+        $legacyPath = CLIENTS_DIR . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $ruta);
+        if (file_exists($legacyPath) && ($r = $ok($legacyPath))) {
+            return $r;
         }
     }
 
-    // Caso C: Ruta relativa a uploads, pero quitando posibles prefijos de carpeta en la ruta de BD
-    // Si ruta_bd es "manifiestos/archivo.pdf", ya probamos eso arriba.
-    // Si es solo "archivo.pdf", probamos en subcarpetas comunes.
-
+    // Caso C: solo el nombre del archivo, en las subcarpetas comunes
     $commonSubdirs = [
         '', // Raíz de uploads
         'manifiestos',
@@ -355,13 +401,12 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
 
     foreach ($commonSubdirs as $subdir) {
         $path = $uploadsDir . ($subdir ? DIRECTORY_SEPARATOR . $subdir : '') . DIRECTORY_SEPARATOR . $filename;
-        if (file_exists($path)) {
-            return $path;
+        if (file_exists($path) && ($r = $ok($path))) {
+            return $r;
         }
     }
 
-    // 2. Búsqueda recursiva (fallback final)
-    // Si el archivo se movió a una carpeta no estándar
+    // 2. Búsqueda recursiva (fallback final) dentro de uploads del cliente
     if (is_dir($uploadsDir)) {
         try {
             $iterator = new RecursiveIteratorIterator(
@@ -370,10 +415,8 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
             );
 
             foreach ($iterator as $file) {
-                if ($file->isFile()) {
-                    if ($file->getFilename() === $filename) {
-                        return $file->getPathname();
-                    }
+                if ($file->isFile() && $file->getFilename() === $filename && ($r = $ok($file->getPathname()))) {
+                    return $r;
                 }
             }
         } catch (UnexpectedValueException $e) {
@@ -383,6 +426,32 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
     }
 
     return null;
+}
+
+/**
+ * ¿La ruta (ya existente) está dentro de la carpeta de ESTE cliente?
+ * Acepta clients/{codigo}/... y la carpeta antigua clients/uploads/client_{codigo}/...
+ * Resuelve "..", enlaces simbólicos y mayúsculas/minúsculas no se confunden con otro cliente.
+ */
+function pdf_path_belongs_to_client(string $path, string $clientCode): bool
+{
+    $clientCode = sanitize_code($clientCode);
+    $real = realpath($path);
+    $clientsReal = realpath(CLIENTS_DIR);
+    if ($real === false || $clientsReal === false || $clientCode === '') {
+        return false;
+    }
+    $norm = fn(string $p): string => rtrim(str_replace('\\', '/', $p), '/') . '/';
+    $real = str_replace('\\', '/', $real);
+    foreach ([
+        $clientsReal . DIRECTORY_SEPARATOR . $clientCode,
+        $clientsReal . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'client_' . $clientCode,
+    ] as $dir) {
+        if (str_starts_with($real, $norm($dir))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
