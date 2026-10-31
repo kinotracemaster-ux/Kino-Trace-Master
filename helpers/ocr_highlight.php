@@ -150,7 +150,24 @@ function ocr_hl_words_from_text_layer(string $pdfPath, int $pageNum): array
 }
 
 /**
- * Busca los términos dentro de las palabras (sin distinguir mayúsculas).
+ * Clave de comparación de un texto para el resaltado: mayúsculas y sin los
+ * separadores que el cliente usa a veces dentro de un código (espacio, guion,
+ * punto, coma, ...). Misma regla que code_match_key() de helpers/tenant.php,
+ * así "BL-1258" resalta también "BL1258" y "DS 230166" resalta "DS230166".
+ */
+function ocr_hl_key(string $text): string
+{
+    if (function_exists('code_match_key')) {
+        return mb_strtoupper(code_match_key($text), 'UTF-8');
+    }
+    return mb_strtoupper(preg_replace('/[\s\-.,;:_\/\x{00A0}]+/u', '', $text), 'UTF-8');
+}
+
+/**
+ * Busca los términos dentro de las palabras (sin distinguir mayúsculas ni
+ * separadores). Las palabras se unen en un solo texto continuo, así un código
+ * que el OCR parte en dos palabras ("DS" + "230166") también se encuentra;
+ * se resalta cada palabra que forma parte de la coincidencia.
  *
  * @return array ['matches' => [...], 'highlights' => [...]]
  */
@@ -159,17 +176,81 @@ function ocr_hl_match_terms(array $words, array $terms): array
     $matches = [];
     $highlights = [];
 
-    foreach ($words as $word) {
-        foreach ($terms as $term) {
-            if (mb_stripos($word['text'], $term, 0, 'UTF-8') !== false) {
-                $box = ['x' => $word['x'], 'y' => $word['y'], 'w' => $word['w'], 'h' => $word['h']];
-                $matches[] = ['term' => $term, 'word' => $word['text']] + $box;
-                $highlights[] = $box + ['term' => $term];
+    // Texto continuo de claves + a qué palabra pertenece cada carácter
+    $stream = '';
+    $owner = []; // posición (en caracteres) → [índice de palabra, posición en la palabra]
+    $chars = []; // caracteres originales de cada palabra
+    foreach ($words as $i => $word) {
+        $chars[$i] = mb_str_split((string) ($word['text'] ?? ''), 1, 'UTF-8');
+        foreach ($chars[$i] as $k => $ch) {
+            $key = ocr_hl_key($ch);
+            if ($key === '') {
+                continue;
+            }
+            $stream .= $key;
+            for ($n = mb_strlen($key, 'UTF-8'); $n > 0; $n--) {
+                $owner[] = [$i, $k];
             }
         }
     }
 
+    foreach ($terms as $term) {
+        $needle = ocr_hl_key((string) $term);
+        $nLen = mb_strlen($needle, 'UTF-8');
+        if ($nLen === 0) {
+            continue;
+        }
+        $from = 0;
+        while (($pos = mb_strpos($stream, $needle, $from, 'UTF-8')) !== false) {
+            $from = $pos + $nLen;
+            if (!ocr_hl_edge_ok($chars, $owner[$pos], -1, mb_substr($needle, 0, 1, 'UTF-8'))
+                || !ocr_hl_edge_ok($chars, $owner[$pos + $nLen - 1], 1, mb_substr($needle, -1, 1, 'UTF-8'))) {
+                continue;
+            }
+            $wordIdx = array_values(array_unique(array_column(array_slice($owner, $pos, $nLen), 0)));
+            $matchNum = count($matches); // enlaza cada caja con su coincidencia
+            $texts = [];
+            foreach ($wordIdx as $i) {
+                $w = $words[$i];
+                $box = ['x' => $w['x'], 'y' => $w['y'], 'w' => $w['w'], 'h' => $w['h']];
+                $highlights[] = $box + ['term' => $term, 'match' => $matchNum];
+                $texts[] = $w['text'];
+            }
+            $first = $words[$wordIdx[0]];
+            $matches[] = [
+                'term' => $term,
+                'word' => implode(' ', $texts),
+                'x' => $first['x'], 'y' => $first['y'], 'w' => $first['w'], 'h' => $first['h'],
+            ];
+        }
+    }
+
     return ['matches' => $matches, 'highlights' => $highlights];
+}
+
+/**
+ * Borde de una coincidencia: el código no puede ir pegado a otra letra/número
+ * ("11251" no es "1251") ni ser parte de una cifra con puntos ("1.251.000").
+ * El borde de una palabra cuenta como separación. Misma regla que el visor.
+ */
+function ocr_hl_edge_ok(array $chars, array $at, int $dir, string $termEdge): bool
+{
+    [$i, $k] = $at;
+    $w = $chars[$i];
+    $j = $k + $dir;
+    $skipped = 0;
+    while ($j >= 0 && $j < count($w) && ($w[$j] === '.' || $w[$j] === ',')) {
+        $j += $dir;
+        $skipped++;
+    }
+    if ($j < 0 || $j >= count($w)) {
+        return true;
+    }
+    $ch = $w[$j];
+    if (!preg_match('/[\p{L}\p{N}]/u', $ch)) {
+        return true;
+    }
+    return $skipped > 0 && !(preg_match('/\p{N}/u', $ch) && preg_match('/\p{N}/u', $termEdge));
 }
 
 /**
