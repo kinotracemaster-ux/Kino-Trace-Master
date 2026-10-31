@@ -69,7 +69,7 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 
 ### Seguridad
 
-Passwords con `password_hash()`/PDO prepared statements en todas partes. `helpers/csrf_protection.php` y `helpers/rate_limiter.php` protegen `api.php`. `helpers/secure_uploader.php` valida uploads. `ADMIN_RESET_PASSWORD` (env var) permite resetear password de `admin`/`kino` en cada arranque — solo para pruebas/deploy nuevo, no dejarla seteada en producción normal.
+Passwords con `password_hash()`/PDO prepared statements en todas partes. `helpers/csrf_protection.php` y `helpers/rate_limiter.php` protegen `api.php`. `helpers/secure_uploader.php` valida uploads. **Aislamiento entre clientes:** `resolve_pdf_path()` solo devuelve archivos dentro de `clients/{codigo}/` (o la carpeta antigua `clients/uploads/client_{codigo}/`), verificado con `pdf_path_belongs_to_client()` (realpath): una ruta absoluta o con `../` en la BD ya no abre PDFs de otro cliente. En el subdominio de un cliente solo puede iniciar sesión ese cliente (`login.php`). La cookie de sesión es host-only (sin `Domain`). `clone_client()` copia la base con el nombre del cliente nuevo y le pone SU nombre como título (antes heredaba el título del origen). El panel admin muestra por cliente los documentos de su base y avisa si comparte título con otro o si su carpeta tiene la `.db` de otro cliente. ⚠️ Pendiente: los PDFs se sirven como archivos estáticos (`clients/{codigo}/uploads/...`) sin pasar por la sesión. `ADMIN_RESET_PASSWORD` (env var) permite resetear password de `admin`/`kino` en cada arranque — solo para pruebas/deploy nuevo, no dejarla seteada en producción normal.
 
 ### Modo local (copia de trabajo en el PC de un cliente)
 
