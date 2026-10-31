@@ -475,6 +475,27 @@ try {
             }
         }
 
+        // ACTUALIZAR LA BASE DE TODOS LOS CLIENTES (mismo proceso que corre al publicar)
+        elseif ($action === 'migrate_all') {
+            $okN = 0;
+            $fallos = [];
+            foreach (migrate_all_clients() as $mCode => $r) {
+                if ($r['despues'] === null && $r['ok']) {
+                    continue; // cliente sin base todavía
+                }
+                if ($r['ok']) {
+                    $okN++;
+                } else {
+                    $fallos[] = "{$mCode} ({$r['error']})";
+                }
+            }
+            if ($fallos) {
+                $error = '❌ Bases con error: ' . implode('; ', $fallos);
+            } else {
+                $message = "✅ {$okN} bases de clientes al día (versión " . client_schema_version() . ').';
+            }
+        }
+
         // DIAGNOSTICAR HUÉRFANOS
         elseif ($action === 'diagnose_orphans') {
             $diagCode = sanitize_code($_POST['diag_code'] ?? '');
@@ -621,7 +642,7 @@ foreach ($clients as $cli) {
 $clientHealth = [];
 foreach ($clients as $cli) {
     $code = $cli['codigo'];
-    $h = ['docs' => null, 'same_title' => [], 'foreign_db' => []];
+    $h = ['docs' => null, 'same_title' => [], 'foreign_db' => [], 'schema' => client_schema_version_of($code)];
     $dbFile = client_db_path($code);
     if (is_file($dbFile)) {
         try {
@@ -1028,6 +1049,10 @@ foreach ($clients as $cli) {
                     Dashboard
                 </a>
                 <a href="sync_local.php" class="btn btn-secondary" title="Copias de trabajo en PC y sincronización">💻 Modo local</a>
+                <form method="post" style="display:inline" onsubmit="return confirm('¿Actualizar la base de datos de TODOS los clientes a la última versión? Es seguro: solo agrega lo que falte.');">
+                    <input type="hidden" name="action" value="migrate_all">
+                    <button type="submit" class="btn btn-secondary" title="Pone al día la base de cada cliente (también ocurre solo al publicar)">🗄️ Actualizar bases</button>
+                </form>
                 <a href="../logout.php" class="btn btn-secondary">Salir</a>
             </div>
         </header>
@@ -1114,6 +1139,9 @@ foreach ($clients as $cli) {
                         <?php $hl = $clientHealth[$cli['codigo']] ?? null; ?>
                         <?php if ($hl): ?>
                             <div class="client-meta">📄 <?= $hl['docs'] === null ? 'sin base' : number_format($hl['docs']) . ' documentos' ?></div>
+                            <?php if ($hl['schema'] !== null && $hl['schema'] < client_schema_version()): ?>
+                                <div class="client-meta" style="color:#b45309;font-weight:600;">⚠️ Base desactualizada (v<?= (int) $hl['schema'] ?> de v<?= client_schema_version() ?>): se actualiza sola al entrar, o con «🗄️ Actualizar bases»</div>
+                            <?php endif; ?>
                             <?php if ($hl['same_title']): ?>
                                 <div class="client-meta" style="color:#b91c1c;font-weight:600;">⚠️ Mismo título que: <?= htmlspecialchars(implode(', ', $hl['same_title'])) ?> (corregir con el botón Editar)</div>
                             <?php endif; ?>
