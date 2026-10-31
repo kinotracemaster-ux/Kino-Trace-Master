@@ -68,12 +68,14 @@ if ($relativePath === $pdfPath || str_starts_with($relativePath, DIRECTORY_SEPAR
     $pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
 }
 
-// Preparar términos a resaltar
+// Preparar términos a resaltar. Solo se separa por coma, punto y coma o salto
+// de línea: los espacios y guiones son parte del código ("DS 230166" es UN
+// código; antes se partía en "DS" y "230166" y se resaltaba cualquier "DS").
 $termsToHighlight = [];
 if (!empty($searchTerm)) {
-    $splitTerms = preg_split('/[\s,\t\n\r]+/', $searchTerm, -1, PREG_SPLIT_NO_EMPTY);
+    $splitTerms = preg_split('/[,;\t\n\r]+/', $searchTerm, -1, PREG_SPLIT_NO_EMPTY);
     if ($splitTerms) {
-        $termsToHighlight = array_unique(array_filter(array_map('trim', $splitTerms)));
+        $termsToHighlight = array_values(array_unique(array_filter(array_map('trim', $splitTerms))));
     }
 }
 ?>
@@ -90,7 +92,6 @@ if (!empty($searchTerm)) {
     $cS = $clientConfig['color_secundario'] ?? '#333';
     ?>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mark.js/dist/mark.min.js"></script>
     <style>
         :root {
             --primary-color:
@@ -274,42 +275,6 @@ if (!empty($searchTerm)) {
             height: auto !important;
         }
 
-        .text-layer {
-            position: absolute;
-            left: 0;
-            top: 0;
-            right: 0;
-            bottom: 0;
-            overflow: hidden;
-            opacity: 1;
-            line-height: 1;
-        }
-
-        .text-layer span {
-            position: absolute;
-            white-space: pre;
-            color: transparent;
-            cursor: text;
-        }
-
-        /* Resaltado amarillo-dorado — mix-blend-mode solo en mark */
-        .text-layer mark {
-            padding: 0;
-            margin: 0;
-            border-radius: 3px;
-            color: transparent;
-            mix-blend-mode: multiply;
-            background-color: var(--hl-color) !important;
-            outline: 1.5px solid var(--hl-border);
-            transition: background-color 0.15s;
-        }
-
-        /* Marca activa (navegación actual) */
-        .text-layer mark.hl-active {
-            background-color: rgba(255, 120, 0, 0.80) !important;
-            outline: 2px solid rgba(200, 80, 0, 0.9);
-        }
-
         .page-number {
             text-align: center;
             font-size: 14px;
@@ -344,14 +309,18 @@ if (!empty($searchTerm)) {
             }
         }
 
-        /* OCR overlay highlights */
+        /* Resaltados (rectángulos sobre el dibujo de la hoja, igual que el visor interno) */
         .ocr-hl-overlay div {
-            border-radius: 4px;
+            position: absolute;
+            border-radius: 3px;
+            background: var(--hl-color);
+            mix-blend-mode: multiply;
             outline: 1.5px solid var(--hl-border);
+            animation: hlFadeIn 0.2s ease-out both;
         }
 
         .ocr-hl-overlay div.hl-active {
-            background: rgba(255, 120, 0, 0.75) !important;
+            background: rgba(255, 120, 0, 0.75);
             outline: 2px solid rgba(200, 80, 0, 0.95);
         }
 
@@ -429,11 +398,6 @@ if (!empty($searchTerm)) {
             .pdf-page-wrapper {
                 box-shadow: none;
                 page-break-after: always;
-            }
-
-            .text-layer mark {
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
             }
 
             .ocr-hl-overlay div {
@@ -530,83 +494,408 @@ if (!empty($searchTerm)) {
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         const pdfUrl = '<?= addslashes($pdfUrl) ?>';
-        const termsToHighlight = <?= json_encode(array_values($termsToHighlight)) ?>;
+        const termsToHighlight = <?= json_encode(array_values($termsToHighlight)) ?>.map(String).map(s => s.trim()).filter(Boolean);
         const clientCode = '<?= addslashes($clientCode) ?>';
         const docId = <?= $documentId ?>;
         const container = document.getElementById('pdfContainer');
-        // El scale se calcula dinámicamente en renderPage según el ancho disponible
+
+        // ============================================
+        // RESALTADO RÁPIDO (mismo motor que modules/resaltar/viewer.php)
+        // ============================================
+        // 1. Se busca el código en la capa de texto del PDF con PDF.js, en el
+        //    navegador (milisegundos, sin servidor).
+        // 2. Solo las hojas escaneadas (menos de MIN_TEXT_CHARS caracteres) van al
+        //    servidor (ocr_text_public.php → pdftotext / OCR, con caché).
+        // 3. Los resaltados son rectángulos encima del dibujo de la hoja.
+        // El código se compara sin mayúsculas, tildes ni separadores (espacio,
+        // guion, punto, coma...), igual que la búsqueda: "BL-1258" también
+        // resalta "BL1258".
+        const AUTO_HIGHLIGHT = true;   // resaltar solo al abrir (como el visor interno)
+        const MIN_TEXT_CHARS = 150;    // = OCR_HL_MIN_TEXT_CHARS (helpers/ocr_highlight.php)
+        const SERVER_CONCURRENCY = 3;  // peticiones simultáneas al servidor (OCR es costoso)
         const BASE_SCALE = 1.5;
 
         let pdfDoc = null;
-        let highlightDone = false;
+        let pageScale = BASE_SCALE;     // ajustada al ancho de pantalla en loadPDF
+        let highlightOn = false;        // se encendió el resaltado
+        let scanPromise = null;
+        let userNavigated = false;
 
         const pagesRendering = new Set();
-        const ocrCache = new Map();
+        const highlightCache = new Map();   // pageNum -> Promise<resultado>
+        const pageResults = new Map();      // pageNum -> resultado con coincidencias
+        const abortCtl = new AbortController();
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const measureCtx = document.createElement('canvas').getContext('2d');
 
-        // ── Navegación entre ocurrencias ──────────────────────────────
-        let allMarks = [];   // { el, type:'mark'|'ocr-div' }
-        let currentIdx = -1;
+        // ── Normalización (misma regla que code_match_key en helpers/tenant.php) ──
+        const SEP_RE = /[\s\-.,;:_\/ ]/;
+        const normChar = ch => ch.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        const keyOf = str => { let o = ''; for (const ch of str) if (!SEP_RE.test(ch)) o += normChar(ch); return o; };
+        const termKeys = termsToHighlight.map(term => ({ term, key: keyOf(term) })).filter(t => t.key);
 
-        function buildMarkList() {
-            allMarks = [];
-            // Recolectar <mark> del text-layer
-            document.querySelectorAll('.text-layer mark').forEach(el => {
-                allMarks.push({ el, type: 'mark' });
+        // ── Búsqueda en la capa de texto (navegador) ──────────────────
+        // Coordenadas en puntos PDF (escala 1): mismo formato que el servidor.
+        async function findInTextLayer(pageNum) {
+            const page = await pdfDoc.getPage(pageNum);
+            const vp = page.getViewport({ scale: 1 });
+            const tc = await page.getTextContent();
+
+            // Texto continuo sin separadores + mapa carácter → (item, posición).
+            // Une los saltos de línea, así un código partido al final de línea
+            // ("M:" + "8278") también se encuentra.
+            let stream = '';
+            const map = [];
+            let textChars = 0;
+            tc.items.forEach((item, idx) => {
+                const s = item.str || '';
+                for (let k = 0; k < s.length; k++) {
+                    const ch = s[k];
+                    if (/\s/.test(ch)) continue;
+                    textChars++;
+                    if (SEP_RE.test(ch)) continue;
+                    for (const c of normChar(ch)) { stream += c; map.push([idx, k]); }
+                }
             });
-            // Recolectar divs del overlay OCR
-            document.querySelectorAll('.ocr-hl-overlay div').forEach(el => {
-                // Calcular posición absoluta en la página para ordenar verticalmente
-                const rect = el.getBoundingClientRect();
-                allMarks.push({ el, type: 'ocr-div', top: rect.top + window.scrollY });
-            });
-            // Ordenar por posición vertical en el documento
-            allMarks.sort((a, b) => {
-                const ra = a.el.getBoundingClientRect();
-                const rb = b.el.getBoundingClientRect();
-                const topA = ra.top + window.scrollY;
-                const topB = rb.top + window.scrollY;
-                return topA - topB;
-            });
-        }
 
-        function updateNavBar() {
-            const navBar = document.getElementById('navBar');
-            const counter = document.getElementById('navCounter');
-            const total = document.getElementById('navTotal');
-            const btnPrev = document.getElementById('btnPrev');
-            const btnNext = document.getElementById('btnNext');
-
-            if (allMarks.length === 0) {
-                navBar.classList.remove('visible');
-                return;
+            const highlights = [];
+            const matches = [];
+            for (const { term, key } of termKeys) {
+                let from = 0, pos;
+                while ((pos = stream.indexOf(key, from)) !== -1) {
+                    from = pos + key.length;
+                    if (!edgeOk(tc, map[pos], -1, key[0]) || !edgeOk(tc, map[pos + key.length - 1], 1, key[key.length - 1])) continue;
+                    // Un rectángulo por fragmento (item) que toca la coincidencia
+                    const segments = [];
+                    for (let c = pos; c < pos + key.length; c++) {
+                        const [idx, k] = map[c];
+                        const last = segments[segments.length - 1];
+                        if (last && last.idx === idx) last.end = k + 1;
+                        else segments.push({ idx, start: k, end: k + 1 });
+                    }
+                    const matchNum = matches.length;
+                    for (const seg of segments) {
+                        const box = itemSubstringBox(tc, tc.items[seg.idx], seg.start, seg.end, vp);
+                        if (box) highlights.push({ ...box, term, match: matchNum });
+                    }
+                    matches.push({ term });
+                }
             }
 
+            return {
+                success: true, source: 'text', textChars,
+                matches, match_count: matches.length, highlights,
+                image_width: vp.width, image_height: vp.height
+            };
+        }
+
+        // Bordes del código: no puede ir pegado a otra letra/número ("11251" no es
+        // "1251") ni ser parte de una cifra con puntos ("1.251.000" no es "1251").
+        // El borde de un fragmento de texto cuenta como separación.
+        const isAlnum = ch => /[\p{L}\p{N}]/u.test(ch);
+        const isDigit = ch => /\p{N}/u.test(ch);
+        function edgeOk(tc, [idx, k], dir, termEdge) {
+            const s = tc.items[idx].str || '';
+            let j = k + dir, skipped = 0;
+            while (j >= 0 && j < s.length && /[.,]/.test(s[j])) { j += dir; skipped++; }
+            if (j < 0 || j >= s.length) return true;
+            const ch = s[j];
+            if (!isAlnum(ch)) return true;
+            return skipped > 0 && !(isDigit(ch) && isDigit(termEdge));
+        }
+
+        // Caja (en puntos) de item.str[start:end], proporcional al ancho medido con su fuente
+        function itemSubstringBox(tc, item, start, end, vp) {
+            const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+            const fontHeight = Math.hypot(tx[2], tx[3]);
+            if (!fontHeight || !item.width) return null;
+            const style = tc.styles[item.fontName] || {};
+            const ascent = style.ascent ? style.ascent : (style.descent ? 1 + style.descent : 0.8);
+            const itemWidth = item.width * vp.scale;
+
+            const s = item.str;
+            measureCtx.font = `100px ${style.fontFamily || 'sans-serif'}`;
+            const full = measureCtx.measureText(s).width || s.length;
+            const pre = start > 0 ? measureCtx.measureText(s.slice(0, start)).width : 0;
+            const sub = measureCtx.measureText(s.slice(start, end)).width;
+
+            return {
+                x: tx[4] + itemWidth * (pre / full),
+                y: tx[5] - fontHeight * ascent,
+                w: Math.max(itemWidth * (sub / full), 2),
+                h: fontHeight
+            };
+        }
+
+        // ── Servidor (solo hojas escaneadas) ──────────────────────────
+        function createLimiter(max) {
+            let active = 0;
+            const queue = [];
+            const next = () => {
+                if (active >= max || queue.length === 0) return;
+                active++;
+                const { fn, resolve, reject } = queue.shift();
+                fn().then(resolve, reject).finally(() => { active--; next(); });
+            };
+            return fn => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
+        }
+        const serverLimit = createLimiter(SERVER_CONCURRENCY);
+
+        // Reintenta si el servidor está ocupado o limita peticiones (429)
+        function fetchServerHighlights(pageNum) {
+            return serverLimit(async () => {
+                const params = new URLSearchParams({
+                    cliente: clientCode, doc: docId, page: pageNum, terms: termsToHighlight.join(',')
+                });
+                for (let attempt = 0; attempt < 4; attempt++) {
+                    let resp;
+                    try {
+                        resp = await fetch(`ocr_text_public.php?${params}`, { signal: abortCtl.signal });
+                    } catch (e) {
+                        if (e.name === 'AbortError') return null;
+                        if (attempt < 3) { await sleep(1500 * (attempt + 1)); continue; }
+                        throw e;
+                    }
+                    if (resp.status === 429) {
+                        const wait = parseInt(resp.headers.get('Retry-After'), 10) || 5;
+                        await sleep(Math.min(wait, 60) * 1000);
+                        continue;
+                    }
+                    let result = null;
+                    try { result = await resp.json(); } catch (e) { result = null; }
+                    if ((!result || !result.success) && attempt < 3) {
+                        await sleep(1500 * (attempt + 1));
+                        continue;
+                    }
+                    return result;
+                }
+                return { success: false, error: 'Servidor ocupado' };
+            });
+        }
+
+        window.addEventListener('beforeunload', () => abortCtl.abort());
+
+        async function computeHighlights(pageNum) {
+            const textResult = await findInTextLayer(pageNum);
+            if (textResult.textChars >= MIN_TEXT_CHARS || textResult.match_count > 0) return textResult;
+            // Hoja escaneada → servidor. Si falla, quedarse con lo poco que haya en texto.
+            const server = await fetchServerHighlights(pageNum).catch(() => null);
+            return (server && server.success) ? server : textResult;
+        }
+
+        // Única puerta de entrada para los resaltados de una hoja
+        function getHighlightsForPage(pageNum) {
+            if (!highlightCache.has(pageNum)) {
+                const promise = computeHighlights(pageNum).catch(e => {
+                    highlightCache.delete(pageNum);
+                    throw e;
+                });
+                highlightCache.set(pageNum, promise);
+            }
+            return highlightCache.get(pageNum);
+        }
+
+        // ── Carga del PDF ─────────────────────────────────────────────
+        async function loadPDF() {
+            try {
+                pdfDoc = await pdfjsLib.getDocument(pdfUrl).promise;
+                const numPages = pdfDoc.numPages;
+
+                // Escala según el ancho disponible (no agranda en desktop, sí ajusta en móvil)
+                const firstPage = await pdfDoc.getPage(1);
+                const vp1 = firstPage.getViewport({ scale: 1 });
+                const pdfViewer = document.querySelector('.pdf-viewer');
+                const containerWidth = (pdfViewer ? pdfViewer.clientWidth : window.innerWidth) - 8;
+                pageScale = Math.min(BASE_SCALE, containerWidth / vp1.width);
+                const phW = vp1.width * pageScale, phH = vp1.height * pageScale;
+
+                // Esqueletos con el tamaño real de la hoja 1 (evita saltos de scroll)
+                container.innerHTML = '';
+                for (let i = 1; i <= numPages; i++) createPlaceholder(i, numPages, phW, phH);
+
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting && !entry.target.dataset.rendered) {
+                            renderPage(parseInt(entry.target.dataset.pageNum), entry.target);
+                        }
+                    });
+                }, { root: null, rootMargin: '800px', threshold: 0.01 });
+                document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
+
+                const p1 = document.getElementById('pub-page-1');
+                const firstRender = p1 ? renderPage(1, p1) : Promise.resolve();
+
+                if (AUTO_HIGHLIGHT && termKeys.length > 0) {
+                    // Arranca cuando la hoja 1 ya está pedida (el worker de PDF.js atiende en orden)
+                    firstRender.then(() => highlightCode());
+                }
+            } catch (err) {
+                console.error('Error:', err);
+                container.innerHTML = '';
+                const p = document.createElement('p');
+                p.style.cssText = 'color:red; padding:40px; text-align:center;';
+                p.textContent = 'Error al cargar el documento: ' + err.message;
+                container.appendChild(p);
+            }
+        }
+
+        function createPlaceholder(pageNum, total, w, h) {
+            const outer = document.createElement('div');
+            outer.innerHTML = `
+                <div id="pub-page-${pageNum}" class="pdf-page-wrapper" data-page-num="${pageNum}"
+                     style="width:${w}px; height:${h}px; display:flex; align-items:center; justify-content:center; background:#fafafa;">
+                    <span style="color:#999; font-size:14px;">Cargando página ${pageNum}...</span>
+                </div>
+                <div class="page-number">Página ${pageNum} de ${total}</div>
+            `;
+            container.appendChild(outer);
+        }
+
+        async function renderPage(pageNum, wrapper) {
+            if (wrapper.dataset.rendered || pagesRendering.has(pageNum)) return;
+            pagesRendering.add(pageNum);
+            wrapper.dataset.rendered = 'pending';
+
+            try {
+                // Pedir la búsqueda ANTES de dibujar: queda primera en la cola del worker
+                const hlPromise = highlightOn ? getHighlightsForPage(pageNum).catch(() => null) : null;
+
+                const page = await pdfDoc.getPage(pageNum);
+                const viewport = page.getViewport({ scale: pageScale });
+
+                // Pantallas de alta densidad (Retina / AMOLED): canvas × DPR para nitidez
+                const dpr = window.devicePixelRatio || 1;
+                const cssWidth = viewport.width;
+                const cssHeight = viewport.height;
+
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.round(cssWidth * dpr);
+                canvas.height = Math.round(cssHeight * dpr);
+                canvas.style.width = cssWidth + 'px';
+                canvas.style.height = cssHeight + 'px';
+                const ctx = canvas.getContext('2d');
+                ctx.scale(dpr, dpr);
+
+                await page.render({ canvasContext: ctx, viewport }).promise;
+
+                wrapper.innerHTML = '';
+                wrapper.style.width = cssWidth + 'px';
+                wrapper.style.height = cssHeight + 'px';
+                wrapper.style.display = 'block';
+                wrapper.appendChild(canvas);
+                wrapper.dataset.rendered = 'true';
+
+                if (hlPromise) hlPromise.then(r => paintHighlights(pageNum, r));
+                else if (pageResults.has(pageNum)) paintHighlights(pageNum, pageResults.get(pageNum));
+            } catch (err) {
+                console.error('Error página ' + pageNum, err);
+                delete wrapper.dataset.rendered; // reintentar al volver a verla
+            } finally {
+                pagesRendering.delete(pageNum);
+            }
+        }
+
+        // Dibuja los rectángulos de una hoja. Idempotente: reemplaza el overlay anterior.
+        function paintHighlights(pageNum, result) {
+            if (!result || !result.success || !result.highlights || !result.highlights.length) return;
+            if (!(result.image_width > 0)) return;
+            const wrapper = document.getElementById(`pub-page-${pageNum}`);
+            const canvas = wrapper && wrapper.querySelector('canvas');
+            if (!canvas) return;
+
+            // Tamaño CSS del canvas (no el físico × DPR)
+            const cssW = parseFloat(canvas.style.width) || canvas.width;
+            const cssH = parseFloat(canvas.style.height) || canvas.height;
+            const sx = cssW / result.image_width;
+            const sy = cssH / result.image_height;
+
+            const old = wrapper.querySelector('.ocr-hl-overlay');
+            if (old) old.remove();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'ocr-hl-overlay';
+            overlay.style.cssText = `position:absolute; top:0; left:0; width:${cssW}px; height:${cssH}px; pointer-events:none; z-index:5;`;
+
+            const active = navItems[currentIdx];
+            const frag = document.createDocumentFragment();
+            result.highlights.forEach((hl, i) => {
+                const padX = Math.max(hl.h * 0.12, 1.5);
+                const padY = Math.max(hl.h * 0.18, 1.5);
+                const rect = document.createElement('div');
+                rect.dataset.match = hl.match ?? i;
+                rect.title = hl.term || '';
+                rect.style.left = ((hl.x - padX) * sx) + 'px';
+                rect.style.top = ((hl.y - padY) * sy) + 'px';
+                rect.style.width = ((hl.w + padX * 2) * sx) + 'px';
+                rect.style.height = ((hl.h + padY * 2) * sy) + 'px';
+                if (active && active.page === pageNum && String(active.match) === rect.dataset.match) {
+                    rect.classList.add('hl-active');
+                }
+                frag.appendChild(rect);
+            });
+            overlay.appendChild(frag);
+            wrapper.appendChild(overlay);
+        }
+
+        // ── Navegación entre coincidencias (por datos, no por DOM) ────
+        let navItems = [];   // { page, match, y, x }
+        let currentIdx = -1;
+
+        function rebuildNavItems() {
+            const prev = navItems[currentIdx];
+            navItems = [];
+            [...pageResults.keys()].sort((a, b) => a - b).forEach(page => {
+                const r = pageResults.get(page);
+                const byMatch = new Map();
+                r.highlights.forEach((hl, i) => {
+                    const m = hl.match ?? i;
+                    if (!byMatch.has(m)) byMatch.set(m, { page, match: m, y: hl.y, x: hl.x });
+                });
+                [...byMatch.values()].sort((a, b) => (a.y - b.y) || (a.x - b.x)).forEach(it => navItems.push(it));
+            });
+            currentIdx = prev ? navItems.findIndex(it => it.page === prev.page && it.match === prev.match) : -1;
+        }
+
+        function updateNavBar(scanning) {
+            const navBar = document.getElementById('navBar');
+            if (navItems.length === 0) { navBar.classList.remove('visible'); return; }
             navBar.classList.add('visible');
-            counter.textContent = currentIdx >= 0 ? `${currentIdx + 1} / ${allMarks.length}` : `0 / ${allMarks.length}`;
-            total.textContent = `${allMarks.length} coincidencia${allMarks.length !== 1 ? 's' : ''}`;
-            btnPrev.disabled = currentIdx <= 0;
-            btnNext.disabled = currentIdx >= allMarks.length - 1;
+            const n = navItems.length;
+            document.getElementById('navCounter').textContent = `${currentIdx >= 0 ? currentIdx + 1 : 0} / ${n}`;
+            document.getElementById('navTotal').textContent =
+                `${n} coincidencia${n !== 1 ? 's' : ''}` + (scanning ? ' · buscando…' : '');
+            document.getElementById('btnPrev').disabled = currentIdx <= 0;
+            document.getElementById('btnNext').disabled = currentIdx >= n - 1;
         }
 
-        function setActive(idx) {
-            // Quitar activo previo
-            document.querySelectorAll('.hl-active').forEach(el => el.classList.remove('hl-active'));
-
-            if (idx < 0 || idx >= allMarks.length) return;
+        async function setActive(idx) {
+            if (idx < 0 || idx >= navItems.length) return;
             currentIdx = idx;
-            const item = allMarks[idx];
-            item.el.classList.add('hl-active');
-            item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            updateNavBar();
+            const item = navItems[idx];
+            updateNavBar(!!scanPromise);
+
+            const wrapper = document.getElementById(`pub-page-${item.page}`);
+            if (!wrapper) return;
+            if (wrapper.dataset.rendered !== 'true') {
+                wrapper.scrollIntoView({ block: 'start' });
+                await renderPage(item.page, wrapper);
+                while (pagesRendering.has(item.page)) await sleep(50);
+            }
+            const r = pageResults.get(item.page);
+            if (r) paintHighlights(item.page, r);
+            document.querySelectorAll('.ocr-hl-overlay div.hl-active').forEach(el => el.classList.remove('hl-active'));
+            const rects = wrapper.querySelectorAll(`.ocr-hl-overlay div[data-match="${item.match}"]`);
+            rects.forEach(el => el.classList.add('hl-active'));
+            if (rects[0]) rects[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
-        function navPrev() { if (currentIdx > 0) setActive(currentIdx - 1); }
-        function navNext() { if (currentIdx < allMarks.length - 1) setActive(currentIdx + 1); }
+        function navPrev() { userNavigated = true; if (currentIdx > 0) setActive(currentIdx - 1); }
+        function navNext() { userNavigated = true; if (currentIdx < navItems.length - 1) setActive(currentIdx + 1); }
 
-        // Teclado: ← →
         document.addEventListener('keydown', e => {
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') navNext();
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') navPrev();
+            if (!navItems.length) return;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navNext(); }
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navPrev(); }
         });
 
         // ── Progreso ──────────────────────────────────────────────────
@@ -619,292 +908,82 @@ if (!empty($searchTerm)) {
             if (cur >= total) setTimeout(() => { bar.style.display = 'none'; }, 600);
         }
 
-        // ── Carga PDF ─────────────────────────────────────────────────
-        async function loadPDF() {
-            try {
-                pdfDoc = await pdfjsLib.getDocument(pdfUrl).promise;
-                const numPages = pdfDoc.numPages;
-                container.innerHTML = '';
+        // ── RESALTADO PRINCIPAL (radar sobre todas las hojas) ─────────
+        function highlightCode() {
+            if (!pdfDoc || termKeys.length === 0) return;
+            if (scanPromise) return scanPromise;
 
-                for (let i = 1; i <= numPages; i++) {
-                    createPlaceholder(i, numPages);
-                }
-
-                const observer = new IntersectionObserver((entries) => {
-                    entries.forEach(entry => {
-                        if (entry.isIntersecting && !entry.target.dataset.rendered) {
-                            const pageNum = parseInt(entry.target.dataset.pageNum);
-                            entry.target.dataset.rendered = 'true';
-                            renderPage(pageNum, entry.target);
-                        }
-                    });
-                }, { root: null, rootMargin: '400px', threshold: 0.05 });
-
-                document.querySelectorAll('.pdf-page-wrapper').forEach(el => observer.observe(el));
-
-                // Renderizar primera página
-                const p1 = document.getElementById('pub-page-1');
-                if (p1) {
-                    await renderPage(1, p1);
-                    p1.dataset.rendered = 'true';
-                }
-
-            } catch (err) {
-                console.error("Error:", err);
-                container.innerHTML = `<p style="color:red; padding:40px; text-align:center;">Error al cargar el documento: ${err.message}</p>`;
+            // Ya se buscó: solo volver a la primera coincidencia
+            if (highlightOn) {
+                if (navItems.length) { userNavigated = true; setActive(0); }
+                showResult();
+                return;
             }
-        }
 
-        function createPlaceholder(pageNum, total) {
-            const outer = document.createElement('div');
-            // min-height adaptado al ancho de pantalla para evitar placeholders gigantes en móvil
-            const phHeight = Math.min(600, Math.round(window.innerWidth * 1.3));
-            outer.innerHTML = `
-                <div id="pub-page-${pageNum}" class="pdf-page-wrapper" data-page-num="${pageNum}"
-                     style="min-height:${phHeight}px; width:100%; display:flex; align-items:center; justify-content:center; background:#fafafa;">
-                    <span style="color:#999; font-size:14px;">Cargando página ${pageNum}...</span>
-                </div>
-                <div class="page-number">Página ${pageNum} de ${total}</div>
-            `;
-            container.appendChild(outer);
-        }
-
-        async function renderPage(pageNum, wrapper) {
-            if (pagesRendering.has(pageNum)) return;
-            pagesRendering.add(pageNum);
-
-            try {
-                const page = await pdfDoc.getPage(pageNum);
-
-                // Calcular scale dinámico: ajusta el PDF al ancho disponible del contenedor
-                const pdfViewer = document.querySelector('.pdf-viewer');
-                const containerWidth = pdfViewer ? pdfViewer.clientWidth - 8 : window.innerWidth - 8;
-                const defaultViewport = page.getViewport({ scale: 1 });
-                const fitScale = containerWidth / defaultViewport.width;
-                // Usar el menor entre BASE_SCALE y fitScale para no agrandar en desktop pero sí escalar en móvil
-                const scale = Math.min(BASE_SCALE, fitScale);
-
-                const viewport = page.getViewport({ scale });
-
-                // ── Soporte para pantallas de alta densidad (Retina / AMOLED) ──
-                // Multiplicar la resolución del canvas por DPR para evitar borrosidad
-                const dpr = window.devicePixelRatio || 1;
-                const cssWidth = viewport.width;
-                const cssHeight = viewport.height;
-
-                wrapper.innerHTML = '';
-                wrapper.style.width = cssWidth + 'px';
-                wrapper.style.height = cssHeight + 'px';
-                wrapper.style.minHeight = 'auto';
-                wrapper.style.display = 'block';
-
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-
-                // Tamaño real del canvas = CSS * DPR
-                canvas.width = Math.round(cssWidth * dpr);
-                canvas.height = Math.round(cssHeight * dpr);
-
-                // Mostrar al tamaño CSS (el navegador lo escala a pantalla completa sin borrosidad)
-                canvas.style.width = cssWidth + 'px';
-                canvas.style.height = cssHeight + 'px';
-
-                // Escalar el contexto para que pdf.js dibuje en alta resolución
-                ctx.scale(dpr, dpr);
-
-                wrapper.appendChild(canvas);
-
-                await page.render({ canvasContext: ctx, viewport }).promise;
-
-                const textContent = await page.getTextContent();
-                if (textContent.items && textContent.items.length > 0) {
-                    const textDiv = document.createElement('div');
-                    textDiv.className = 'text-layer';
-                    textDiv.style.width = cssWidth + 'px';
-                    textDiv.style.height = cssHeight + 'px';
-                    wrapper.appendChild(textDiv);
-
-                    await pdfjsLib.renderTextLayer({
-                        textContent,
-                        container: textDiv,
-                        viewport,
-                        textDivs: []
-                    }).promise;
-                }
-
-            } catch (err) {
-                console.error("Error página " + pageNum, err);
-            } finally {
-                pagesRendering.delete(pageNum);
-            }
-        }
-
-        // ── PRE-CHEQUEO DE TEXTO ──────────────────────────────────────
-        // Mismo umbral que OCR_HL_MIN_TEXT_CHARS (helpers/ocr_highlight.php):
-        // menos caracteres = hoja escaneada.
-        const MIN_TEXT_CHARS = 150;
-        const normalizeForSearch = str => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, '');
-        const normalizedTerms = termsToHighlight.map(normalizeForSearch).filter(Boolean);
-
-        // Más permisivo que Mark.js (ignora espacios, tildes y saltos de línea),
-        // así nunca se salta una hoja donde Mark.js sí encontraría el código
-        async function getPageTextInfo(pageNum) {
-            try {
-                const page = await pdfDoc.getPage(pageNum);
-                const tc = await page.getTextContent();
-                const text = normalizeForSearch(tc.items.map(i => i.str || '').join(''));
-                return { chars: text.length, hasMatch: normalizedTerms.some(t => text.includes(t)) };
-            } catch (e) {
-                return { chars: 0, hasMatch: false }; // Ante la duda, tratar como escaneada
-            }
-        }
-
-        // ── RESALTADO PRINCIPAL ───────────────────────────────────────
-        async function highlightCode() {
-            if (!pdfDoc || termsToHighlight.length === 0) return;
-
+            highlightOn = true;
             const btn = document.getElementById('btnResaltar');
             const headerCode = document.getElementById('headerCode');
-
             if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Buscando...'; }
             if (headerCode) headerCode.classList.add('searching');
 
-            highlightDone = false;
-            allMarks = [];
-            currentIdx = -1;
+            const total = pdfDoc.numPages;
+            let scanned = 0;
+            setProgress(0, total);
 
-            const numPages = pdfDoc.numPages;
-            setProgress(0, numPages);
-
-            for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-
-                const wrapper = document.getElementById(`pub-page-${pageNum}`);
-                if (!wrapper) { setProgress(pageNum, numPages); continue; }
-
-                // Pre-chequeo barato en el texto del PDF (sin dibujar la hoja):
-                // una hoja con texto y sin el código se salta sin canvas ni servidor
-                const info = await getPageTextInfo(pageNum);
-                const isScanned = info.chars < MIN_TEXT_CHARS;
-                if (!isScanned && !info.hasMatch) { setProgress(pageNum, numPages); continue; }
-
-                // Asegurar que la página esté renderizada
-                if (!wrapper.dataset.rendered || wrapper.dataset.rendered === 'placeholder') {
-                    wrapper.dataset.rendered = 'true';
-                    await renderPage(pageNum, wrapper);
-                }
-
-                // Esperar renderizado activo
-                while (pagesRendering.has(pageNum)) {
-                    await new Promise(r => setTimeout(r, 80));
-                }
-
-                // ── Capa 1: Mark.js en text-layer ──
-                const textLayer = wrapper.querySelector('.text-layer');
-                let foundInTextLayer = false;
-
-                if (textLayer) {
-                    foundInTextLayer = await new Promise(resolve => {
-                        const instance = new Mark(textLayer);
-                        instance.mark(termsToHighlight, {
-                            element: 'mark',
-                            accuracy: 'partially',
-                            separateWordSearch: false,
-                            done: () => {
-                                const marks = textLayer.querySelectorAll('mark');
-                                resolve(marks.length > 0);
-                            }
-                        });
-                    });
-
-                    if (foundInTextLayer) {
-                        highlightDone = true;
+            const processPage = async (pageNum) => {
+                try {
+                    const result = await getHighlightsForPage(pageNum);
+                    if (result && result.success && result.highlights && result.highlights.length > 0) {
+                        pageResults.set(pageNum, result);
+                        paintHighlights(pageNum, result);
+                        rebuildNavItems();
+                        // Llevar la vista a la primera coincidencia (si el usuario no se movió)
+                        if (currentIdx < 0 && !userNavigated) setActive(0);
                     }
+                } catch (e) {
+                    console.warn(`Resaltado: error en página ${pageNum}`, e);
+                } finally {
+                    scanned++;
+                    setProgress(scanned, total);
+                    if (btn) btn.innerHTML = `⏳ ${scanned}/${total}`;
+                    updateNavBar(true);
                 }
+            };
 
-                // ── Capa 2: servidor si no encontró con text-layer ──
-                // (hoja escaneada, o código partido entre líneas que Mark.js no une)
-                if (!foundInTextLayer) {
-                    try {
-                        const termsStr = encodeURIComponent(termsToHighlight.join(','));
-                        const resp = await fetch(`ocr_text_public.php?cliente=${clientCode}&doc=${docId}&page=${pageNum}&terms=${termsStr}`);
-                        const result = await resp.json();
-
-                        if (result.success && result.highlights && result.highlights.length > 0 && result.image_width > 0) {
-                            const canvas = wrapper.querySelector('canvas');
-                            if (!canvas) { setProgress(pageNum, numPages); continue; }
-
-                            // Usar tamaño CSS del canvas (no el físico ×DPR) para que
-                            // los overlays se posicionen correctamente en pantallas Retina
-                            const cssW = parseFloat(canvas.style.width) || canvas.width;
-                            const cssH = parseFloat(canvas.style.height) || canvas.height;
-
-                            const scaleX = cssW / result.image_width;
-                            const scaleY = cssH / result.image_height;
-
-                            const oldOverlay = wrapper.querySelector('.ocr-hl-overlay');
-                            if (oldOverlay) oldOverlay.remove();
-
-                            const overlay = document.createElement('div');
-                            overlay.className = 'ocr-hl-overlay';
-                            overlay.style.cssText = `
-                                position: absolute; top: 0; left: 0;
-                                width: ${cssW}px; height: ${cssH}px;
-                                pointer-events: none; z-index: 5;
-                            `;
-
-                            result.highlights.forEach((hl, idx) => {
-                                const padX = Math.max(hl.h * 0.10, 2);
-                                const padY = Math.max(hl.h * 0.15, 2);
-                                const rect = document.createElement('div');
-                                rect.style.cssText = `
-                                    position: absolute;
-                                    left:   ${(hl.x - padX) * scaleX}px;
-                                    top:    ${(hl.y - padY) * scaleY}px;
-                                    width:  ${(hl.w + padX * 2) * scaleX}px;
-                                    height: ${(hl.h + padY * 2) * scaleY}px;
-                                    background: var(--hl-color);
-                                    mix-blend-mode: multiply;
-                                    animation: hlFadeIn 0.2s ease-out ${idx * 30}ms both;
-                                `;
-                                overlay.appendChild(rect);
-                            });
-
-                            wrapper.appendChild(overlay);
-                            highlightDone = true;
-                        }
-                    } catch (e) {
-                        console.warn(`OCR fallback error pág ${pageNum}:`, e);
-                    }
-                }
-
-                setProgress(pageNum, numPages);
-            }
-
-            // Construir lista de marks ordenada y activar primera
-            buildMarkList();
-            if (allMarks.length > 0) {
-                setActive(0);
-            }
-            updateNavBar();
-
-            // Feedback en botón
-            if (btn) {
-                if (highlightDone) {
-                    btn.innerHTML = `✅ ${allMarks.length} hallado${allMarks.length !== 1 ? 's' : ''}`;
-                    btn.style.background = '#15803d';
-                } else {
-                    btn.innerHTML = '❌ No encontrado';
-                    btn.style.background = '#dc2626';
-                }
-                setTimeout(() => {
-                    btn.disabled = false;
-                    btn.innerHTML = '🔍 Resaltar';
-                    btn.style.background = '#16a34a';
-                }, 4000);
-            }
-
-            if (headerCode) headerCode.classList.remove('searching');
+            // Cola en orden de página con 3 trabajadores: el texto se resuelve al
+            // instante y las hojas escaneadas (servidor) no frenan a las demás
+            let nextPage = 1;
+            const worker = async () => { while (nextPage <= total) await processPage(nextPage++); };
+            scanPromise = Promise.all(Array.from({ length: Math.min(3, total) }, worker)).then(() => {
+                scanPromise = null;
+                if (headerCode) headerCode.classList.remove('searching');
+                updateNavBar(false);
+                showResult();
+            });
+            return scanPromise;
         }
+
+        function showResult() {
+            const btn = document.getElementById('btnResaltar');
+            if (!btn) return;
+            const n = navItems.length;
+            if (n > 0) {
+                btn.innerHTML = `✅ ${n} hallado${n !== 1 ? 's' : ''}`;
+                btn.style.background = '#15803d';
+            } else {
+                btn.innerHTML = '❌ No encontrado';
+                btn.style.background = '#dc2626';
+            }
+            btn.disabled = false;
+            clearTimeout(showResult._t);
+            showResult._t = setTimeout(() => {
+                btn.innerHTML = n > 0 ? '🔍 Ir al primero' : '🔍 Resaltar';
+                btn.style.background = '#16a34a';
+            }, 4000);
+        }
+
+        // Si el usuario se desplaza por su cuenta, no arrastrarlo a la coincidencia
+        ['wheel', 'touchmove'].forEach(ev => window.addEventListener(ev, () => { userNavigated = true; }, { passive: true }));
 
         loadPDF();
     </script>
