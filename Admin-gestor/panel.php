@@ -606,6 +606,43 @@ $clients = $centralDb->query("
 
 // Para clonación
 $clientCodes = array_column($clients, 'codigo');
+
+// SEGURIDAD (aislamiento entre clientes): resumen para detectar datos/marca cruzados.
+// - Documentos en la base PROPIA de cada cliente (abierta solo lectura, sin crearla).
+// - Mismo título (marca) que otro cliente: el panel del cliente mostraría otra empresa.
+// - Bases .db de OTROS clientes dentro de su carpeta (restos de una clonación antigua).
+$titleOwners = [];
+foreach ($clients as $cli) {
+    $t = mb_strtolower(trim((string) ($cli['titulo'] ?? '')));
+    if ($t !== '') {
+        $titleOwners[$t][] = $cli['codigo'];
+    }
+}
+$clientHealth = [];
+foreach ($clients as $cli) {
+    $code = $cli['codigo'];
+    $h = ['docs' => null, 'same_title' => [], 'foreign_db' => []];
+    $dbFile = client_db_path($code);
+    if (is_file($dbFile)) {
+        try {
+            $ro = new PDO('sqlite:' . $dbFile, null, null, [PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
+            $h['docs'] = (int) $ro->query('SELECT COUNT(*) FROM documentos')->fetchColumn();
+        } catch (Throwable $e) {
+            $h['docs'] = null;
+        }
+        $ro = null;
+    }
+    $t = mb_strtolower(trim((string) ($cli['titulo'] ?? '')));
+    if ($t !== '' && count($titleOwners[$t] ?? []) > 1) {
+        $h['same_title'] = array_values(array_diff($titleOwners[$t], [$code]));
+    }
+    foreach (glob(CLIENTS_DIR . DIRECTORY_SEPARATOR . $code . DIRECTORY_SEPARATOR . '*.db') ?: [] as $f) {
+        if (basename($f) !== $code . '.db') {
+            $h['foreign_db'][] = basename($f);
+        }
+    }
+    $clientHealth[$code] = $h;
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -1073,6 +1110,16 @@ $clientCodes = array_column($clients, 'codigo');
 
                         <?php if ($cli['titulo']): ?>
                             <div class="client-meta">📍 <?= htmlspecialchars($cli['titulo']) ?></div>
+                        <?php endif; ?>
+                        <?php $hl = $clientHealth[$cli['codigo']] ?? null; ?>
+                        <?php if ($hl): ?>
+                            <div class="client-meta">📄 <?= $hl['docs'] === null ? 'sin base' : number_format($hl['docs']) . ' documentos' ?></div>
+                            <?php if ($hl['same_title']): ?>
+                                <div class="client-meta" style="color:#b91c1c;font-weight:600;">⚠️ Mismo título que: <?= htmlspecialchars(implode(', ', $hl['same_title'])) ?> (corregir con el botón Editar)</div>
+                            <?php endif; ?>
+                            <?php if ($hl['foreign_db']): ?>
+                                <div class="client-meta" style="color:#b91c1c;font-weight:600;">⚠️ Su carpeta tiene la base de otro cliente: <?= htmlspecialchars(implode(', ', $hl['foreign_db'])) ?></div>
+                            <?php endif; ?>
                         <?php endif; ?>
                         <?php if (!empty($cli['email'])): ?>
                             <div class="client-meta">📧 <?= htmlspecialchars($cli['email']) ?></div>

@@ -35,9 +35,11 @@ session_name($_sessionName);
 session_set_cookie_params([
     'lifetime' => 0,
     'path' => '/',
-    // En una IP o "localhost" (modo local) la cookie va sin dominio: los navegadores
-    // rechazan Domain=127.0.0.1 en algunos casos y sin sesión no se puede entrar.
-    'domain' => (filter_var($_host, FILTER_VALIDATE_IP) || $_host === 'localhost') ? '' : $_host,
+    // Sin atributo Domain = cookie "host-only": el navegador la manda SOLO a este
+    // hostname exacto. Con Domain=kino-trace.com la cookie de kino-trace.com viajaba
+    // también a todos los subdominios de clientes (losmonte.kino-trace.com, ...).
+    // También evita el problema de Domain=127.0.0.1 en modo local.
+    'domain' => '',
     'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
     'httponly' => true,
     'samesite' => 'Lax'
