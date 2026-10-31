@@ -44,12 +44,19 @@ RUN mkdir -p /var/www/html/clients \
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
 # Script de inicio que configura el puerto dinámicamente, arregla MPM y permisos.
+# Antes de abrir la web pone al día la base de TODOS los clientes
+# (tools/migrar_clientes.php): cada mejora con cambio de base llega a todos a la vez
+# y un error se ve aquí, en el log del deploy, no en la pantalla de un cliente.
+# Si falla, la web arranca igual (cada base también se actualiza sola al abrirse).
+# Va ANTES del chown para que los archivos que cree queden de www-data.
 # Los sed deben ser idempotentes: si Railway reinicia el MISMO contenedor el script
 # vuelve a correr sobre archivos ya modificados. El sed anterior ("s/80/$PORT/g")
 # convertía "Listen 8080" en "Listen 808080" y Apache no arrancaba más
 # (AH00526: Invalid address or port en ports.conf).
 RUN echo '#!/bin/bash\n\
     rm -f /etc/apache2/mods-enabled/mpm_event.* 2>/dev/null\n\
+    echo "[KINO] Actualizando bases de clientes..."\n\
+    timeout 240 php /var/www/html/tools/migrar_clientes.php || echo "[KINO] AVISO: migración con errores (ver arriba). La web arranca igual."\n\
     chown -R www-data:www-data /var/www/html/clients\n\
     chmod -R 777 /var/www/html/clients\n\
     sed -i -E "s/<VirtualHost [*]:[0-9]+>/<VirtualHost *:${PORT:-8080}>/" /etc/apache2/sites-available/000-default.conf\n\

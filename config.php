@@ -30,7 +30,9 @@ if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROT
 define('APP_BRANCH', getenv('APP_BRANCH') ?: 'main'); // Rama activa (para indicador visual)
 
 // Directorio donde se almacenan los datos de cada cliente
-define('CLIENTS_DIR', BASE_DIR . DIRECTORY_SEPARATOR . 'clients');
+// KT_CLIENTS_DIR solo para tools/chequeo.php (prueba en una carpeta temporal);
+// en producción no se define y se usa clients/.
+define('CLIENTS_DIR', getenv('KT_CLIENTS_DIR') ?: BASE_DIR . DIRECTORY_SEPARATOR . 'clients');
 
 // Archivo de base de datos central para almacenar información de clientes
 // NOTA: Se coloca DENTRO de CLIENTS_DIR para que un solo volumen persista todo.
@@ -81,49 +83,77 @@ try {
     $centralDb = new PDO($centralDsn);
     $centralDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Crear la tabla de control de clientes si aún no existe
-    $centralDb->exec(
-        "CREATE TABLE IF NOT EXISTS control_clientes (\n"
-        . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        . "    codigo TEXT UNIQUE,\n"
-        . "    nombre TEXT NOT NULL,\n"
-        . "    password_hash TEXT NOT NULL,\n"
-        . "    titulo TEXT,\n"
-        . "    color_primario TEXT,\n"
-        . "    color_secundario TEXT,\n"
-        . "    activo INTEGER DEFAULT 1,\n"
-        . "    fecha_creacion TEXT DEFAULT (datetime('now'))\n"
-        . ");"
-    );
-    // Migración: agregar columnas de email y recuperación de contraseña
-    $newColumns = [
-        'email' => "ALTER TABLE control_clientes ADD COLUMN email TEXT",
-        'reset_token' => "ALTER TABLE control_clientes ADD COLUMN reset_token TEXT",
-        'reset_token_expiry' => "ALTER TABLE control_clientes ADD COLUMN reset_token_expiry TEXT",
-        'subdominio' => "ALTER TABLE control_clientes ADD COLUMN subdominio TEXT",
-        'password_plain' => "ALTER TABLE control_clientes ADD COLUMN password_plain TEXT",
+    // MIGRACIONES DE central.db (misma regla que client_schema_migrations en
+    // helpers/tenant.php): AGREGAR pasos al final, nunca editar uno publicado,
+    // siempre idempotentes. La versión aplicada se guarda en PRAGMA user_version,
+    // así una base al día no ejecuta nada (antes: ~8 consultas, 5 de ellas
+    // fallando a propósito con "columna ya existe", en CADA request).
+    $centralMigrations = [
+        1 => function (PDO $centralDb): void {
+            // Crear la tabla de control de clientes si aún no existe
+            $centralDb->exec(
+                "CREATE TABLE IF NOT EXISTS control_clientes (\n"
+                . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+                . "    codigo TEXT UNIQUE,\n"
+                . "    nombre TEXT NOT NULL,\n"
+                . "    password_hash TEXT NOT NULL,\n"
+                . "    titulo TEXT,\n"
+                . "    color_primario TEXT,\n"
+                . "    color_secundario TEXT,\n"
+                . "    activo INTEGER DEFAULT 1,\n"
+                . "    fecha_creacion TEXT DEFAULT (datetime('now'))\n"
+                . ");"
+            );
+            // Migración: agregar columnas de email y recuperación de contraseña
+            $newColumns = [
+                'email' => "ALTER TABLE control_clientes ADD COLUMN email TEXT",
+                'reset_token' => "ALTER TABLE control_clientes ADD COLUMN reset_token TEXT",
+                'reset_token_expiry' => "ALTER TABLE control_clientes ADD COLUMN reset_token_expiry TEXT",
+                'subdominio' => "ALTER TABLE control_clientes ADD COLUMN subdominio TEXT",
+                'password_plain' => "ALTER TABLE control_clientes ADD COLUMN password_plain TEXT",
+            ];
+            foreach ($newColumns as $col => $sql) {
+                try {
+                    $centralDb->exec($sql);
+                } catch (PDOException $e) { /* columna ya existe */
+                }
+            }
+
+            // Migración: tabla para contenido de página pública por cliente
+            $centralDb->exec(
+                "CREATE TABLE IF NOT EXISTS pagina_publica (
+                    codigo TEXT PRIMARY KEY,
+                    intro_titulo TEXT,
+                    intro_texto TEXT,
+                    instrucciones TEXT,
+                    footer_texto TEXT,
+                    footer_ubicacion TEXT,
+                    footer_telefono TEXT,
+                    footer_url TEXT,
+                    aviso_legal TEXT
+                )"
+            );
+        },
+        // 2 => function (PDO $centralDb): void { ... },
     ];
-    foreach ($newColumns as $col => $sql) {
+    $centralVersion = (int) $centralDb->query('PRAGMA user_version')->fetchColumn();
+    if ($centralVersion < max(array_keys($centralMigrations))) {
+        $centralDb->exec('BEGIN IMMEDIATE');
         try {
-            $centralDb->exec($sql);
-        } catch (PDOException $e) { /* columna ya existe */
+            $centralVersion = (int) $centralDb->query('PRAGMA user_version')->fetchColumn();
+            foreach ($centralMigrations as $v => $step) {
+                if ($v > $centralVersion) {
+                    $step($centralDb);
+                    $centralDb->exec('PRAGMA user_version = ' . (int) $v);
+                }
+            }
+            $centralDb->exec('COMMIT');
+        } catch (Throwable $e) {
+            $centralDb->exec('ROLLBACK');
+            throw $e;
         }
     }
-
-    // Migración: tabla para contenido de página pública por cliente
-    $centralDb->exec(
-        "CREATE TABLE IF NOT EXISTS pagina_publica (
-            codigo TEXT PRIMARY KEY,
-            intro_titulo TEXT,
-            intro_texto TEXT,
-            instrucciones TEXT,
-            footer_texto TEXT,
-            footer_ubicacion TEXT,
-            footer_telefono TEXT,
-            footer_url TEXT,
-            aviso_legal TEXT
-        )"
-    );
+    unset($centralMigrations, $centralVersion);
 
     // Reset de contraseñas vía variable de entorno (útil para pruebas/deploy nuevo)
     // Configurar en Railway: ADMIN_RESET_PASSWORD=miClaveSegura

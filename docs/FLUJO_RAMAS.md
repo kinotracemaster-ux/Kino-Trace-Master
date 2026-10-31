@@ -57,9 +57,20 @@ git branch -d fix/nombre-tarea   # opcional: borra la rama local ya fusionada
 Claude trabaja en la nube: crea la rama, hace commit, push y abre el PR. Tú solo:
 
 1. Abres el link del PR y revisas los cambios ("Files changed").
-2. Pruebas si hace falta (Railway puede desplegar la rama, ver `APP_BRANCH`).
-3. Pulsas **Merge pull request**.
-4. En tu PC: `git checkout main` y `git pull origin main`.
+2. Miras abajo en el PR el **chequeo automático** ("Chequeo antes de publicar"):
+   ✅ verde = se puede seguir. ❌ rojo = NO fusionar (Claude lo arregla).
+3. Pruebas en **Railway PRUEBAS**: Settings → Source → rama del PR. Entras con un
+   cliente de prueba y revisas que la mejora funcione.
+4. Pulsas **Merge pull request**. Railway publica `main` y, al arrancar, pone al día la
+   base de **todos** los clientes (se ve en el log del deploy: "Todos los clientes al día").
+5. En tu PC: `git checkout main` y `git pull origin main`.
+
+### ¿Por qué un cambio llega a todos los clientes?
+
+Hay **un solo código** para todos. Cada cliente solo tiene sus datos (su base, sus PDFs,
+su logo). Si una mejora necesita algo nuevo en la base (una columna, una tabla), se
+agrega como un **paso nuevo** en `client_schema_migrations()` y se aplica a todos al
+publicar. En el panel admin, el botón **🗄️ Actualizar bases** hace lo mismo a mano.
 
 ## Comandos de rescate
 
