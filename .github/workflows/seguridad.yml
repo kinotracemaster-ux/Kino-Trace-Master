@@ -1,6 +1,7 @@
 # Chequeos de seguridad y respaldos en cada PR y en main.
 # Fallan si: un cliente puede ver datos o PDFs de otro, un PDF se abre sin permiso,
-# vuelve una clave escrita en el código, o restaurar un respaldo deja de funcionar.
+# vuelve una clave escrita en el código, restaurar un respaldo deja de funcionar,
+# el alta de un cliente hereda datos de otro o una función apagada sigue abierta.
 name: Seguridad y respaldos
 
 on:
@@ -30,6 +31,9 @@ jobs:
 
       - name: Aislamiento entre clientes (por HTTP)
         run: php tests/seguridad/chequeo_aislamiento.php
+
+      - name: Alta de clientes en un paso y funciones por cliente (por HTTP)
+        run: php tests/multicliente/chequeo_alta_funciones.php
 
       - name: Respaldos (respaldar, desastre, restaurar)
         run: php tests/respaldo/chequeo_respaldo.php

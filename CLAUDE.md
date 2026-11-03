@@ -64,6 +64,12 @@ El código es **uno solo para todos los clientes**; por cliente solo hay datos (
 - Al arrancar cada deploy, `start.sh` (Dockerfile) corre `tools/migrar_clientes.php` → `migrate_all_clients()`: todos los clientes quedan al día antes de abrir la web y los errores salen en el log de Railway. El panel admin muestra "Base desactualizada" por cliente y tiene el botón **🗄️ Actualizar bases**.
 - Flujo de publicación: rama → PR → **chequeo en verde** (GitHub Actions, `tools/chequeo.php`) → probar en Railway **PRUEBAS** → merge a `main`.
 
+### Alta de clientes y funciones por cliente
+
+- **Alta en un paso:** el formulario "Crear cliente" del panel llama a `kt_alta_cliente()` (`helpers/alta_cliente.php`): valida código, correo y **subdominio** (que no sea de otro cliente ni el código de otro, `kt_subdominio_problema()`), **rechaza si ya existe la carpeta `clients/{codigo}`** (antes el cliente nuevo heredaba la base vieja) o si el código es de una plantilla de `database_initial/`, crea fila + carpeta + base + subdominio + funciones, **deshace todo si algo falla** y corre `kt_verificar_cliente()` (base al día, carpeta escribible, contraseña, subdominio que abre ESE cliente, marca y bases ajenas). El botón **✓ Verificar** de cada tarjeta corre la misma revisión. Cambiar el subdominio también pasa por `kt_subdominio_problema()`.
+- **Funciones por cliente:** `helpers/funciones.php` (`KT_FUNCIONES`: buscador público, subir, trazabilidad, importar, IA) + tabla `funciones_cliente` en `central.db` (migración 2; sin fila = activa). Se apagan en la tarjeta del cliente (⚙️ Funciones) o al crearlo. El bloqueo es en el **servidor**: `kt_guardia_funciones()` (al final de `config.php` y de `session_init.php`, lo que cargue segundo) responde 403 por ruta (`modules/...`) o por acción de `api.php`; el buscador público lo revisa `validate_public_client()`. El menú oculta lo apagado. El admin con clave maestra no tiene restricciones. **Función nueva = agregarla a `KT_FUNCIONES` con sus rutas/acciones.**
+- Chequeo: `php tests/multicliente/chequeo_alta_funciones.php` (también en CI).
+
 ### Base de datos: rendimiento y cuidado de los datos
 
 - **Páginas lentas:** `config.php` activa `helpers/registro_lento.php`: toda página que tarde más de `KT_LENTO_MS` (1000 ms por defecto) queda en `clients/logs/lento.log` (ruta, acción, cliente, ms; nunca lo buscado). El panel admin muestra el resumen "🐢 Páginas lentas". Mirar eso antes de optimizar a ojo.

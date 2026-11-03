@@ -828,6 +828,10 @@ function validate_public_client(string $input, bool $jsonMode = false): string
                     <p>Cliente no encontrado</p>
                 </div>');
             }
+            // El buscador público se puede apagar por cliente (panel admin → Funciones)
+            if (function_exists('kt_funcion_activa') && !kt_funcion_activa($code, 'buscador_publico')) {
+                kt_funcion_negada('buscador_publico', $jsonMode);
+            }
         } catch (PDOException $e) {
             // Si la BD falla, rechazar por seguridad
             if ($jsonMode) {
