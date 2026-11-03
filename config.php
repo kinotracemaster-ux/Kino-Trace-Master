@@ -138,7 +138,16 @@ try {
                 )"
             );
         },
-        // 2 => function (PDO $centralDb): void { ... },
+        // 2 — Funciones que se prenden o apagan por cliente (helpers/funciones.php)
+        2 => function (PDO $centralDb): void {
+            $centralDb->exec('CREATE TABLE IF NOT EXISTS funciones_cliente (
+                codigo TEXT NOT NULL,
+                funcion TEXT NOT NULL,
+                activa INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (codigo, funcion)
+            )');
+        },
+        // 3 => function (PDO $centralDb): void { ... },
     ];
     $centralVersion = (int) $centralDb->query('PRAGMA user_version')->fetchColumn();
     if ($centralVersion < max(array_keys($centralMigrations))) {
@@ -170,6 +179,13 @@ try {
 } catch (PDOException $e) {
     // Si la conexión falla, detener la ejecución con un mensaje claro
     die('❌ Error conectando a la base central: ' . $e->getMessage());
+}
+
+// Funciones por cliente: si la página pertenece a una función apagada para el cliente
+// con sesión, responde 403 (si la sesión se inicia después, lo hace session_init.php)
+require_once BASE_DIR . '/helpers/funciones.php';
+if (isset($_SESSION)) {
+    kt_guardia_funciones();
 }
 
 // MODO LOCAL: paquete instalado en el PC de un cliente (docs/modo_local/).

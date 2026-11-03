@@ -26,6 +26,12 @@ if (isset($centralDb)) {
     }
 }
 
+// Funciones activas del cliente (panel admin → Funciones): lo apagado no se muestra
+// en el menú (y además el servidor lo bloquea, ver helpers/funciones.php)
+$ktFn = function_exists('kt_funciones_cliente') && empty($_SESSION['is_admin'])
+    ? kt_funciones_cliente($clientCode) : [];
+$ktOn = fn(string $f) => $ktFn[$f] ?? true;
+
 // Detect client logo
 $clientLogo = '';
 $extensions = ['png', 'jpg', 'jpeg', 'gif'];
@@ -103,6 +109,7 @@ $currentSection = $currentSection ?? 'voraz';
                 <span class="nav-label">Búsqueda por Código</span>
             </button>
 
+            <?php if ($ktOn('subir')): ?>
             <!-- 4. SUBIR DOCUMENTO -->
             <button class="nav-item nav-section-btn" data-section="subir" onclick="switchSection('subir')">
                 <span class="nav-icon">
@@ -114,6 +121,7 @@ $currentSection = $currentSection ?? 'voraz';
                 </span>
                 <span class="nav-label">Subir Documento</span>
             </button>
+            <?php endif; ?>
         </div>
 
         <!-- 5. ADMINISTRADOR (Expandible - Oculta botones principales) -->
@@ -131,27 +139,41 @@ $currentSection = $currentSection ?? 'voraz';
                 <span class="nav-arrow">▾</span>
             </button>
             <div class="nav-submenu" id="submenu-admin">
+                <?php if ($ktOn('importar')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/excel_import/" class="nav-subitem">
                     Importar Data Excel
                 </a>
+                <?php endif; ?>
+                <?php if ($ktOn('importar')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/importar/" class="nav-subitem">
                     Importar Backup (SQL)
                 </a>
+                <?php endif; ?>
+                <?php if ($ktOn('subir')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/lote/" class="nav-subitem">
                     Subida por Lote
                 </a>
+                <?php endif; ?>
+                <?php if ($ktOn('importar')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/sincronizar/" class="nav-subitem">
                     Sincronizar
                 </a>
+                <?php endif; ?>
+                <?php if ($ktOn('trazabilidad')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/trazabilidad/vincular.php" class="nav-subitem">
                     Vincular
                 </a>
+                <?php endif; ?>
+                <?php if ($ktOn('importar')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/indexar/" class="nav-subitem">
                     Indexar
                 </a>
+                <?php endif; ?>
+                <?php if ($ktOn('trazabilidad')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/trazabilidad/validar.php" class="nav-subitem">
                     Validar
                 </a>
+                <?php endif; ?>
             </div>
         </div>
 

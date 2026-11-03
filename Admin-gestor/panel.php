@@ -16,6 +16,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/tenant.php';
 require_once __DIR__ . '/../helpers/subdomain.php';
 require_once __DIR__ . '/../helpers/mailer.php';
+require_once __DIR__ . '/../helpers/alta_cliente.php';
 
 // Block admin access from client subdomains
 $sub = getSubdomain();
@@ -94,29 +95,27 @@ try {
 
         // CREAR NUEVO CLIENTE
         if ($action === 'create') {
-            $code = sanitize_code($_POST['code'] ?? '');
+            // Alta en UN paso (helpers/alta_cliente.php): valida código, subdominio y que no
+            // quede una carpeta vieja, crea todo, deshace si falla y verifica que funcione
+            $alta = kt_alta_cliente([
+                'codigo' => $_POST['code'] ?? '',
+                'nombre' => $_POST['name'] ?? '',
+                'password' => $_POST['password'] ?? '',
+                'email' => $_POST['email'] ?? '',
+                'titulo' => $_POST['titulo'] ?? '',
+                'color_primario' => $_POST['color_primario'] ?? '',
+                'color_secundario' => $_POST['color_secundario'] ?? '',
+                'subdominio' => $_POST['subdominio'] ?? '',
+                'funciones' => (array) ($_POST['funciones'] ?? []),
+            ]);
+            $code = $alta['codigo'];
             $name = trim($_POST['name'] ?? '');
-            $password = $_POST['password'] ?? '';
-            $email = trim($_POST['email'] ?? '');
-            $titulo = trim($_POST['titulo'] ?? '');
-            $colorP = trim($_POST['color_primario'] ?? '#3b82f6');
-            $colorS = trim($_POST['color_secundario'] ?? '#64748b');
             $copyKinoData = isset($_POST['copy_kino_data']);
 
-            if ($code === '' || $name === '' || $password === '') {
-                $error = 'Debe completar código, nombre y contraseña.';
+            if ($alta['error'] !== null && empty($alta['chequeos'])) {
+                $error = $alta['error'];
             } else {
-                // Verificar que no exista
-                $stmt = $centralDb->prepare('SELECT COUNT(*) FROM control_clientes WHERE codigo = ?');
-                $stmt->execute([$code]);
-                if ((int) $stmt->fetchColumn() > 0) {
-                    $error = 'Ya existe un cliente con ese código.';
-                } else {
-                    $hash = password_hash($password, PASSWORD_DEFAULT);
-                    create_client_structure($code, $name, $hash, $titulo, $colorP, $colorS, $email);
-                    // Guardar contraseña en texto plano para visibilidad del admin
-                    $centralDb->prepare('UPDATE control_clientes SET password_plain = ? WHERE codigo = ?')->execute([$password, $code]);
-
+                    $altaResumen = $alta;
                     $extraMsg = '';
 
                     // Process logo upload
@@ -262,11 +261,13 @@ try {
                         }
                     }
 
-                    $message = "✅ Cliente '{$name}' creado correctamente." . $extraMsg;
+                    $fallidos = array_filter($alta['chequeos'], fn($c) => !$c['ok']);
+                    $message = ($fallidos ? "⚠️ Cliente '{$name}' creado, pero revise: "
+                        . implode('; ', array_map(fn($c) => $c['que'] . ($c['detalle'] !== '' ? " ({$c['detalle']})" : ''), $fallidos)) . '.'
+                        : "✅ Cliente '{$name}' creado y verificado en {$alta['ms']} ms (" . count($alta['chequeos']) . ' chequeos en verde).') . $extraMsg;
 
                     // Store created client code for batch ZIP UI
                     $createdClientCode = $code;
-                }
             }
         }
 
@@ -279,6 +280,8 @@ try {
 
             if ($source === '' || $newCode === '' || $newName === '' || $newPassword === '') {
                 $error = 'Debe completar todos los campos de clonación.';
+            } elseif ($p = kt_subdominio_problema($centralDb, $newCode, $newCode)) {
+                $error = $p . ' Use otro código.';
             } else {
                 $hash = password_hash($newPassword, PASSWORD_DEFAULT);
                 clone_client($source, $newCode, $newName, $hash);
@@ -456,6 +459,10 @@ try {
                 $delStmt = $centralDb->prepare('DELETE FROM control_clientes WHERE codigo = ?');
                 $delStmt->execute([$delCode]);
                 $centralDb->prepare('DELETE FROM pagina_publica WHERE codigo = ?')->execute([$delCode]);
+                try {
+                    $centralDb->prepare('DELETE FROM funciones_cliente WHERE codigo = ?')->execute([$delCode]);
+                } catch (Throwable $e) {
+                }
 
                 // Eliminar directorio
                 $dir = CLIENTS_DIR . DIRECTORY_SEPARATOR . $delCode;
@@ -578,13 +585,44 @@ try {
             }
         }
 
+        // FUNCIONES DEL CLIENTE (prender / apagar)
+        elseif ($action === 'update_funciones') {
+            $code = sanitize_code($_POST['fn_code'] ?? '');
+            if ($code !== '' && $code !== 'admin') {
+                kt_funciones_guardar($centralDb, $code, array_map('strval', (array) ($_POST['funciones'] ?? [])));
+                $apagadas = array_keys(array_filter(kt_funciones_cliente($code), fn($on) => !$on));
+                $message = "✅ Funciones de '{$code}': " . ($apagadas
+                    ? 'apagadas ' . implode(', ', array_map(fn($f) => KT_FUNCIONES[$f]['nombre'], $apagadas)) . '.'
+                    : 'todas activas.');
+            }
+        }
+
+        // VERIFICAR QUE UN CLIENTE FUNCIONE
+        elseif ($action === 'verify_client') {
+            $code = sanitize_code($_POST['verify_code'] ?? '');
+            if ($code !== '') {
+                $chequeos = kt_verificar_cliente($code);
+                $malos = array_filter($chequeos, fn($c) => !$c['ok']);
+                $texto = implode(' · ', array_map(fn($c) => ($c['ok'] ? '✓ ' : '✗ ') . $c['que'] . ($c['detalle'] !== '' ? " ({$c['detalle']})" : ''), $chequeos));
+                if ($malos) {
+                    $error = "Cliente '{$code}' con problemas: " . $texto;
+                } else {
+                    $message = "✅ Cliente '{$code}' funciona: " . $texto;
+                }
+            }
+        }
+
         // ACTUALIZAR SUBDOMINIO
         elseif ($action === 'update_subdomain') {
             $code = sanitize_code($_POST['sub_code'] ?? '');
             $newSub = strtolower(trim($_POST['subdominio'] ?? ''));
             // Sanitize: only allow alphanumeric and hyphens
-            $newSub = preg_replace('/[^a-z0-9\-]/', '', $newSub);
-            if ($code !== '' && $code !== 'admin') {
+            $newSub = kt_subdominio_limpio($newSub);
+            if ($code !== '' && $code !== 'admin' && $newSub !== '' && ($p = kt_subdominio_problema($centralDb, $newSub, $code))) {
+                // Antes no se revisaba: un subdominio igual al de otro cliente (o a su código)
+                // hacía que esa dirección abriera el cliente equivocado
+                $error = $p;
+            } elseif ($code !== '' && $code !== 'admin') {
                 $stmt = $centralDb->prepare('UPDATE control_clientes SET subdominio = ? WHERE codigo = ?');
                 $stmt->execute([$newSub ?: null, $code]);
                 $subLabel = $newSub ?: $code;
@@ -1218,6 +1256,11 @@ foreach ($clients as $cli) {
                                         <?= $cli['activo'] ? 'Pause' : 'Activar' ?>
                                     </button>
                                 </form>
+                                <form method="post">
+                                    <input type="hidden" name="action" value="verify_client">
+                                    <input type="hidden" name="verify_code" value="<?= htmlspecialchars($cli['codigo']) ?>">
+                                    <button type="submit" class="btn btn-secondary btn-xs" title="Revisa base, carpeta, subdominio, marca y funciones">✓ Verificar</button>
+                                </form>
                                 <button class="btn btn-secondary btn-xs" title="Ver documentos sin PDF"
                                     onclick="diagnoseOrphans('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['nombre']) ?>')">
                                     🔍 Huérfanos
@@ -1230,6 +1273,23 @@ foreach ($clients as $cli) {
                                 </form>
                             <?php endif; ?>
                         </div>
+                        <?php if ($cli['codigo'] !== 'admin'): ?>
+                            <?php $fnCli = kt_funciones_cliente($cli['codigo']); $fnOff = array_keys(array_filter($fnCli, fn($on) => !$on)); ?>
+                            <details style="margin-top:0.5rem;">
+                                <summary class="client-meta" style="cursor:pointer;">⚙️ Funciones<?= $fnOff ? ' — ' . count($fnOff) . ' apagada(s)' : ': todas activas' ?></summary>
+                                <form method="post" style="margin-top:0.4rem;">
+                                    <input type="hidden" name="action" value="update_funciones">
+                                    <input type="hidden" name="fn_code" value="<?= htmlspecialchars($cli['codigo']) ?>">
+                                    <?php foreach (KT_FUNCIONES as $fk => $fd): ?>
+                                        <label class="client-meta" style="display:flex;gap:0.4rem;align-items:flex-start;" title="<?= htmlspecialchars($fd['detalle']) ?>">
+                                            <input type="checkbox" name="funciones[]" value="<?= $fk ?>" <?= $fnCli[$fk] ? 'checked' : '' ?>>
+                                            <span><?= htmlspecialchars($fd['nombre']) ?></span>
+                                        </label>
+                                    <?php endforeach; ?>
+                                    <button type="submit" class="btn btn-secondary btn-xs" style="margin-top:0.3rem;">Guardar funciones</button>
+                                </form>
+                            </details>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </div>
@@ -1308,6 +1368,26 @@ foreach ($clients as $cli) {
                                         <input type="color" name="color_secundario" value="#64748b">
                                         <label>Secundario</label>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ── Dirección y funciones (todo queda listo en este mismo paso) ── -->
+                        <div style="display:flex;flex-wrap:wrap;gap:0.75rem;">
+                            <div class="form-group" style="flex:1 1 220px;">
+                                <label class="form-label">🌐 Subdominio</label>
+                                <input type="text" class="form-input" name="subdominio" placeholder="igual al código"
+                                    pattern="[a-zA-Z0-9-]{2,40}" title="Letras, números o guiones">
+                                <small class="client-meta">Vacío = el código (codigo.<?= htmlspecialchars(APP_BASE_DOMAIN) ?>). Se revisa que no lo use otro cliente.</small>
+                            </div>
+                            <div class="form-group" style="flex:2 1 300px;">
+                                <label class="form-label">⚙️ Funciones activas</label>
+                                <div style="display:flex;flex-wrap:wrap;gap:0.25rem 1rem;">
+                                    <?php foreach (KT_FUNCIONES as $fk => $fd): ?>
+                                        <label class="client-meta" style="display:flex;gap:0.35rem;align-items:center;" title="<?= htmlspecialchars($fd['detalle']) ?>">
+                                            <input type="checkbox" name="funciones[]" value="<?= $fk ?>" checked> <?= htmlspecialchars($fd['nombre']) ?>
+                                        </label>
+                                    <?php endforeach; ?>
                                 </div>
                             </div>
                         </div>

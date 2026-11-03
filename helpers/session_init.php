@@ -77,3 +77,9 @@ function session_reopen(): void
 
 // Limpiar variables temporales
 unset($_host, $_safeName, $_sessionName);
+
+// Funciones por cliente (helpers/funciones.php): si config.php ya se cargó antes que
+// la sesión, la revisión de la función de esta página se hace aquí
+if (function_exists('kt_guardia_funciones')) {
+    kt_guardia_funciones();
+}
