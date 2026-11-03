@@ -1,4 +1,9 @@
 <?php
+// Solo línea de comandos: desde el navegador este script no existe (ver CLAUDE.md, Seguridad)
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 // import_backup.php
 // Script para importar el respaldo de base de datos desde el zip extraído
 

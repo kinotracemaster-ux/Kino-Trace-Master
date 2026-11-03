@@ -4,13 +4,18 @@ php_value memory_limit 1024M
 php_value max_execution_time 600
 php_value max_input_time 600
 
+# Sin listado de carpetas: antes /clients/ podía mostrar los códigos de todos los clientes
+# y la lista de sus PDFs
+Options -Indexes
+
 # Bloquear acceso a archivos sensibles
 # md: la documentación (docs/, MAPA_TECNICO.md...) describe la arquitectura y hallazgos de seguridad
 # ps1/ktdata/ktsync/lock: herramientas y paquetes del modo local
 # db-wal/db-shm/db-journal: SQLite en modo WAL deja junto a cada base un archivo con los
 #   cambios recientes; sin esto se podía descargar con solo conocer el código del cliente
 # jsonl/nuevo: historial de sincronización y copia temporal durante un reemplazo
-<FilesMatch "\.(db|db-wal|db-shm|db-journal|sql|zip|env|log|json|jsonl|md|ps1|ktdata|ktsync|lock|nuevo)$">
+# csv: volcados de datos de clientes
+<FilesMatch "\.(db|db-wal|db-shm|db-journal|sql|csv|zip|env|log|json|jsonl|md|ps1|ktdata|ktsync|lock|nuevo)$">
     Order Allow,Deny
     Deny from all
 </FilesMatch>
@@ -18,4 +23,10 @@ php_value max_input_time 600
 # Modo local: historial, paquetes recibidos y respaldos automáticos de cada cliente
 <IfModule mod_alias.c>
     RedirectMatch 404 ^/clients/[^/]+/(_sync|_respaldos)(/|$)
+</IfModule>
+
+# Carpetas que nunca se sirven por web: plantillas con datos (database_initial), respaldos viejos,
+# tests, documentación, herramientas y dependencias
+<IfModule mod_alias.c>
+    RedirectMatch 404 ^/(database_initial|backups|tests|docs|tools|vendor|\.git|\.agent)(/|$)
 </IfModule>

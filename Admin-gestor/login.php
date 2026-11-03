@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../helpers/session_init.php';
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helpers/subdomain.php';
+require_once __DIR__ . '/../helpers/admin_secret.php';
 
 // Si ya está autenticado como admin, ir directo al panel
 $allowedAdminUsers = ['admin', 'kino'];
@@ -16,15 +17,14 @@ if (isset($_SESSION['client_code']) && in_array($_SESSION['client_code'], $allow
     exit;
 }
 
-// Admin secret password
-define('ADMIN_SECRET', getenv('ADMIN_SECRET') ?: '3312');
+// Clave maestra: variable ADMIN_SECRET (helpers/admin_secret.php). Sin ella, acceso admin apagado.
 
 $error = '';
 
 // Procesar login
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $secret = $_POST['admin_secret'] ?? '';
-    if ($secret === ADMIN_SECRET) {
+    $resultado = kt_admin_verificar((string) ($_POST['admin_secret'] ?? ''));
+    if ($resultado === 'ok') {
         session_reopen();
         $_SESSION['client_code'] = 'admin';
         $_SESSION['is_admin'] = true;
@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: panel.php');
         exit;
     } else {
-        $error = 'Código de acceso incorrecto';
+        $error = kt_admin_mensaje($resultado);
     }
 }
 ?>

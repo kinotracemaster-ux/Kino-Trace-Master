@@ -10,6 +10,7 @@ require_once __DIR__ . '/helpers/auth.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers/tenant.php';
 require_once __DIR__ . '/helpers/subdomain.php';
+require_once __DIR__ . '/helpers/admin_secret.php';
 
 // Detect client from subdomain (e.g. losmonte.kino-trace.com)
 $detectedSub = getSubdomain();
@@ -30,8 +31,7 @@ if ($detectedSub === 'admin') {
     }
 }
 
-// Admin secret password
-define('ADMIN_SECRET', getenv('ADMIN_SECRET') ?: '3312');
+// Clave maestra: variable ADMIN_SECRET (helpers/admin_secret.php). Sin ella, acceso admin apagado.
 
 $error = '';
 $adminError = '';
@@ -39,8 +39,8 @@ $adminError = '';
 // Handle admin secret access
 // En modo local (PC del cliente) no existe acceso de administrador
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret']) && !defined('KT_MODO_LOCAL')) {
-    $secret = $_POST['admin_secret'] ?? '';
-    if ($secret === ADMIN_SECRET) {
+    $resultado = kt_admin_verificar((string) ($_POST['admin_secret'] ?? ''));
+    if ($resultado === 'ok') {
         // Reabrir sesión para escritura
         session_reopen();
         $_SESSION['client_code'] = 'admin';
@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_secret']) && !d
         header('Location: Admin-gestor/panel.php');
         exit;
     } else {
-        $adminError = 'Código incorrecto';
+        $adminError = kt_admin_mensaje($resultado);
     }
 }
 

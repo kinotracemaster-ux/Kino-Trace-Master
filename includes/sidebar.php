@@ -549,12 +549,14 @@ $currentSection = $currentSection ?? 'voraz';
     // Toggle Admin Menu (oculta botones principales) - PROTEGIDO CON CÓDIGO
     let adminUnlocked = false;
 
-    function toggleAdminMenu() {
+    async function toggleAdminMenu() {
         const submenu = document.getElementById('submenu-admin');
         const button = submenu.previousElementSibling;
         const mainButtons = document.getElementById('main-nav-buttons');
 
-        // Si el menú está cerrado y no está desbloqueado, pedir código
+        // Si el menú está cerrado y no está desbloqueado, pedir código.
+        // El código se verifica en el servidor (admin_codigo.php): antes estaba escrito
+        // aquí y cualquiera podía leerlo en el código fuente de la página.
         if (!submenu.classList.contains('open') && !adminUnlocked) {
             const code = prompt('🔐 Ingresa el código de administrador:');
 
@@ -563,12 +565,20 @@ $currentSection = $currentSection ?? 'voraz';
                 return;
             }
 
-            if (code !== '3312') {
-                alert('❌ Código incorrecto');
+            try {
+                const body = new URLSearchParams({ codigo: code });
+                const resp = await fetch('/admin_codigo.php', { method: 'POST', body, credentials: 'same-origin' });
+                const data = await resp.json();
+                if (!data.ok) {
+                    alert('❌ ' + (data.mensaje || 'Código incorrecto'));
+                    return;
+                }
+            } catch (e) {
+                alert('❌ No se pudo verificar el código. Intenta de nuevo.');
                 return;
             }
 
-            // Código correcto - desbloquear para esta sesión
+            // Código correcto - desbloquear para esta página
             adminUnlocked = true;
         }
 
