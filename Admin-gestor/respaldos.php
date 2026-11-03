@@ -14,13 +14,14 @@ require_once __DIR__ . '/../helpers/tenant.php';
 require_once __DIR__ . '/../helpers/subdomain.php';
 require_once __DIR__ . '/../helpers/respaldo.php';
 
-// Mismas reglas de acceso que panel.php
+// Como panel.php, pero solo con la clave maestra (is_admin): la sesión del cliente "kino"
+// no basta para restaurar bases de otros clientes
 $sub = getSubdomain();
 if ($sub !== null && $sub !== 'admin') {
     http_response_code(403);
     exit('Acceso denegado desde este subdominio.');
 }
-if (!isset($_SESSION['client_code']) || !in_array($_SESSION['client_code'], ['admin', 'kino'], true)) {
+if (empty($_SESSION['is_admin'])) {
     header('Location: login.php');
     exit;
 }
