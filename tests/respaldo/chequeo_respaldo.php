@@ -89,6 +89,10 @@ try {
     }
 
     // --- 7. Prueba de restauración
+    // La prueba usa el respaldo más nuevo de cada cliente. Tras restaurar, el más nuevo
+    // era "antes_restaurar" (la base vaciada del paso 3) cuando caía en otro segundo, y
+    // el chequeo fallaba a veces. Un respaldo normal ahora deja claro cuál se prueba.
+    kt_resp_cliente($cd, 'kino', 'diario');
     $p = kt_resp_probar($cd);
     ok($p['ok'], 'prueba de restauración OK para todos los clientes');
     ok(($p['clientes']['kino']['documentos'] ?? -1) === $antes['documentos'], 'la prueba cuenta los documentos del respaldo');

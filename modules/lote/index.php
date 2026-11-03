@@ -35,7 +35,9 @@ $success = '';
 // Handle ZIP upload
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['zip_file'])) {
     $zipFile = $_FILES['zip_file'];
-    $docType = $_POST['doc_type'] ?? 'documento';
+    // Se usa como carpeta: solo letras, números y _ (antes "../../otro_cliente/uploads"
+    // guardaba los PDFs en la carpeta de OTRO cliente)
+    $docType = sanitize_code((string) ($_POST['doc_type'] ?? '')) ?: 'documento';
     $extractCodes = isset($_POST['extract_codes']);
 
     if ($zipFile['error'] !== UPLOAD_ERR_OK) {
@@ -77,25 +79,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['zip_file'])) {
 
                     // Insert document record
                     try {
-                        $stmt = $db->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo) VALUES (?, ?, ?, ?)");
-                        $stmt->execute([$docType, $docName, $docDate, $newFilename]);
-                        $docId = $db->lastInsertId();
-
-                        // Extract codes if requested
+                        // Leer los códigos ANTES de abrir la transacción (leer el PDF es lo lento)
+                        $codes = [];
                         if ($extractCodes && function_exists('extract_codes_from_pdf')) {
                             try {
-                                $codes = extract_codes_from_pdf($destPath);
-                                if (!empty($codes)) {
-                                    $stmtCode = $db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
-                                    foreach ($codes as $code) {
-                                        $stmtCode->execute([$docId, $code]);
-                                        $codesExtracted++;
-                                    }
-                                }
+                                // extract_codes_from_pdf() devuelve ['success', 'text', 'codes', ...]:
+                                // antes se guardaba ese arreglo entero como si fueran códigos
+                                // ("1", todo el texto del PDF, "Array"...), no la lista de códigos
+                                $extraccion = extract_codes_from_pdf($destPath);
+                                $codes = array_values(array_unique(array_filter(
+                                    (array) ($extraccion['codes'] ?? []),
+                                    fn($c) => is_string($c) && trim($c) !== ''
+                                )));
                             } catch (Exception $e) {
                                 // Ignore extraction errors
                             }
                         }
+
+                        // Documento y códigos juntos: o queda todo o nada
+                        $db->beginTransaction();
+                        $stmt = $db->prepare("INSERT INTO documentos (tipo, numero, fecha, ruta_archivo) VALUES (?, ?, ?, ?)");
+                        $stmt->execute([$docType, $docName, $docDate, $newFilename]);
+                        $docId = $db->lastInsertId();
+                        if ($codes) {
+                            $stmtCode = $db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
+                            foreach ($codes as $code) {
+                                $stmtCode->execute([$docId, $code]);
+                                $codesExtracted++;
+                            }
+                        }
+                        $db->commit();
 
                         $results[] = [
                             'file' => $basename,
@@ -104,6 +117,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['zip_file'])) {
                         ];
                         $processed++;
                     } catch (Exception $e) {
+                        if ($db->inTransaction()) {
+                            $db->rollBack();
+                        }
                         $results[] = [
                             'file' => $basename,
                             'status' => 'error',

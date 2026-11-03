@@ -33,7 +33,17 @@ php migrate.php
 
 No hay `composer.json` con scripts de lint/build; `composer install` solo trae dependencias de producción (`setasign/fpdi-tcpdf`, `phpmailer/phpmailer`).
 
-⚠️ `optimize_db.php` **no existe** en el repo pese a haber sido documentado antes como comando. La optimización de índices real es automática y vive en `ensure_client_schema()` (`helpers/tenant.php`), que corre en cada `open_client_db()` — no requiere ejecutar nada manualmente.
+```bash
+# Chequeo antes de publicar (lo corre GitHub Actions en cada PR: .github/workflows/chequeo.yml)
+# Sintaxis de todos los .php + deploy simulado en carpeta temporal (migra database_initial
+# y un cliente nuevo, y repite los pasos para probar que son idempotentes). Nunca toca clients/.
+php tools/chequeo.php
+
+# Poner al día la base de TODOS los clientes (corre solo al arrancar cada deploy, ver Dockerfile)
+php tools/migrar_clientes.php
+```
+
+⚠️ `optimize_db.php` **no existe** en el repo pese a haber sido documentado antes como comando. Índices y tablas nuevas viven en `client_schema_migrations()` (`helpers/tenant.php`), ver "Cambios para todos los clientes".
 
 Para un mapa exhaustivo y verificado del código real (todas las acciones de `api.php`, esquema SQLite completo, inventario de helpers/módulos, inconsistencias conocidas), ver `MAPA_TECNICO.md`.
 
@@ -44,6 +54,24 @@ Para un mapa exhaustivo y verificado del código real (todas las acciones de `ap
 No hay servidor de BD externo. `config.php` crea/abre `clients/central.db` (tabla `control_clientes`: credenciales y branding de cada cliente) al arrancar cualquier request. Cada cliente tiene su propia carpeta `clients/{codigo}/{codigo}.db` + `clients/{codigo}/uploads/`. `helpers/tenant.php` centraliza `sanitize_code()`, `client_db_path()` y `open_client_db()` (con auto-reparación: si falta la BD del cliente, la copia desde `database_initial/{codigo}/`). En Railway todo `clients/` vive en un volumen persistente — sin volumen se pierde todo en cada deploy. `database_initial/` es la plantilla que se copia a `clients/` solo en el primer arranque (cuando `central.db` no existe).
 
 Login (`login.php`) valida código+contraseña contra `central.db`, guarda `$_SESSION['client_code']`, y desde ahí toda request abre la BD de ese cliente vía `open_client_db($_SESSION['client_code'])`.
+
+### Cambios para todos los clientes (código global + migraciones versionadas)
+
+El código es **uno solo para todos los clientes**; por cliente solo hay datos (`clients/{codigo}/{codigo}.db`, `uploads/`, `logo.*`) y su fila en `central.db`. No hay páginas, config ni plantillas copiadas por cliente: un merge a `main` llega a todos los subdominios a la vez. Lo único que vive *dentro* de cada cliente es el **esquema de su base**, y eso se maneja así:
+
+- `client_schema_migrations()` (`helpers/tenant.php`) es la **única** lista de pasos de esquema de las bases de cliente (también la usa `create_client_structure`). La versión aplicada se guarda en cada base con `PRAGMA user_version`; `ensure_client_schema()` (en cada `open_client_db()`) sale de inmediato si la base está al día y si no aplica los pasos pendientes en una transacción `BEGIN IMMEDIATE`. `central.db` usa el mismo esquema de pasos en `config.php` (`$centralMigrations`).
+- **Para cambiar el esquema: AGREGAR un paso nuevo al final** (`2 => function (PDO $db) {...}`). Nunca editar ni borrar un paso publicado (en producción ya corrió y no se repite). Cada paso debe ser idempotente (`IF NOT EXISTS`, `kt_add_column()`) y aditivo (el código viejo debe seguir funcionando con la base nueva). Si cambia `code_match_sql()`, agregar un paso que borre y recree `idx_codigos_match`.
+- Al arrancar cada deploy, `start.sh` (Dockerfile) corre `tools/migrar_clientes.php` → `migrate_all_clients()`: todos los clientes quedan al día antes de abrir la web y los errores salen en el log de Railway. El panel admin muestra "Base desactualizada" por cliente y tiene el botón **🗄️ Actualizar bases**.
+- Flujo de publicación: rama → PR → **chequeo en verde** (GitHub Actions, `tools/chequeo.php`) → probar en Railway **PRUEBAS** → merge a `main`.
+
+### Base de datos: rendimiento y cuidado de los datos
+
+- **Páginas lentas:** `config.php` activa `helpers/registro_lento.php`: toda página que tarde más de `KT_LENTO_MS` (1000 ms por defecto) queda en `clients/logs/lento.log` (ruta, acción, cliente, ms; nunca lo buscado). El panel admin muestra el resumen "🐢 Páginas lentas". Mirar eso antes de optimizar a ojo.
+- **Consultas que recorren todos los códigos están prohibidas en las búsquedas frecuentes:** `tools/chequeo.php` (paso 5) corre `search_by_code`, `greedy_search`, `suggest_codes`, `kt_listar_documentos` y `get_search_stats` sobre la base más grande y falla si alguna hace `SCAN codigos` sin índice. Un `LIKE` sobre `codigo` no usa índice: para prefijos usar el rango sobre `code_match_sql()` como `suggest_codes()`.
+- **Listados paginados:** elegir primero la página de documentos y después juntar sus códigos (`kt_listar_documentos()`); un `LEFT JOIN codigos ... GROUP BY` sobre todos los documentos antes del `LIMIT` crece con el total de códigos.
+- **Guardar documento + códigos siempre en una transacción** (`beginTransaction`/`commit`): o queda todo o nada, y es ~45 veces más rápido que un guardado por código.
+- Cada deploy (`migrate_all_clients()`) revisa cada base con `PRAGMA quick_check` y corre `PRAGMA optimize`.
+- Medir antes/después: `php tools/medir_bd.php clients/kino/kino.db 20` (trabaja sobre una copia; el 20 la multiplica: 2.420 documentos y 738 mil códigos).
 
 ### Autoload y carga de helpers
 
@@ -61,7 +89,7 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 
 ### Motor de búsqueda voraz (`helpers/search_engine.php`)
 
-`greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`. `search_by_code()` y `greedy_search()` van **sin caché** a propósito (antes cacheaban 5–10 min sin invalidar al subir/borrar/re-enlazar: un PDF recién subido "no aparecía"). No volver a cachearlas sin borrar la caché en cada escritura. Comparan códigos **ignorando espacios, guiones, puntos, comas, `;`, `:`, `_` y `/`** (`code_match_key()` / `code_match_sql()` en `helpers/tenant.php`, índice por expresión `idx_codigos_match`): en Los Montañeros el mismo código está guardado como "BL-1258" y "BL1258", "DS 230166" y "DS230166", o "NS377675,". Los códigos se guardan y muestran **tal como los escribió el cliente** (a veces usa puntos/guiones/espacios para distinguir productos): la coincidencia exacta tiene prioridad (`exacta=1`, sale primero; en la voraz, si existe la escritura exacta solo cuentan esos documentos) y las variantes solo se suman en la búsqueda por código, marcadas "Escrito en el documento como…". Cualquier consulta nueva por código debe usar esas dos funciones (también `Buscador/api_public.php`). Cada resultado muestra **"Por qué aparece"** (`motivoBox()` en `index.php`): búsqueda por código y voraz usan `exacta` / `match_info`; "Buscar en Contenido" (`fulltextSearch`, busca en el texto del PDF) devuelve `motivo` {codigos registrados que contienen lo buscado, nombre, veces en el texto}, así se ve cuando un documento sale solo porque el código está en su texto (p. ej. la factura que lista los productos).
+`greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`. `search_by_code()` y `greedy_search()` van **sin caché** a propósito (antes cacheaban 5–10 min sin invalidar al subir/borrar/re-enlazar: un PDF recién subido "no aparecía"). No volver a cachearlas sin borrar la caché en cada escritura. Comparan códigos **ignorando espacios, guiones, puntos, comas, `;`, `:`, `_` y `/`** (`code_match_key()` / `code_match_sql()` en `helpers/tenant.php`, índice por expresión `idx_codigos_match`): en Los Montañeros el mismo código está guardado como "BL-1258" y "BL1258", "DS 230166" y "DS230166", o "NS377675,". Los códigos se guardan y muestran **tal como los escribió el cliente** (a veces usa puntos/guiones/espacios para distinguir productos): la coincidencia exacta tiene prioridad (`exacta=1`, sale primero; en la voraz, si existe la escritura exacta solo cuentan esos documentos) y las variantes solo se suman en la búsqueda por código, marcadas "Escrito en el documento como…". Cualquier consulta nueva por código debe usar esas dos funciones (también `Buscador/api_public.php`). Las sugerencias mientras se escribe (`suggest_codes()`, interno y público) siguen la misma regla: "bl1" sugiere "BL-1258". Cada resultado muestra **"Por qué aparece"** (`motivoBox()` en `index.php`): búsqueda por código y voraz usan `exacta` / `match_info`; "Buscar en Contenido" (`fulltextSearch`, busca en el texto del PDF) devuelve `motivo` {codigos registrados que contienen lo buscado, nombre, veces en el texto}, así se ve cuando un documento sale solo porque el código está en su texto (p. ej. la factura que lista los productos).
 
 ### Resaltado de PDFs (visor interno y público)
 

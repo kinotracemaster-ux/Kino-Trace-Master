@@ -61,29 +61,39 @@ class DocumentController extends BaseController
             }
         }
 
-        // Insertar documento
-        $stmt = $this->db->prepare("
-            INSERT INTO documentos (tipo, numero, fecha, proveedor, ruta_archivo, hash_archivo, datos_extraidos)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([
-            $tipo,
-            $numero,
-            $fecha,
-            $proveedor,
-            $uploadResult['path'], // Storing relative path as returned by uploader
-            $hash,
-            json_encode($datosExtraidos)
-        ]);
+        // Documento y códigos en UNA transacción: o queda todo o nada (antes, si algo
+        // fallaba a mitad, quedaba el documento con la mitad de sus códigos) y es mucho
+        // más rápido (un solo guardado en disco en vez de uno por código).
+        $this->db->beginTransaction();
+        try {
+            // Insertar documento
+            $stmt = $this->db->prepare("
+                INSERT INTO documentos (tipo, numero, fecha, proveedor, ruta_archivo, hash_archivo, datos_extraidos)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $tipo,
+                $numero,
+                $fecha,
+                $proveedor,
+                $uploadResult['path'], // Storing relative path as returned by uploader
+                $hash,
+                json_encode($datosExtraidos)
+            ]);
 
-        $docId = $this->db->lastInsertId();
+            $docId = $this->db->lastInsertId();
 
-        // Insertar códigos
-        if (!empty($codes)) {
-            $insertCode = $this->db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
-            foreach (array_unique($codes) as $code) {
-                $insertCode->execute([$docId, $code]);
+            // Insertar códigos
+            if (!empty($codes)) {
+                $insertCode = $this->db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
+                foreach (array_unique($codes) as $code) {
+                    $insertCode->execute([$docId, $code]);
+                }
             }
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
         }
 
         $this->jsonExit([
@@ -158,43 +168,52 @@ class DocumentController extends BaseController
             }
         }
 
-        // Update document
-        if ($hash && $datosExtraidos) {
-            // New file uploaded
-            $stmt = $this->db->prepare("
-                UPDATE documentos 
-                SET tipo = ?, numero = ?, fecha = ?, proveedor = ?, 
-                    ruta_archivo = ?, hash_archivo = ?, datos_extraidos = ?
-                WHERE id = ?
-            ");
-            $stmt->execute([
-                $tipo,
-                $numero,
-                $fecha,
-                $proveedor,
-                $rutaArchivo,
-                $hash,
-                json_encode($datosExtraidos),
-                $id
-            ]);
-        } else {
-            // Metadata only
-            $stmt = $this->db->prepare("
-                UPDATE documentos 
-                SET tipo = ?, numero = ?, fecha = ?, proveedor = ?
-                WHERE id = ?
-            ");
-            $stmt->execute([$tipo, $numero, $fecha, $proveedor, $id]);
-        }
-
-        // Update codes
-        $this->db->prepare("DELETE FROM codigos WHERE documento_id = ?")->execute([$id]);
-
-        if (!empty($codes)) {
-            $insertCode = $this->db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
-            foreach (array_unique($codes) as $code) {
-                $insertCode->execute([$id, $code]);
+        // Documento y códigos en una transacción: antes se borraban los códigos y, si algo
+        // fallaba antes de volver a insertarlos, el documento quedaba sin códigos.
+        $this->db->beginTransaction();
+        try {
+            // Update document
+            if ($hash && $datosExtraidos) {
+                // New file uploaded
+                $stmt = $this->db->prepare("
+                    UPDATE documentos 
+                    SET tipo = ?, numero = ?, fecha = ?, proveedor = ?, 
+                        ruta_archivo = ?, hash_archivo = ?, datos_extraidos = ?
+                    WHERE id = ?
+                ");
+                $stmt->execute([
+                    $tipo,
+                    $numero,
+                    $fecha,
+                    $proveedor,
+                    $rutaArchivo,
+                    $hash,
+                    json_encode($datosExtraidos),
+                    $id
+                ]);
+            } else {
+                // Metadata only
+                $stmt = $this->db->prepare("
+                    UPDATE documentos 
+                    SET tipo = ?, numero = ?, fecha = ?, proveedor = ?
+                    WHERE id = ?
+                ");
+                $stmt->execute([$tipo, $numero, $fecha, $proveedor, $id]);
             }
+
+            // Update codes
+            $this->db->prepare("DELETE FROM codigos WHERE documento_id = ?")->execute([$id]);
+
+            if (!empty($codes)) {
+                $insertCode = $this->db->prepare("INSERT INTO codigos (documento_id, codigo) VALUES (?, ?)");
+                foreach (array_unique($codes) as $code) {
+                    $insertCode->execute([$id, $code]);
+                }
+            }
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
         }
 
         $this->jsonExit([
@@ -245,41 +264,12 @@ class DocumentController extends BaseController
     public function list($get)
     {
         $page = max(1, (int) ($get['page'] ?? 1));
-        $perPage = (int) ($get['per_page'] ?? 50);
-        $tipo = $get['tipo'] ?? '';
+        $perPage = max(1, min(200, (int) ($get['per_page'] ?? 50)));
+        $tipo = (string) ($get['tipo'] ?? '');
 
-        $where = '';
-        $params = [];
-        if ($tipo !== '') {
-            $where = 'WHERE LOWER(d.tipo) = LOWER(?)';
-            $params[] = $tipo;
-        }
-
-        if ($params) {
-            // Fix: add 'd.' prefix to tipo column in COUNT query
-            $stmt = $this->db->prepare("SELECT COUNT(*) FROM documentos d $where");
-            $stmt->execute($params);
-            $total = (int) $stmt->fetchColumn();
-        } else {
-            $total = (int) $this->db->query("SELECT COUNT(*) FROM documentos")->fetchColumn();
-        }
-
-        $offset = ($page - 1) * $perPage;
-        // Inject integers directly to avoid PDO string casting issues in LIMIT
-        $stmt = $this->db->prepare("
-            SELECT
-                d.id, d.tipo, d.numero, d.fecha, d.proveedor, d.ruta_archivo,
-                GROUP_CONCAT(c.codigo, '||') AS codigos
-            FROM documentos d
-            LEFT JOIN codigos c ON d.id = c.documento_id
-            $where
-            GROUP BY d.id
-            ORDER BY d.fecha DESC, d.id DESC
-            LIMIT $perPage OFFSET $offset
-        ");
-
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $pagina = kt_listar_documentos($this->db, $tipo, $perPage, ($page - 1) * $perPage);
+        $total = $pagina['total'];
+        $rows = $pagina['rows'];
 
         $docs = array_map(function ($r) {
             return [

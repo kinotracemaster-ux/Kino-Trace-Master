@@ -57,7 +57,8 @@ unlink("$app/_setup.php");
 
 // --- 3. Servidor
 $puerto = 18000 + random_int(0, 999);
-$env = 'ADMIN_SECRET=clave-maestra-de-prueba-123';
+// KT_LENTO_MS=1: anota todas las páginas como lentas para probar el registro
+$env = 'ADMIN_SECRET=clave-maestra-de-prueba-123 KT_LENTO_MS=1';
 $srv = proc_open("$env php -S 127.0.0.1:$puerto -t " . escapeshellarg($app), [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, $app);
 $base = "http://127.0.0.1:$puerto";
 for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $puerto); $i++) usleep(100000);
@@ -92,8 +93,33 @@ try {
     ok(strpos($r['body'], 'MAN-ALFA') !== false && strpos($r['body'], 'MAN-BETA') === false, 'API: la lista de alfa solo tiene sus documentos');
     $r = pedir("$base/api.php?action=fulltext_search&query=BETA-001", null, $alfa);
     ok(strpos($r['body'], 'MAN-BETA') === false, 'API: búsqueda en contenido no muestra a beta');
+    $r = pedir("$base/api.php?action=suggest&term=bet", null, $alfa);
+    ok(strpos($r['body'], 'BETA') === false, 'API: las sugerencias de alfa no muestran códigos de beta');
+    $r = pedir("$base/api.php?action=suggest&term=alfa", null, $alfa);
+    ok(strpos($r['body'], 'ALFA-001') !== false, 'API: sugerencias por el índice ("alfa" sugiere ALFA-001)');
+    $r = pedir("$base/api.php?action=list&per_page=100000", null, $alfa);
+    ok((json_decode($r['body'], true)['per_page'] ?? 0) === 200, 'API: el listado no deja pedir más de 200 por página');
     $r = pedir("$base/api.php?action=list");
     ok($r['code'] === 401, 'API sin sesión: 401');
+
+    // --- Subida masiva (ZIP): la carpeta sale del formulario y los códigos del PDF
+    $zipPath = sys_get_temp_dir() . '/kt_lote_' . bin2hex(random_bytes(3)) . '.zip';
+    $zip = new ZipArchive();
+    $zip->open($zipPath, ZipArchive::CREATE);
+    $zip->addFromString('lote_alfa.pdf', "%PDF-1.4\n%%EOF\n");
+    $zip->close();
+    $ch = curl_init("$base/modules/lote/index.php");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_COOKIEFILE => $alfa, CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => ['zip_file' => new CURLFile($zipPath, 'application/zip', 'lote.zip'),
+            'doc_type' => '../../beta/uploads/manifiesto', 'extract_codes' => '1']]);
+    curl_exec($ch);
+    curl_close($ch);
+    @unlink($zipPath);
+    ok(!glob("$app/clients/beta/uploads/manifiesto/*lote_alfa*") && !glob("$app/clients/beta/uploads/*lote_alfa*"),
+        'subida masiva: no se puede guardar en la carpeta de otro cliente');
+    $basura = (int) (new PDO("sqlite:$app/clients/alfa/alfa.db"))
+        ->query("SELECT COUNT(*) FROM codigos WHERE codigo IN ('', '1', 'Array') OR codigo LIKE 'No se pudo%'")->fetchColumn();
+    ok($basura === 0, 'subida masiva: no guarda basura como códigos');
 
     // --- Descarga y visor interno
     $r = pedir("$base/modules/resaltar/download.php?doc=1", null, $alfa);
@@ -127,6 +153,10 @@ try {
     // --- Buscador público (sin sesión, por cliente)
     $r = pedir("$base/modules/Buscador/api_public.php?cliente=alfa&action=search_by_code&code=BETA-001");
     ok(strpos($r['body'], 'MAN-BETA') === false, 'buscador público de alfa no encuentra el código de beta');
+    $r = pedir("$base/modules/Buscador/api_public.php?cliente=alfa&action=suggest&term=BE");
+    ok(strpos($r['body'], 'BETA') === false, 'sugerencias del buscador público de alfa no muestran códigos de beta');
+    $r = pedir("$base/modules/Buscador/api_public.php?cliente=alfa&action=suggest&term=AL");
+    ok(strpos($r['body'], 'ALFA-001') !== false, 'sugerencias del buscador público de alfa sí muestran los suyos');
     $r = pedir("$base/modules/Buscador/viewer_publico.php?cliente=alfa&doc=1&term=ALFA-001");
     $url = enlace_pdf($r['body']);
     ok($url !== null && strpos($url, 'pdf.php?') !== false && strpos($url, 'alfa%2Fuploads') !== false, 'visor público usa enlace firmado del propio cliente');
@@ -143,7 +173,14 @@ try {
     $mae = tempnam(sys_get_temp_dir(), 'ktjar');
     pedir("$base/Admin-gestor/login.php", null, $mae);
     pedir("$base/Admin-gestor/login.php", ['admin_secret' => 'clave-maestra-de-prueba-123'], $mae);
-    ok(pedir("$base/Admin-gestor/panel.php", null, $mae)['code'] === 200, 'panel admin con la clave maestra: entra');
+    $r = pedir("$base/Admin-gestor/panel.php", null, $mae);
+    ok($r['code'] === 200, 'panel admin con la clave maestra: entra');
+
+    // --- Registro de páginas lentas (con KT_LENTO_MS=1 se anota todo)
+    $log = (string) @file_get_contents("$app/clients/logs/lento.log");
+    ok(strpos($log, '"accion":"search_by_code"') !== false && strpos($log, '"cliente":"alfa"') !== false, 'registro de páginas lentas anota página, acción y cliente');
+    ok(strpos($log, 'BETA-001') === false && strpos($log, 'clave-') === false, 'el registro de páginas lentas no guarda lo buscado ni contraseñas');
+    ok(strpos($r['body'], 'Páginas lentas') !== false, 'el panel admin muestra el resumen de páginas lentas');
     ok(pedir("$base/Admin-gestor/respaldos.php", null, $alfa)['code'] === 302, 'respaldos con sesión de cliente: no entra');
     $r = pedir("$base/index.php", null, $alfa, true);
     ok(strpos($r['body'], 'Admin-gestor/panel.php') === false, 'el menú de un cliente no muestra el gestor de clientes');

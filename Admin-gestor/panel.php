@@ -475,6 +475,27 @@ try {
             }
         }
 
+        // ACTUALIZAR LA BASE DE TODOS LOS CLIENTES (mismo proceso que corre al publicar)
+        elseif ($action === 'migrate_all') {
+            $okN = 0;
+            $fallos = [];
+            foreach (migrate_all_clients() as $mCode => $r) {
+                if ($r['despues'] === null && $r['ok']) {
+                    continue; // cliente sin base todavía
+                }
+                if ($r['ok']) {
+                    $okN++;
+                } else {
+                    $fallos[] = "{$mCode} ({$r['error']})";
+                }
+            }
+            if ($fallos) {
+                $error = '❌ Bases con error: ' . implode('; ', $fallos);
+            } else {
+                $message = "✅ {$okN} bases de clientes al día (versión " . client_schema_version() . ').';
+            }
+        }
+
         // DIAGNOSTICAR HUÉRFANOS
         elseif ($action === 'diagnose_orphans') {
             $diagCode = sanitize_code($_POST['diag_code'] ?? '');
@@ -621,12 +642,16 @@ foreach ($clients as $cli) {
 $clientHealth = [];
 foreach ($clients as $cli) {
     $code = $cli['codigo'];
-    $h = ['docs' => null, 'same_title' => [], 'foreign_db' => []];
+    $h = ['docs' => null, 'same_title' => [], 'foreign_db' => [], 'schema' => client_schema_version_of($code)];
     $dbFile = client_db_path($code);
     if (is_file($dbFile)) {
         try {
             $ro = new PDO('sqlite:' . $dbFile, null, null, [PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
             $h['docs'] = (int) $ro->query('SELECT COUNT(*) FROM documentos')->fetchColumn();
+            // Códigos basura que guardaba la subida masiva (ZIP) hasta nov. 2026: "1", "Array"
+            // y el aviso "No se pudo extraer texto..." (va por el índice de códigos, es rápido)
+            $h['basura'] = (int) $ro->query("SELECT COUNT(*) FROM codigos WHERE codigo IN ('', '1', 'Array')
+                OR (codigo >= 'No se pudo extraer' AND codigo < 'No se pudo extraes')")->fetchColumn();
         } catch (Throwable $e) {
             $h['docs'] = null;
         }
@@ -1029,6 +1054,10 @@ foreach ($clients as $cli) {
                 </a>
                 <a href="respaldos.php" class="btn btn-secondary" title="Respaldos automáticos y restaurar un cliente">🛟 Respaldos</a>
                 <a href="sync_local.php" class="btn btn-secondary" title="Copias de trabajo en PC y sincronización">💻 Modo local</a>
+                <form method="post" style="display:inline" onsubmit="return confirm('¿Actualizar la base de datos de TODOS los clientes a la última versión? Es seguro: solo agrega lo que falte.');">
+                    <input type="hidden" name="action" value="migrate_all">
+                    <button type="submit" class="btn btn-secondary" title="Pone al día la base de cada cliente (también ocurre solo al publicar)">🗄️ Actualizar bases</button>
+                </form>
                 <a href="../logout.php" class="btn btn-secondary">Salir</a>
             </div>
         </header>
@@ -1115,6 +1144,12 @@ foreach ($clients as $cli) {
                         <?php $hl = $clientHealth[$cli['codigo']] ?? null; ?>
                         <?php if ($hl): ?>
                             <div class="client-meta">📄 <?= $hl['docs'] === null ? 'sin base' : number_format($hl['docs']) . ' documentos' ?></div>
+                            <?php if (!empty($hl['basura'])): ?>
+                                <div class="client-meta" style="color:#b45309;font-weight:600;">⚠️ <?= number_format($hl['basura']) ?> códigos basura de la subida masiva (ZIP) antigua</div>
+                            <?php endif; ?>
+                            <?php if ($hl['schema'] !== null && $hl['schema'] < client_schema_version()): ?>
+                                <div class="client-meta" style="color:#b45309;font-weight:600;">⚠️ Base desactualizada (v<?= (int) $hl['schema'] ?> de v<?= client_schema_version() ?>): se actualiza sola al entrar, o con «🗄️ Actualizar bases»</div>
+                            <?php endif; ?>
                             <?php if ($hl['same_title']): ?>
                                 <div class="client-meta" style="color:#b91c1c;font-weight:600;">⚠️ Mismo título que: <?= htmlspecialchars(implode(', ', $hl['same_title'])) ?> (corregir con el botón Editar)</div>
                             <?php endif; ?>
@@ -1198,6 +1233,29 @@ foreach ($clients as $cli) {
                     </div>
                 <?php endforeach; ?>
             </div>
+
+            <?php $lentas = kt_lento_resumen(7); ?>
+            <details class="form-card" style="margin:1.5rem 0;" <?= $lentas ? '' : 'hidden' ?>>
+                <summary style="cursor:pointer;font-weight:700;">🐢 Páginas lentas, últimos 7 días (<?= count($lentas) ?>)</summary>
+                <p class="client-meta" style="margin:0.5rem 0;">Páginas que tardaron más de <?= number_format(kt_lento_umbral_ms()) ?> ms. Las de arriba son las que más tiempo le quitan a los clientes.</p>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                        <thead><tr style="text-align:left;"><th>Página</th><th>Veces</th><th>Mediana</th><th>Máximo</th><th>Clientes</th><th>Última</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($lentas as $l): ?>
+                                <tr style="border-top:1px solid var(--border-color, #e2e8f0);">
+                                    <td style="padding:4px 8px 4px 0;font-family:monospace;"><?= htmlspecialchars($l['pagina'] . ($l['accion'] !== '' ? ' · ' . $l['accion'] : '')) ?></td>
+                                    <td><?= (int) $l['veces'] ?></td>
+                                    <td><?= number_format($l['mediana_ms']) ?> ms</td>
+                                    <td><?= number_format($l['max_ms']) ?> ms</td>
+                                    <td><?= htmlspecialchars($l['clientes']) ?></td>
+                                    <td><?= htmlspecialchars(substr($l['ultima'], 0, 16)) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </details>
 
             <!-- Action Cards -->
             <div class="cards-section" style="grid-template-columns: 1fr 1fr;">
