@@ -23,6 +23,8 @@ Options -Indexes
 # Modo local: historial, paquetes recibidos y respaldos automáticos de cada cliente
 <IfModule mod_alias.c>
     RedirectMatch 404 ^/clients/[^/]+/(_sync|_respaldos)(/|$)
+    # Respaldos automáticos de todos los clientes (helpers/respaldo.php)
+    RedirectMatch 404 ^/clients/_respaldos(/|$)
 </IfModule>
 
 # Carpetas que nunca se sirven por web: plantillas con datos (database_initial), respaldos viejos,

@@ -1027,6 +1027,7 @@ foreach ($clients as $cli) {
                     </svg>
                     Dashboard
                 </a>
+                <a href="respaldos.php" class="btn btn-secondary" title="Respaldos automáticos y restaurar un cliente">🛟 Respaldos</a>
                 <a href="sync_local.php" class="btn btn-secondary" title="Copias de trabajo en PC y sincronización">💻 Modo local</a>
                 <a href="../logout.php" class="btn btn-secondary">Salir</a>
             </div>
