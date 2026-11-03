@@ -28,9 +28,9 @@ if ($sub !== null && $sub !== 'admin') {
     </div>');
 }
 
-// Verificar que el usuario sea administrador (admin o kino)
-$allowedAdminUsers = ['admin', 'kino'];
-if (!isset($_SESSION['client_code']) || !in_array($_SESSION['client_code'], $allowedAdminUsers)) {
+// Solo con la clave maestra (ADMIN_SECRET → is_admin). Antes también entraba la sesión del
+// cliente "kino" o de "admin" con su contraseña de cliente.
+if (empty($_SESSION['is_admin'])) {
     header('Location: login.php');
     exit;
 }

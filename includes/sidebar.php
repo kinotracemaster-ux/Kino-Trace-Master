@@ -184,8 +184,8 @@ $currentSection = $currentSection ?? 'voraz';
             </a>
         <?php endif; ?>
 
-        <?php if (in_array($clientCode, ['kino', 'admin']) && !defined('KT_MODO_LOCAL')): ?>
-            <!-- GESTOR DE CLIENTES - Solo para kino y admin -->
+        <?php if (!empty($_SESSION['is_admin']) && !defined('KT_MODO_LOCAL')): ?>
+            <!-- GESTOR DE CLIENTES - Solo con la clave maestra (is_admin) -->
             <a href="<?= $baseUrl ?? '' ?>Admin-gestor/panel.php" class="nav-item"
                 style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                 <span class="nav-icon">

@@ -55,17 +55,12 @@ if (!$pdfPath || !file_exists($pdfPath)) {
     die('Archivo PDF no encontrado');
 }
 
-$relativePath = str_replace($uploadsDir, '', $pdfPath);
-$baseUrl = '../../';
-if ($relativePath === $pdfPath || str_starts_with($relativePath, DIRECTORY_SEPARATOR) === false && str_contains($relativePath, 'uploads/client_')) {
-    $projectRoot = realpath(__DIR__ . '/../../');
-    $realPdfPath = realpath($pdfPath);
-    $relativePath = str_replace($projectRoot . DIRECTORY_SEPARATOR, '', $realPdfPath);
-    $relativePath = str_replace('\\', '/', $relativePath);
-    $pdfUrl = $baseUrl . $relativePath;
-} else {
-    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
-    $pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
+// PDFs privados: enlace firmado que vence en unas horas (helpers/pdf_acceso.php), nunca la
+// ruta estática clients/{codigo}/uploads/... (que ahora da 404)
+require_once __DIR__ . '/../../helpers/pdf_acceso.php';
+$pdfUrl = pdf_path_belongs_to_client($pdfPath, $clientCode) ? kt_pdf_url($pdfPath, KT_PDF_TTL_PUBLICO, '../../') : null;
+if ($pdfUrl === null) {
+    die('Archivo PDF no encontrado');
 }
 
 // Preparar términos a resaltar. Solo se separa por coma, punto y coma o salto

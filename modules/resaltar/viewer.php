@@ -97,7 +97,6 @@ if ($strictMode) {
 
 // --- GESTIÓN DE DOCUMENTO ---
 $totalDocs = isset($_GET['total']) ? (int) $_GET['total'] : 1;
-$downloadUrl = isset($_GET['download']) ? $_GET['download'] : '';
 
 if ($documentId <= 0 && empty($fileParam)) {
     die('ID de documento inválido o archivo no especificado');
@@ -140,18 +139,19 @@ if (!$pdfPath || !file_exists($pdfPath)) {
     die("Archivo PDF no encontrado.<br>Ruta: " . htmlspecialchars($pdfPath ?? 'NULL'));
 }
 
-$relativePath = str_replace($uploadsDir, '', $pdfPath);
-$baseUrl = '../../';
-// If the path wasn't inside uploadsDir, build URL relative to project root
-if ($relativePath === $pdfPath || str_starts_with($relativePath, DIRECTORY_SEPARATOR) === false && str_contains($relativePath, 'uploads/client_')) {
-    $projectRoot = realpath(__DIR__ . '/../../');
-    $realPdfPath = realpath($pdfPath);
-    $relFromRoot = str_replace($projectRoot . DIRECTORY_SEPARATOR, '', $realPdfPath);
-    $relFromRoot = str_replace('\\', '/', $relFromRoot);
-    $pdfUrl = $baseUrl . $relFromRoot;
-} else {
-    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
-    $pdfUrl = $baseUrl . 'clients/' . $clientCode . '/uploads/' . $relativePath;
+// Ruta relativa a uploads/ (la usa el OCR de respaldo para hojas escaneadas)
+$relativePath = ltrim(str_replace('\\', '/', str_replace($uploadsDir, '', $pdfPath)), '/');
+
+// PDFs privados: el navegador recibe un enlace firmado que vence (helpers/pdf_acceso.php),
+// nunca la ruta estática clients/{codigo}/uploads/... (que ahora da 404)
+require_once __DIR__ . '/../../helpers/pdf_acceso.php';
+if (!pdf_path_belongs_to_client($pdfPath, $clientCode)) {
+    die('Archivo PDF no disponible.');
+}
+$pdfUrl = kt_pdf_url($pdfPath, KT_PDF_TTL_INTERNO, '../../');
+$pdfDescarga = kt_pdf_url($pdfPath, KT_PDF_TTL_INTERNO, '../../', true);
+if ($pdfUrl === null) {
+    die('Archivo PDF no disponible.');
 }
 $docIdForOcr = $documentId; // For OCR fallback
 ?>
@@ -581,9 +581,9 @@ $docIdForOcr = $documentId; // For OCR fallback
                             </div>
                         <?php endif; ?>
 
-                        <?php if ($mode === 'unified' && $downloadUrl): ?>
+                        <?php if ($mode === 'unified'): ?>
                             <div style="margin-bottom:1rem; text-align:center;">
-                                <a href="<?= htmlspecialchars($downloadUrl) ?>" download class="btn btn-secondary"
+                                <a href="<?= htmlspecialchars($pdfDescarga) ?>" download class="btn btn-secondary"
                                     style="width:100%;">📥 Descargar Unificado</a>
                             </div>
                         <?php endif; ?>
@@ -628,7 +628,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                         <hr style="margin: 1.5rem 0; border-top:1px solid #eee;">
 
                         <button class="btn-print" onclick="printCleanDocument()">🖨️ Imprimir PDF</button>
-                        <a href="<?= $pdfUrl ?>" download class="btn btn-secondary"
+                        <a href="<?= htmlspecialchars($pdfDescarga) ?>" download class="btn btn-secondary"
                             style="width: 100%; text-align: center; display:block; padding:0.8rem;">
                             📥 Descargar PDF
                         </a>

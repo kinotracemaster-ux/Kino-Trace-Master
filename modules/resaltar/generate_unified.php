@@ -109,8 +109,9 @@ try {
 
     // Return path relative to web root or module
     // Viewer expects a path it can load/download
-    // Relative to modules/resaltar/: ../../clients/CODE/uploads/temp/FILE
-    $downloadUrl = "../../clients/{$clientCode}/uploads/temp/{$fileName}";
+    // Enlace firmado (los PDFs ya no se sirven como archivos estáticos)
+    require_once __DIR__ . '/../../helpers/pdf_acceso.php';
+    $downloadUrl = kt_pdf_url($outputPath, KT_PDF_TTL_INTERNO, '../../', true);
 
     // The viewer currently takes absolute filesystem path via 'file' param in some contexts (legacy) 
     // BUT the new viewer logic in our plan uses 'file' as path relative to uploads usually?

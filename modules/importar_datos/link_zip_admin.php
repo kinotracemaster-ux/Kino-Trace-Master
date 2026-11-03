@@ -26,8 +26,7 @@ function logMsg($msg, $type = "info")
 
 try {
     // Admin auth check
-    $allowedAdminUsers = ['admin', 'kino'];
-    if (!isset($_SESSION['client_code']) || !in_array($_SESSION['client_code'], $allowedAdminUsers)) {
+    if (empty($_SESSION['is_admin'])) {
         throw new Exception('Acceso no autorizado. Solo admin.');
     }
 

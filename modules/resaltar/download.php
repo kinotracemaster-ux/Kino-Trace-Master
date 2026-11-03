@@ -1,6 +1,6 @@
 <?php
 /**
- * Resolves the correct path for a document and redirects to the static file.
+ * Resolves the correct path for a document and serves it (only with the client's session).
  * Used for "Original" / "Download" buttons to handle variable directory structures.
  */
 
@@ -40,11 +40,8 @@ if (!$pdfPath) {
     exit;
 }
 
-// Serve the file directly (works regardless of file location on disk)
-$filename = basename($pdfPath);
-header('Content-Type: application/pdf');
-header('Content-Disposition: inline; filename="' . $filename . '"');
-header('Content-Length: ' . filesize($pdfPath));
-header('Cache-Control: public, max-age=3600');
-readfile($pdfPath);
+// Servir el archivo (privado: con sesión; con rangos para que PDF.js no lo baje entero)
+require_once __DIR__ . '/../../helpers/pdf_acceso.php';
+session_write_close();
+kt_pdf_enviar($pdfPath);
 exit;
