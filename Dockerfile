@@ -47,6 +47,8 @@ RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/Allo
 RUN sed -i 's/Options Indexes FollowSymLinks/Options FollowSymLinks/' /etc/apache2/apache2.conf
 
 # Script de inicio que configura el puerto dinámicamente, arregla MPM y permisos.
+# También deja corriendo los respaldos automáticos: cada hora revisa si toca respaldar
+# (cada 20 h) o probar la restauración (cada 7 días). Ver docs/RESPALDOS.md
 # Los sed deben ser idempotentes: si Railway reinicia el MISMO contenedor el script
 # vuelve a correr sobre archivos ya modificados. El sed anterior ("s/80/$PORT/g")
 # convertía "Listen 8080" en "Listen 808080" y Apache no arrancaba más
@@ -57,6 +59,7 @@ RUN echo '#!/bin/bash\n\
     chmod -R 777 /var/www/html/clients\n\
     sed -i -E "s/<VirtualHost [*]:[0-9]+>/<VirtualHost *:${PORT:-8080}>/" /etc/apache2/sites-available/000-default.conf\n\
     sed -i -E "s/^Listen [0-9]+$/Listen ${PORT:-8080}/" /etc/apache2/ports.conf\n\
+    (sleep 300; mkdir -p /var/www/html/clients/logs; while true; do runuser -u www-data -- php /var/www/html/tools/respaldo.php auto >> /var/www/html/clients/logs/respaldo.log 2>&1; sleep 3600; done) &\n\
     apache2-foreground' > /start.sh && chmod +x /start.sh
 
 EXPOSE 8080
