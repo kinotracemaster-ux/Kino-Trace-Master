@@ -43,6 +43,9 @@ RUN mkdir -p /var/www/html/clients \
 # Permitir .htaccess
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
+# Sin listado de carpetas en todo el sitio (también lo dice .htaccess, por si acaso)
+RUN sed -i 's/Options Indexes FollowSymLinks/Options FollowSymLinks/' /etc/apache2/apache2.conf
+
 # Script de inicio que configura el puerto dinámicamente, arregla MPM y permisos.
 # Los sed deben ser idempotentes: si Railway reinicia el MISMO contenedor el script
 # vuelve a correr sobre archivos ya modificados. El sed anterior ("s/80/$PORT/g")

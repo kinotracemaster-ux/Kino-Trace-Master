@@ -1,4 +1,9 @@
 <?php
+// Solo línea de comandos: desde el navegador este script no existe (ver CLAUDE.md, Seguridad)
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 /**
  * Script de migración inicial para crear el cliente principal
  * Ejecutar una sola vez para crear el usuario inicial

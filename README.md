@@ -42,16 +42,16 @@ Esto persiste:
 | Variable | Descripción |
 |----------|-------------|
 | `GEMINI_API_KEY` | Clave API de Google Gemini (para IA) |
+| `ADMIN_SECRET` | **Obligatoria para el panel admin.** Mínimo 12 caracteres. Sin ella el acceso admin queda apagado |
 
-#### 4. Crear Usuario Admin
-Después del primer despliegue, visita:
+#### 4. Crear el cliente inicial
+Después del primer despliegue, desde la terminal de Railway (no desde el navegador: los scripts
+de mantenimiento solo funcionan por línea de comandos):
 ```
-https://tu-app.railway.app/migrate.php
+railway run php migrate.php
 ```
 
-Esto crea:
-- **Código**: `admin`
-- **Contraseña**: `admin123`
+Esto crea el cliente `kino` (contraseña `kino123`) si la base está vacía.
 
 > 🔐 Cambia la contraseña después del primer login.
 

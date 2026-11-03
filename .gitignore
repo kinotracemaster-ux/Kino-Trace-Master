@@ -39,3 +39,9 @@ desktop.ini
 /local/.reloj
 *.ktdata
 *.ktsync
+
+# Datos de clientes: nunca en el repo (volcados, respaldos, exportaciones)
+/backups/
+/backup_*.zip
+/if0_*.sql
+/if0_*.csv

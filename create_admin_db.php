@@ -1,4 +1,9 @@
 <?php
+// Solo línea de comandos: desde el navegador este script no existe (ver CLAUDE.md, Seguridad)
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 // create_admin_db.php
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers/tenant.php';
