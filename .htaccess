@@ -25,6 +25,9 @@ Options -Indexes
     RedirectMatch 404 ^/clients/[^/]+/(_sync|_respaldos)(/|$)
     # Respaldos automáticos de todos los clientes (helpers/respaldo.php)
     RedirectMatch 404 ^/clients/_respaldos(/|$)
+    # PDFs privados: de clients/ solo se sirven los logos. Los PDFs van por pdf.php con
+    # enlace firmado que vence (helpers/pdf_acceso.php) o por download.php con sesión
+    RedirectMatch 404 "^/clients/(?![a-z0-9_]+/logo\.(png|jpe?g|gif|webp|svg)$)"
 </IfModule>
 
 # Carpetas que nunca se sirven por web: plantillas con datos (database_initial), respaldos viejos,

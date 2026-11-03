@@ -11,8 +11,7 @@ require_once __DIR__ . '/../helpers/subdomain.php';
 require_once __DIR__ . '/../helpers/admin_secret.php';
 
 // Si ya está autenticado como admin, ir directo al panel
-$allowedAdminUsers = ['admin', 'kino'];
-if (isset($_SESSION['client_code']) && in_array($_SESSION['client_code'], $allowedAdminUsers)) {
+if (!empty($_SESSION['is_admin'])) {
     header('Location: panel.php');
     exit;
 }

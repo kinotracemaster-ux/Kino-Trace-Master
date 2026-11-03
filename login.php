@@ -84,7 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
         } else {
             session_reopen();
             $_SESSION['client_code'] = $row['codigo'];
-            $_SESSION['is_admin'] = ($row['codigo'] === 'admin');
+            // El panel admin solo se abre con la clave maestra (ADMIN_SECRET), nunca con la
+            // contraseña de un cliente (antes bastaba la de "admin" o la de "kino")
+            $_SESSION['is_admin'] = false;
             // SEGURIDAD: Fingerprint de sesión
             $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
             $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';

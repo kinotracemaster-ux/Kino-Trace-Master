@@ -1,0 +1,35 @@
+# Chequeos de seguridad y respaldos en cada PR y en main.
+# Fallan si: un cliente puede ver datos o PDFs de otro, un PDF se abre sin permiso,
+# vuelve una clave escrita en el código, o restaurar un respaldo deja de funcionar.
+name: Seguridad y respaldos
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  chequeos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_sqlite, curl, zip, zlib
+          coverage: none
+
+      - name: Sintaxis PHP
+        run: |
+          find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
+
+      - name: Seguridad urgente (scripts, claves, .htaccess, datos fuera del repo)
+        run: php tests/seguridad/chequeo_urgente.php
+
+      - name: Aislamiento entre clientes (por HTTP)
+        run: php tests/seguridad/chequeo_aislamiento.php
+
+      - name: Respaldos (respaldar, desastre, restaurar)
+        run: php tests/respaldo/chequeo_respaldo.php
