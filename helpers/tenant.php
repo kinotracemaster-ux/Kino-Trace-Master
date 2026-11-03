@@ -124,61 +124,10 @@ function create_client_structure(
         mkdir($clientDir . '/uploads/facturas', 0777, true);
     }
 
-    // 2. Crear base de datos SQLite del cliente y tablas
-    $db = open_client_db($code);
-    $db->exec(
-        "CREATE TABLE IF NOT EXISTS documentos (\n"
-        . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        . "    tipo TEXT NOT NULL,\n"
-        . "    numero TEXT NOT NULL,\n"
-        . "    fecha DATE NOT NULL,\n"
-        . "    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,\n"
-        . "    proveedor TEXT,\n"
-        . "    naviera TEXT,\n"
-        . "    peso_kg REAL,\n"
-        . "    valor_usd REAL,\n"
-        . "    ruta_archivo TEXT NOT NULL,\n"
-        . "    hash_archivo TEXT,\n"
-        . "    datos_extraidos TEXT,\n"
-        . "    ai_confianza REAL,\n"
-        . "    requiere_revision INTEGER DEFAULT 0,\n"
-        . "    estado TEXT DEFAULT 'pendiente',\n"
-        . "    notas TEXT\n"
-        . ");\n"
-        . "CREATE TABLE IF NOT EXISTS codigos (\n"
-        . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        . "    documento_id INTEGER NOT NULL,\n"
-        . "    codigo TEXT NOT NULL,\n"
-        . "    descripcion TEXT,\n"
-        . "    cantidad INTEGER,\n"
-        . "    valor_unitario REAL,\n"
-        . "    validado INTEGER DEFAULT 0,\n"
-        . "    alerta TEXT,\n"
-        . "    FOREIGN KEY(documento_id) REFERENCES documentos(id) ON DELETE CASCADE\n"
-        . ");\n"
-        . "CREATE TABLE IF NOT EXISTS vinculos (\n"
-        . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        . "    documento_origen_id INTEGER NOT NULL,\n"
-        . "    documento_destino_id INTEGER NOT NULL,\n"
-        . "    tipo_vinculo TEXT NOT NULL,\n"
-        . "    codigos_coinciden INTEGER DEFAULT 0,\n"
-        . "    codigos_faltan INTEGER DEFAULT 0,\n"
-        . "    codigos_extra INTEGER DEFAULT 0,\n"
-        . "    discrepancias TEXT,\n"
-        . "    FOREIGN KEY(documento_origen_id) REFERENCES documentos(id) ON DELETE CASCADE,\n"
-        . "    FOREIGN KEY(documento_destino_id) REFERENCES documentos(id) ON DELETE CASCADE\n"
-        . ");\n"
-        . "CREATE TABLE IF NOT EXISTS configuracion_extraccion (\n"
-        . "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-        . "    prefix TEXT DEFAULT '',\n"
-        . "    terminator TEXT DEFAULT '/',\n"
-        . "    min_length INTEGER DEFAULT 4,\n"
-        . "    max_length INTEGER DEFAULT 50,\n"
-        . "    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n"
-        . ");\n"
-        . "INSERT INTO configuracion_extraccion (id, prefix, terminator, min_length, max_length) \n"
-        . "SELECT 1, '', '/', 4, 50 WHERE NOT EXISTS (SELECT 1 FROM configuracion_extraccion);"
-    );
+    // 2. Crear base de datos SQLite del cliente con todas sus tablas.
+    //    El esquema vive en UN solo lugar (client_schema_migrations): open_client_db
+    //    lo aplica, igual que a cualquier cliente existente.
+    open_client_db($code);
 
     // 3. Registrar cliente en la base de control
     // Insert the new client into the control table. Note: we do not include
@@ -508,105 +457,311 @@ function code_match_sql(string $column): string
 }
 
 /**
- * Asegura que el esquema de la base de datos del cliente esté actualizado.
- * Se ejecuta automáticamente al abrir la conexión para garantizar que todas las tablas existan.
- * Esto permite desplegar actualizaciones de esquema sin migraciones manuales complejas.
+ * MIGRACIONES DE LA BASE DE CADA CLIENTE (una sola lista para todos los clientes).
+ *
+ * Cada entrada es un paso numerado que deja la base en esa versión. La versión
+ * aplicada se guarda DENTRO de cada base (PRAGMA user_version), así:
+ *  - Una base al día no ejecuta nada (antes se corrían ~20 consultas en CADA request).
+ *  - Una base vieja (cliente nuevo, clonado, copiado de database_initial o recibido
+ *    del modo local) se pone al día sola la primera vez que se abre.
+ *  - Al publicar, docker/start.sh corre tools/migrar_clientes.php y pone al día a
+ *    TODOS los clientes antes de abrir la web (los errores salen en el log de Railway,
+ *    no en la pantalla del cliente).
+ *
+ * REGLAS (ver CLAUDE.md):
+ *  1. Para cambiar el esquema, AGREGAR un paso nuevo al final (N+1). Nunca editar ni
+ *     borrar un paso ya publicado: en producción ya corrió y no volvería a correr.
+ *  2. Cada paso debe ser idempotente (CREATE ... IF NOT EXISTS, revisar columnas con
+ *     PRAGMA table_info antes de ALTER) porque puede encontrarse bases a medio camino.
+ *  3. Solo cambios "aditivos" (tablas, columnas, índices nuevos): el código viejo debe
+ *     seguir funcionando con la base nueva mientras se publica.
+ *
+ * tools/chequeo.php prueba todos los pasos sobre copias de las bases de
+ * database_initial y sobre una base vacía antes de cada PR.
+ *
+ * @return array<int, callable(PDO):void>
+ */
+function client_schema_migrations(): array
+{
+    return [
+        // 1 — Esquema base + mejoras Feb 2026 + índice de códigos sin separadores.
+        //     (Todo lo que antes hacía ensure_client_schema en cada request.)
+        1 => function (PDO $db): void {
+            // Tablas base (antes solo las creaba create_client_structure: una base
+            // creada por otro camino quedaba sin ellas)
+            $db->exec(
+                "CREATE TABLE IF NOT EXISTS documentos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tipo TEXT NOT NULL,
+                    numero TEXT NOT NULL,
+                    fecha DATE NOT NULL,
+                    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    proveedor TEXT,
+                    naviera TEXT,
+                    peso_kg REAL,
+                    valor_usd REAL,
+                    ruta_archivo TEXT NOT NULL,
+                    hash_archivo TEXT,
+                    datos_extraidos TEXT,
+                    ai_confianza REAL,
+                    requiere_revision INTEGER DEFAULT 0,
+                    estado TEXT DEFAULT 'pendiente',
+                    notas TEXT
+                )"
+            );
+            $db->exec(
+                "CREATE TABLE IF NOT EXISTS codigos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    documento_id INTEGER NOT NULL,
+                    codigo TEXT NOT NULL,
+                    descripcion TEXT,
+                    cantidad INTEGER,
+                    valor_unitario REAL,
+                    validado INTEGER DEFAULT 0,
+                    alerta TEXT,
+                    FOREIGN KEY(documento_id) REFERENCES documentos(id) ON DELETE CASCADE
+                )"
+            );
+            $db->exec(
+                "CREATE TABLE IF NOT EXISTS vinculos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    documento_origen_id INTEGER NOT NULL,
+                    documento_destino_id INTEGER NOT NULL,
+                    tipo_vinculo TEXT NOT NULL,
+                    codigos_coinciden INTEGER DEFAULT 0,
+                    codigos_faltan INTEGER DEFAULT 0,
+                    codigos_extra INTEGER DEFAULT 0,
+                    discrepancias TEXT,
+                    FOREIGN KEY(documento_origen_id) REFERENCES documentos(id) ON DELETE CASCADE,
+                    FOREIGN KEY(documento_destino_id) REFERENCES documentos(id) ON DELETE CASCADE
+                )"
+            );
+
+            // Tabla configuracion_extraccion (Agregada en Update Feb 2026)
+            // Usada por el módulo de subida para definir patrones de códigos.
+            $db->exec(
+                "CREATE TABLE IF NOT EXISTS configuracion_extraccion (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prefix TEXT DEFAULT '',
+                    terminator TEXT DEFAULT '/',
+                    min_length INTEGER DEFAULT 4,
+                    max_length INTEGER DEFAULT 50,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )"
+            );
+
+            // Seed inicial si está vacía
+            $db->exec("INSERT OR IGNORE INTO configuracion_extraccion (id, prefix, terminator, min_length, max_length) VALUES (1, '', '/', 4, 50)");
+
+            // --- MEJORAS FEBRERO 2026: Fase Estabilidad y Practicidad ---
+
+            // 1. Tabla tipos_documento
+            $db->exec(
+                "CREATE TABLE IF NOT EXISTS tipos_documento (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    codigo TEXT NOT NULL UNIQUE,
+                    nombre TEXT NOT NULL,
+                    activo INTEGER DEFAULT 1
+                )"
+            );
+
+            // Seed de tipos base si tabla vacía
+            $count = $db->query("SELECT COUNT(*) FROM tipos_documento")->fetchColumn();
+            if ($count == 0) {
+                $db->exec("INSERT INTO tipos_documento (codigo, nombre) VALUES 
+                    ('documento', 'Documento General'),
+                    ('manifiesto', 'Manifiesto'),
+                    ('declaracion', 'Declaración'),
+                    ('factura', 'Factura')");
+            }
+
+            // 2. Tabla log_actividad
+            $db->exec(
+                "CREATE TABLE IF NOT EXISTS log_actividad (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    accion TEXT NOT NULL,
+                    detalle TEXT,
+                    ip TEXT,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                )"
+            );
+
+            // 3. Columnas nuevas en documentos (texto_extraido, estado_extraccion)
+            // Verificar primero si la tabla documentos existe (puede ser un DB nuevo aún sin tablas)
+            $tableCheck = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='documentos'")->fetchColumn();
+            if ($tableCheck) {
+                // Usamos PRAGMA para verificar existencia antes de agregar
+                $cols = $db->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
+                if (!in_array('texto_extraido', $cols)) {
+                    $db->exec("ALTER TABLE documentos ADD COLUMN texto_extraido TEXT");
+                }
+                if (!in_array('estado_extraccion', $cols)) {
+                    $db->exec("ALTER TABLE documentos ADD COLUMN estado_extraccion TEXT DEFAULT 'pendiente'");
+                }
+                if (!in_array('original_path', $cols)) {
+                    $db->exec("ALTER TABLE documentos ADD COLUMN original_path TEXT");
+                }
+
+                // --- MEJORAS FEBRERO 2026: Fase Rendimiento ---
+                // Índices para búsquedas rápidas (IF NOT EXISTS es seguro)
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_numero ON documentos(numero)");
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_tipo ON documentos(tipo)");
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_fecha ON documentos(fecha)");
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_estado ON documentos(estado)");
+            }
+
+            // Índices en otras tablas (solo si existen)
+            $codigosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='codigos'")->fetchColumn();
+            if ($codigosExists) {
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
+                // Búsqueda por código ignorando espacios/guiones/etc. (ver code_match_sql)
+                // Si no se pudiera crear, la búsqueda funciona igual (más lenta): no bloquear la BD
+                try {
+                    $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_match ON codigos(" . code_match_sql('codigo') . ")");
+                } catch (PDOException $e) {
+                    error_log('idx_codigos_match: ' . $e->getMessage());
+                }
+            }
+            $vinculosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='vinculos'")->fetchColumn();
+            if ($vinculosExists) {
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_origen ON vinculos(documento_origen_id)");
+                $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_destino ON vinculos(documento_destino_id)");
+            }
+        },
+
+        // 2 — (siguiente cambio de esquema aquí)
+    ];
+}
+
+/**
+ * Ayuda para pasos de migración: agrega una columna solo si no existe
+ * (así el paso es idempotente). Ej.: kt_add_column($db, 'documentos', 'nota_interna', 'TEXT')
+ */
+function kt_add_column(PDO $db, string $table, string $column, string $definition): void
+{
+    $cols = $db->query('PRAGMA table_info(' . $table . ')')->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array($column, $cols, true)) {
+        $db->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
+    }
+}
+
+/** Versión de esquema que espera este código (= último paso de la lista). */
+function client_schema_version(): int
+{
+    $migs = client_schema_migrations();
+    return $migs ? max(array_keys($migs)) : 0;
+}
+
+/**
+ * Pone al día el esquema de la base del cliente. Se ejecuta en cada
+ * open_client_db(), pero si la base ya está en la versión actual solo cuesta
+ * una lectura de PRAGMA user_version.
  *
  * @param PDO $db Conexión a la base de datos del cliente.
+ * @return int Versión en la que quedó la base.
  */
-function ensure_client_schema(PDO $db): void
+function ensure_client_schema(PDO $db): int
 {
-    // Tabla configuracion_extraccion (Agregada en Update Feb 2026)
-    // Usada por el módulo de subida para definir patrones de códigos.
-    $db->exec(
-        "CREATE TABLE IF NOT EXISTS configuracion_extraccion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prefix TEXT DEFAULT '',
-            terminator TEXT DEFAULT '/',
-            min_length INTEGER DEFAULT 4,
-            max_length INTEGER DEFAULT 50,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"
-    );
-
-    // Seed inicial si está vacía
-    $db->exec("INSERT OR IGNORE INTO configuracion_extraccion (id, prefix, terminator, min_length, max_length) VALUES (1, '', '/', 4, 50)");
-
-    // --- MEJORAS FEBRERO 2026: Fase Estabilidad y Practicidad ---
-
-    // 1. Tabla tipos_documento
-    $db->exec(
-        "CREATE TABLE IF NOT EXISTS tipos_documento (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo TEXT NOT NULL UNIQUE,
-            nombre TEXT NOT NULL,
-            activo INTEGER DEFAULT 1
-        )"
-    );
-
-    // Seed de tipos base si tabla vacía
-    $count = $db->query("SELECT COUNT(*) FROM tipos_documento")->fetchColumn();
-    if ($count == 0) {
-        $db->exec("INSERT INTO tipos_documento (codigo, nombre) VALUES 
-            ('documento', 'Documento General'),
-            ('manifiesto', 'Manifiesto'),
-            ('declaracion', 'Declaración'),
-            ('factura', 'Factura')");
+    $target = client_schema_version();
+    $current = (int) $db->query('PRAGMA user_version')->fetchColumn();
+    if ($current >= $target) {
+        return $current; // camino rápido: base al día
     }
 
-    // 2. Tabla log_actividad
-    $db->exec(
-        "CREATE TABLE IF NOT EXISTS log_actividad (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            accion TEXT NOT NULL,
-            detalle TEXT,
-            ip TEXT,
-            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"
-    );
-
-    // 3. Columnas nuevas en documentos (texto_extraido, estado_extraccion)
-    // Verificar primero si la tabla documentos existe (puede ser un DB nuevo aún sin tablas)
-    $tableCheck = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='documentos'")->fetchColumn();
-    if ($tableCheck) {
-        // Usamos PRAGMA para verificar existencia antes de agregar
-        $cols = $db->query("PRAGMA table_info(documentos)")->fetchAll(PDO::FETCH_COLUMN, 1);
-        if (!in_array('texto_extraido', $cols)) {
-            $db->exec("ALTER TABLE documentos ADD COLUMN texto_extraido TEXT");
+    // IMMEDIATE: si dos requests llegan a la vez, la segunda espera y luego ve
+    // la versión nueva (evita "duplicate column" por ALTER simultáneos).
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        $current = (int) $db->query('PRAGMA user_version')->fetchColumn();
+        foreach (client_schema_migrations() as $version => $step) {
+            if ($version <= $current) {
+                continue;
+            }
+            $step($db);
+            $db->exec('PRAGMA user_version = ' . (int) $version);
+            $current = $version;
         }
-        if (!in_array('estado_extraccion', $cols)) {
-            $db->exec("ALTER TABLE documentos ADD COLUMN estado_extraccion TEXT DEFAULT 'pendiente'");
-        }
-        if (!in_array('original_path', $cols)) {
-            $db->exec("ALTER TABLE documentos ADD COLUMN original_path TEXT");
-        }
-
-        // --- MEJORAS FEBRERO 2026: Fase Rendimiento ---
-        // Índices para búsquedas rápidas (IF NOT EXISTS es seguro)
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_numero ON documentos(numero)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_tipo ON documentos(tipo)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_fecha ON documentos(fecha)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_documentos_estado ON documentos(estado)");
-    }
-
-    // Índices en otras tablas (solo si existen)
-    $codigosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='codigos'")->fetchColumn();
-    if ($codigosExists) {
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_documento_id ON codigos(documento_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_codigo ON codigos(codigo)");
-        // Búsqueda por código ignorando espacios/guiones/etc. (ver code_match_sql)
-        // Si no se pudiera crear, la búsqueda funciona igual (más lenta): no bloquear la BD
+        $db->exec('COMMIT');
+    } catch (Throwable $e) {
         try {
-            $db->exec("CREATE INDEX IF NOT EXISTS idx_codigos_match ON codigos(" . code_match_sql('codigo') . ")");
-        } catch (PDOException $e) {
-            error_log('idx_codigos_match: ' . $e->getMessage());
+            $db->exec('ROLLBACK');
+        } catch (Throwable $ignored) {
+        }
+        throw new RuntimeException("Migración de esquema falló (versión " . ($current + 1) . "): " . $e->getMessage(), 0, $e);
+    }
+    return $current;
+}
+
+/**
+ * Versión de esquema de una base SIN abrirla para escribir (no migra ni crea nada).
+ * Devuelve null si la base no existe o no se puede leer.
+ */
+function client_schema_version_of(string $code): ?int
+{
+    $path = client_db_path(sanitize_code($code));
+    if (!is_file($path)) {
+        return null;
+    }
+    try {
+        $ro = new PDO('sqlite:' . $path, null, null, [PDO::SQLITE_ATTR_OPEN_FLAGS => PDO::SQLITE_OPEN_READONLY]);
+        return (int) $ro->query('PRAGMA user_version')->fetchColumn();
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Pone al día la base de TODOS los clientes (los registrados en central.db y
+ * cualquier carpeta clients/{codigo}/{codigo}.db). No crea bases que no existen.
+ * La usan tools/migrar_clientes.php (al arrancar cada deploy) y el panel admin.
+ *
+ * @return array<string, array{antes:?int, despues:?int, ok:bool, error:?string}>
+ */
+function migrate_all_clients(): array
+{
+    global $centralDb;
+    $codes = [];
+    if ($centralDb instanceof PDO) {
+        foreach ($centralDb->query('SELECT codigo FROM control_clientes')->fetchAll(PDO::FETCH_COLUMN) as $c) {
+            $codes[sanitize_code((string) $c)] = true;
         }
     }
-    $vinculosExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='vinculos'")->fetchColumn();
-    if ($vinculosExists) {
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_origen ON vinculos(documento_origen_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_vinculos_destino ON vinculos(documento_destino_id)");
+    foreach (glob(CLIENTS_DIR . DIRECTORY_SEPARATOR . '*', GLOB_ONLYDIR) ?: [] as $dir) {
+        $c = basename($dir);
+        if ($c === sanitize_code($c) && is_file(client_db_path($c))) {
+            $codes[$c] = true;
+        }
     }
+    ksort($codes);
+
+    $report = [];
+    foreach (array_keys($codes) as $code) {
+        if ($code === '') {
+            continue;
+        }
+        $before = client_schema_version_of($code);
+        if ($before === null) {
+            $report[$code] = ['antes' => null, 'despues' => null, 'ok' => true, 'error' => 'sin base (aún no tiene datos)'];
+            continue;
+        }
+        try {
+            $db = open_client_db($code); // migra si hace falta
+            $check = (string) $db->query('PRAGMA quick_check')->fetchColumn();
+            $after = (int) $db->query('PRAGMA user_version')->fetchColumn();
+            $db = null;
+            $ok = ($check === 'ok' && $after >= client_schema_version());
+            $report[$code] = [
+                'antes' => $before,
+                'despues' => $after,
+                'ok' => $ok,
+                'error' => $check === 'ok' ? null : 'quick_check: ' . $check,
+            ];
+        } catch (Throwable $e) {
+            $report[$code] = ['antes' => $before, 'despues' => client_schema_version_of($code), 'ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+    return $report;
 }
 
 /**
