@@ -630,7 +630,16 @@ function client_schema_migrations(): array
             }
         },
 
-        // 2 — (siguiente cambio de esquema aquí)
+        // 2 — Conteo de códigos validados sin recorrer toda la tabla (la portada lo
+        //     muestra en cada visita; con 740 mil códigos tardaba ~26 ms, ahora <1 ms).
+        2 => function (PDO $db): void {
+            $cols = $db->query('PRAGMA table_info(codigos)')->fetchAll(PDO::FETCH_COLUMN, 1);
+            if (in_array('validado', $cols, true)) {
+                $db->exec('CREATE INDEX IF NOT EXISTS idx_codigos_validado ON codigos(documento_id) WHERE validado = 1');
+            }
+        },
+
+        // 3 — (siguiente cambio de esquema aquí)
     ];
 }
 
@@ -749,6 +758,12 @@ function migrate_all_clients(): array
             $db = open_client_db($code); // migra si hace falta
             $check = (string) $db->query('PRAGMA quick_check')->fetchColumn();
             $after = (int) $db->query('PRAGMA user_version')->fetchColumn();
+            // Actualiza las estadísticas que usa SQLite para elegir índices (barato:
+            // solo analiza lo que cambió mucho). Si falla no importa.
+            try {
+                $db->exec('PRAGMA optimize');
+            } catch (Throwable $ignored) {
+            }
             $db = null;
             $ok = ($check === 'ok' && $after >= client_schema_version());
             $report[$code] = [

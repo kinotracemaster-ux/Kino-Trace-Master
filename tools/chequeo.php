@@ -11,7 +11,9 @@
  * 4. Vuelve a correr TODOS los pasos sobre bases ya migradas (deben ser
  *    idempotentes: así se comportan en producción si algo quedó a medio camino).
  * 5. Crea un cliente nuevo vacío y revisa que tenga el esquema completo.
- * 6. Si PHPUnit está instalado, corre los tests.
+ * 6. Las búsquedas frecuentes (código, voraz, sugerencias, listado, portada) usan
+ *    índices sobre la base de cliente más grande: falla si alguna recorre todos los códigos.
+ * 7. Si PHPUnit está instalado, corre los tests.
  *
  * Código de salida 0 = todo bien; 1 = no publicar.
  */
@@ -158,7 +160,70 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-$paso('5. Tests (PHPUnit)');
+$paso('5. Las búsquedas frecuentes usan índices (no recorren todos los códigos)');
+// Se corren las funciones reales sobre la base de cliente más grande y se anota cada
+// consulta que hacen; después se pide a SQLite su plan. Si alguna recorre la tabla
+// codigos entera ("SCAN codigos" sin índice) el chequeo falla: con muchos códigos
+// esa página se vuelve lenta para el cliente.
+require_once $root . '/helpers/search_engine.php';
+class KtPdoEspia extends PDO
+{
+    public array $consultas = [];
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        $this->consultas[] = $query;
+        return parent::prepare($query, $options);
+    }
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
+    {
+        $this->consultas[] = $query;
+        return $fetchMode === null ? parent::query($query) : parent::query($query, $fetchMode, ...$fetchModeArgs);
+    }
+}
+$mayor = null;
+foreach ($report as $code => $r) {
+    if ($r['ok'] && $r['despues'] !== null && ($mayor === null || filesize(client_db_path($code)) > filesize(client_db_path($mayor)))) {
+        $mayor = $code;
+    }
+}
+if ($mayor === null) {
+    $mal('no hay base de cliente para revisar los planes de consulta');
+} else {
+    $espia = new KtPdoEspia('sqlite:' . client_db_path($mayor));
+    $espia->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $muestra = (string) ($espia->query('SELECT codigo FROM codigos LIMIT 1')->fetchColumn() ?: 'BL-1258');
+    $espia->consultas = [];
+    $funciones = [
+        'buscar por código' => fn() => search_by_code($espia, $muestra),
+        'búsqueda voraz' => fn() => greedy_search($espia, [$muestra, 'NO-EXISTE-1']),
+        'sugerencias' => fn() => suggest_codes($espia, substr($muestra, 0, 3)),
+        'listado de documentos' => fn() => kt_listar_documentos($espia, '', 50, 0),
+        'estadísticas (portada)' => fn() => get_search_stats($espia),
+    ];
+    foreach ($funciones as $nombre => $f) {
+        $espia->consultas = [];
+        $f();
+        $consultas = $espia->consultas;
+        $malas = [];
+        foreach ($consultas as $sql) {
+            $st = $espia->prepare('EXPLAIN QUERY PLAN ' . $sql);
+            $st->execute(array_fill(0, substr_count($sql, '?'), 'X'));
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $fila) {
+                if (preg_match('/^SCAN (codigos|c)\b(?! USING)/', $fila['detail'])) {
+                    $malas[] = trim(preg_replace('/\s+/', ' ', $sql));
+                }
+            }
+        }
+        if ($malas) {
+            $mal("{$nombre} recorre todos los códigos sin índice: " . substr($malas[0], 0, 160));
+        } else {
+            echo "  OK {$nombre} (" . count($consultas) . " consultas)\n";
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+$paso('6. Tests (PHPUnit)');
 $phpunit = $root . '/vendor/bin/phpunit';
 if (is_file($phpunit)) {
     passthru($php . ' ' . escapeshellarg($phpunit) . ' -c ' . escapeshellarg($root . '/phpunit.xml'), $code);

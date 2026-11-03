@@ -192,7 +192,8 @@ Todos extienden `BaseController` (`__construct($db,$clientCode)`, `jsonExit($dat
 - `greedy_search($db, array $codes)` — algoritmo voraz real: en cada iteración selecciona el documento que cubre más códigos restantes (empate → doc más reciente por fecha), hasta cubrir todos o agotar candidatos. Devuelve `{documents, covered, not_found, total_searched, total_covered}`. Sin caché.
 - `fulltext_search($db, $query)` — `LIKE` case-insensitive sobre `datos_extraidos`/`numero`, límite 200.
 - `search_in_pdf_content($db, $searchTerm, $clientCode)` — extrae texto en vivo de cada PDF y busca coincidencias con snippet (no usado por `api.php`, es de uso interno/legacy).
-- `suggest_codes($db, $term, $limit=10)` — autocompletado `LIKE 'term%'`.
+- `suggest_codes($db, $term, $limit=10)` — autocompletado por prefijo de `code_match_key()` (rango sobre `idx_codigos_match`, sin `LIKE`). Lo usan `api.php` y `Buscador/api_public.php`.
+- `kt_listar_documentos($db, $tipo, $perPage, $offset)` — página del listado (`DocumentController::list`): elige los documentos y después junta sus códigos.
 - `get_search_stats($db)` — stats para dashboard.
 
 Entrada real de usuario: `SearchController::search()` toma el textarea `#bulkInput` de `index.php` (tab Voraz), separa por línea, toma solo el **primer token** de cada línea (para pegar tablas tipo Excel con descripción en columnas siguientes), normaliza con `normalize_code_token()`, y llama `greedy_search()`.
@@ -258,7 +259,7 @@ Entrada real de usuario: `SearchController::search()` toma el textarea `#bulkInp
 | `excel_import/` | Standalone (`process.php` propio) | Importación CSV/XLSX con heurística de columnas (`archivo/nombre/documento`↔`codigo/code`). |
 | `importar/`, `importar_datos/`, `restaurar_sistema/` | Standalone | Tres variantes solapadas de "importar SQL + ZIP de PDFs" (ver §0). `importar_datos/link_zip_admin.php` es variante multi-cliente solo para `admin`/`kino`. |
 | `indexar/` | **Sí usa `api.php`** | Loop de `action=reindex_documents&batch=N` hasta agotar pendientes. |
-| `lote/` | Standalone | Subida masiva vía ZIP con extracción opcional, usa `pdf_extractor.php` directo. |
+| `lote/` | Standalone | Subida masiva vía ZIP con extracción opcional, usa `pdf_extractor.php` directo. Documento + códigos en una transacción; la carpeta (`doc_type`) pasa por `sanitize_code()`. |
 | `mantenimiento/organizar.php` | Standalone | Reubica PDFs a `uploads/<tipo>/` según BD, usa `resolve_pdf_path()`. |
 | `recientes/` | Endpoint propio `api_recientes.php` | Lista paginada de documentos recientes con conteo de códigos. |
 | `resaltar/` | `index.php` usa `api.php?action=fulltext_search`; el resto (`viewer.php`, `ocr_text.php`, `download.php`, `generate_unified.php`) son endpoints propios | Visor PDF.js con resaltado (primero busca en la capa de texto del PDF en el navegador, sin servidor; solo las páginas escaneadas van a `ocr_text.php`; botón "Buscar faltantes con OCR" para códigos dentro de imágenes), OCR con coordenadas, generación de PDF unificado para resultados de la búsqueda voraz. Es el módulo que abre `index.php` (raíz) al hacer clic en "Resaltar"/"PDF Unificado" desde el tab Voraz. Si el PDF de un documento no aparece, `download.php` y `viewer.php` redirigen a `pdf_faltante.php`: buscarlo en el servidor (`relinkFromServer` solo para ese documento) o subirlo de nuevo; al lograrlo vuelve a la página de origen. |

@@ -80,15 +80,9 @@ switch ($action) {
             exit;
         }
 
-        $stmt = $db->prepare("
-            SELECT DISTINCT codigo
-            FROM codigos
-            WHERE codigo LIKE ?
-            ORDER BY codigo ASC
-            LIMIT 10
-        ");
-        $stmt->execute([$term . '%']);
-        echo json_encode($stmt->fetchAll(PDO::FETCH_COLUMN));
+        // Misma función que el buscador interno (usa el índice de códigos)
+        require_once __DIR__ . '/../../helpers/search_engine.php';
+        echo json_encode(suggest_codes($db, $term, 10));
         break;
 
     default:
