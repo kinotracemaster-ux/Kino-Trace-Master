@@ -85,6 +85,13 @@ while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - KINO TRACE</title>
     <link rel="stylesheet" href="../../assets/css/styles.css">
+    <style>
+        /* Celular: una columna, y las tablas hacen scroll dentro de su tarjeta */
+        @media (max-width: 768px) {
+            .dash-dos-columnas { grid-template-columns: minmax(0, 1fr) !important; }
+            .dash-dos-columnas .card { min-width: 0; overflow-x: auto; }
+        }
+    </style>
 </head>
 
 <body>
@@ -240,7 +247,7 @@ while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
                 </div>
 
                 <!-- Recent Documents & Stats by Type -->
-                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+                <div class="dash-dos-columnas" style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
                     <!-- Recent Documents -->
                     <div class="card">
                         <div class="card-header">

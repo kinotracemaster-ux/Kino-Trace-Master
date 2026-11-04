@@ -1,0 +1,35 @@
+# Chequeo de UX en un navegador de verdad (celular y computador) en cada PR y en main.
+# Falla si: una pantalla se sale de lado en el celular, una casilla hace zoom en iPhone,
+# hay errores de JavaScript, "Validar" vuelve a ser pesada, el resaltado no aparece o
+# no cae sobre el código, la hoja del PDF no cabe en la pantalla o el CSV no descarga.
+name: UX
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  navegador:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_sqlite, curl, zip, zlib
+          coverage: none
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar navegador de pruebas
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: UX en celular y computador
+        run: node tests/ux/chequeo_ux.js

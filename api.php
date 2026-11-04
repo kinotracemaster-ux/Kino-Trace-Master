@@ -130,6 +130,9 @@ try {
         case 'get':
             (new DocumentController($db, $clientCode))->get($_GET);
             break;
+        case 'export_csv':
+            (new DocumentController($db, $clientCode))->exportCsv($_GET);
+            break;
 
         // Search Operations
         case 'search':

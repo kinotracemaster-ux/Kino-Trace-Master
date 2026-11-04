@@ -27,6 +27,9 @@ if (!isset($_SESSION['client_code'])) {
 $code = $_SESSION['client_code'];
 $db = open_client_db($code);
 $stats = get_search_stats($db);
+// Tipos que de verdad tiene este cliente, para el filtro de "Consultar"
+// (antes eran fijos: declaración/factura/otro, y no servían a quien sube manifiestos o importa CSV)
+$tiposDoc = $db->query("SELECT tipo, COUNT(*) AS n FROM documentos WHERE tipo IS NOT NULL AND tipo <> '' GROUP BY tipo ORDER BY n DESC")->fetchAll(PDO::FETCH_KEY_PAIR);
 
 // For sidebar - Nueva estructura
 $currentSection = 'voraz';
@@ -488,14 +491,14 @@ Se extraerán solo los códigos de la izquierda."></textarea>
 
                     <!-- Sección: Consultar -->
                     <div class="section-content" id="section-consultar">
-                        <div class="flex justify-between items-center mb-4">
+                        <div class="flex justify-between items-center mb-4" style="flex-wrap: wrap; gap: 0.5rem;">
                             <h3>Lista de Documentos</h3>
-                            <div class="flex gap-2">
+                            <div class="flex gap-2" style="flex-wrap: wrap;">
                                 <select class="form-select" id="filterTipo" style="width: auto;">
                                     <option value="">Todos los tipos</option>
-                                    <option value="declaracion">📄 Declaraciones</option>
-                                    <option value="factura">💰 Facturas</option>
-                                    <option value="otro">📁 Otros</option>
+                                    <?php foreach ($tiposDoc as $t => $n): ?>
+                                        <option value="<?= htmlspecialchars($t) ?>"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $t))) ?> (<?= number_format($n) ?>)</option>
+                                    <?php endforeach; ?>
                                 </select>
                                 <button class="btn btn-secondary" onclick="downloadCSV()">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
@@ -802,6 +805,9 @@ Se extraerán solo los códigos de la izquierda."></textarea>
             }
         }
 
+        // Códigos de cada documento de la página (se dibujan al abrir "Ver Códigos")
+        const codigosPorDoc = {};
+
         function renderDocumentsTable(result) {
             const tbody = document.getElementById('documentsTbody');
 
@@ -810,10 +816,11 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                 return;
             }
 
+            result.data.forEach(doc => { codigosPorDoc[doc.id] = doc.codes || []; });
             tbody.innerHTML = result.data.map(doc => `
                 <tr>
-                    <td><span class="badge badge-primary">${doc.tipo.toUpperCase()}</span></td>
-                    <td>${doc.numero}</td>
+                    <td><span class="badge badge-primary">${escapeForAttr(String(doc.tipo || '').toUpperCase())}</span></td>
+                    <td>${escapeForAttr(doc.numero)}</td>
                     <td>${doc.fecha}</td>
                     <td>${doc.proveedor || '-'}</td>
                     <td><span class="code-tag">${doc.codes.length}</span></td>
@@ -844,9 +851,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                     <td colspan="6">
                          <div style="padding: 1rem;">
                             <strong>Códigos vinculados:</strong>
-                            <div class="codes-list" style="margin-top: 0.5rem; max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; flex-wrap: nowrap; gap: 0; background: white; padding: 0.5rem; border: 1px solid #f0f0f0; border-radius: 4px; user-select: text; cursor: text;">
-                                ${doc.codes.map(c => `<div style="font-family: inherit; font-size: 0.9rem; padding: 2px 0; color: #374151; width: 100%; display: block; user-select: text;">${c}</div>`).join('')}
-                            </div>
+                            <div class="codes-list" id="codes-list-${doc.id}" style="margin-top: 0.5rem; max-height: 400px; overflow-y: auto; display: block; white-space: pre-line; font-size: 0.9rem; line-height: 1.6; color: #374151; background: white; padding: 0.5rem; border: 1px solid #f0f0f0; border-radius: 4px; user-select: text; cursor: text;"></div>
                         </div>
                     </td>
                 </tr>
@@ -970,24 +975,6 @@ Se extraerán solo los códigos de la izquierda."></textarea>
         }
 
         // ============ Toggle Codes Row ============
-        function toggleTableCodes(event, docId) {
-            event.preventDefault();
-            const codesRow = document.getElementById('codes-row-' + docId);
-            const btn = document.getElementById('btn-codes-' + docId);
-
-            if (codesRow.classList.contains('hidden')) {
-                codesRow.classList.remove('hidden');
-                btn.textContent = 'Ocultar Códigos';
-                btn.classList.add('btn-primary');
-                btn.classList.remove('btn-secondary');
-            } else {
-                codesRow.classList.add('hidden');
-                btn.textContent = 'Ver Códigos';
-                btn.classList.remove('btn-primary');
-                btn.classList.add('btn-secondary');
-            }
-        }
-
         // ============ Full-Text Search in PDFs ============
         const fulltextInput = document.getElementById('fulltextSearch');
 
@@ -1111,10 +1098,10 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                 html += `
                     <div class="result-card">
                         <div class="result-header">
-                            <span class="badge badge-primary">${doc.tipo.toUpperCase()}</span>
+                            <span class="badge badge-primary">${escapeForAttr(String(doc.tipo || '').toUpperCase())}</span>
                             <span class="result-meta">${doc.fecha} · ${doc.occurrences} coincidencia(s)</span>
                         </div>
-                        <div class="result-title">${doc.numero}</div>
+                        <div class="result-title">${escapeForAttr(doc.numero)}</div>
                         ${(() => {
                             const m = doc.motivo || {};
                             const lines = [];
@@ -1258,7 +1245,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
 
                     if (suggestions.length > 0) {
                         suggestionsDiv.innerHTML = suggestions.map(s =>
-                            `<div class="suggestion-item" onclick="selectCode('${s}')">${s}</div>`
+                            `<div class="suggestion-item" data-code="${escapeForAttr(s)}" onclick="selectCode(this.dataset.code)">${escapeForAttr(s)}</div>`
                         ).join('');
                         suggestionsDiv.classList.remove('hidden');
                     } else {
@@ -1301,10 +1288,10 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                     return `
                         <div class="result-card">
                             <div class="result-header">
-                                <span class="badge badge-primary">${doc.tipo.toUpperCase()}</span>
+                                <span class="badge badge-primary">${escapeForAttr(String(doc.tipo || '').toUpperCase())}</span>
                                 <span class="result-meta">${doc.fecha}</span>
                             </div>
-                            <div class="result-title">${doc.numero}</div>
+                            <div class="result-title">${escapeForAttr(doc.numero)}</div>
                             ${motivoBox([doc.exacta == 0
                                 ? { text: `🏷️ Tiene registrado el código <b>${escapeForAttr(doc.codigo_encontrado)}</b>, escrito distinto a lo que buscaste (${escapeForAttr(code)})`, aviso: true }
                                 : { text: `🏷️ Tiene registrado el código <b>${escapeForAttr(doc.codigo_encontrado)}</b>` }])}
@@ -1348,6 +1335,11 @@ Se extraerán solo los códigos de la izquierda."></textarea>
             const btn = document.getElementById(`btn-codes-${docId}`);
 
             if (row.classList.contains('hidden')) {
+                const lista = document.getElementById(`codes-list-${docId}`);
+                if (lista && !lista.dataset.listo) {
+                    lista.textContent = (codigosPorDoc[docId] || []).join('\n');
+                    lista.dataset.listo = '1';
+                }
                 row.classList.remove('hidden');
                 btn.textContent = 'Ocultar Códigos';
                 btn.style.backgroundColor = '#d1d5db'; // Un gris más oscuro para indicar activo
@@ -1783,18 +1775,12 @@ Se extraerán solo los códigos de la izquierda."></textarea>
             document.getElementById('bulkResults').classList.add('hidden');
         }
         // ============ Highlighter Modal Function ============
+        // Abre el visor resaltado en otra pestaña. Antes además tapaba esta página
+        // 3 segundos con un aviso "Estamos resaltando..." que no esperaba nada.
+        // Si el navegador bloquea la pestaña nueva (pasa en celulares), abre aquí mismo.
         function openHighlighter(url) {
-            // Show modal
-            const modal = document.getElementById('highlighterModal');
-            modal.classList.remove('hidden');
-
-            // Open in new tab
-            window.open(url, '_blank');
-
-            // Auto-hide modal after 3 seconds
-            setTimeout(() => {
-                modal.classList.add('hidden');
-            }, 3000);
+            const w = window.open(url, '_blank');
+            if (!w) window.location.href = url;
         }
 
         /**
@@ -1838,21 +1824,6 @@ Se extraerán solo los códigos de la izquierda."></textarea>
 
     </script>
 
-    <!-- Highlighter Loading Modal -->
-    <div id="highlighterModal" class="hidden"
-        style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-        <div
-            style="background: white; padding: 2rem 3rem; border-radius: 12px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🖍️</div>
-            <h3 style="margin: 0 0 0.5rem 0; color: #333;">Estamos resaltando...</h3>
-            <p style="margin: 0; color: #666;">¡Espera un momento!</p>
-            <div style="margin-top: 1rem;">
-                <div class="spinner"
-                    style="border: 3px solid #f3f3f3; border-top: 3px solid #038802; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto;">
-                </div>
-            </div>
-        </div>
-    </div>
 </body>
 
 </html>
