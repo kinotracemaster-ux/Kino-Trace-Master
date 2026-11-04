@@ -64,6 +64,7 @@ $docs = $db->query("SELECT id, tipo, numero, fecha FROM documentos ORDER BY fech
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vincular Documentos</title>
 <link rel="stylesheet" href="../../assets/css/styles.css">
 <style>

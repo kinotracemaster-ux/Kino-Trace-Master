@@ -176,7 +176,23 @@ $docIdForOcr = $documentId; // For OCR fallback
 
         @media (max-width: 900px) {
             .viewer-container {
-                grid-template-columns: 1fr;
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            /* En celular el panel va arriba y NO se queda pegado: antes ocupaba
+               dos tercios de la pantalla encima del PDF al bajar al resaltado */
+            .viewer-sidebar {
+                position: static !important;
+                max-height: none !important;
+            }
+
+            .viewer-sidebar textarea {
+                min-height: 0;
+                height: 4.5rem;
+            }
+
+            .viewer-main {
+                padding: 0.5rem !important;
             }
         }
 
@@ -668,7 +684,11 @@ $docIdForOcr = $documentId; // For OCR fallback
         const docIdForOcr = <?= $docIdForOcr ?>;
         const fileForOcr = '<?= addslashes($relativePath) ?>';
         const container = document.getElementById('pdfContainer');
-        const scale = 1.5;
+        // Tamaño de la hoja: 1.5 como máximo, pero nunca más ancha que el espacio
+        // disponible (antes en el celular la hoja se salía por los dos lados y la
+        // parte izquierda no se podía ver). Se calcula al abrir el PDF.
+        const MAX_SCALE = 1.5;
+        let scale = MAX_SCALE;
         let pdfDoc = null;
 
         // Scroll al primer resaltado (una sola vez)
@@ -897,6 +917,9 @@ $docIdForOcr = $documentId; // For OCR fallback
 
                 // Esqueletos con el tamaño real de la página 1 (evita saltos de scroll)
                 const firstPage = await pdfDoc.getPage(1);
+                const vp1 = firstPage.getViewport({ scale: 1 });
+                const disponible = (container.clientWidth || window.innerWidth) - 4;
+                scale = Math.max(0.3, Math.min(MAX_SCALE, disponible / vp1.width));
                 const baseViewport = firstPage.getViewport({ scale });
                 for (let i = 1; i <= numPages; i++) createPagePlaceholder(i, baseViewport);
 
@@ -1119,14 +1142,19 @@ $docIdForOcr = $documentId; // For OCR fallback
                 wrapper.style.width = viewport.width + 'px';
                 wrapper.style.height = viewport.height + 'px';
 
-                // 1. Canvas — renderizar PDF visualmente
+                // 1. Canvas — renderizar PDF visualmente. Pantallas de alta densidad
+                // (celulares, Retina): canvas × DPR para que el texto se vea nítido y
+                // se pueda ampliar con los dedos (máx. ×3 para no gastar memoria).
+                const dpr = Math.min(window.devicePixelRatio || 1, 3);
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
+                canvas.width = Math.round(viewport.width * dpr);
+                canvas.height = Math.round(viewport.height * dpr);
+                canvas.style.width = viewport.width + 'px';
+                canvas.style.height = viewport.height + 'px';
                 wrapper.appendChild(canvas);
 
-                await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+                await page.render({ canvasContext: ctx, viewport: viewport, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null }).promise;
 
                 // MARCAR COMO RENDERIZADO (Vital para el CSS de impresión)
                 wrapper.setAttribute('data-rendered', 'true');
@@ -1168,8 +1196,9 @@ $docIdForOcr = $documentId; // For OCR fallback
             badge.textContent = `✅ ${result.match_count} encontrado(s)`;
             wrapper.appendChild(badge);
 
-            const canvasWidth = canvas.width;
-            const canvasHeight = canvas.height;
+            // Tamaño CSS del canvas (no el físico × DPR)
+            const canvasWidth = parseFloat(canvas.style.width) || canvas.width;
+            const canvasHeight = parseFloat(canvas.style.height) || canvas.height;
             const scaleX = canvasWidth / result.image_width;
             const scaleY = canvasHeight / result.image_height;
 

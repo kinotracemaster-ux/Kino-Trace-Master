@@ -1067,6 +1067,40 @@ foreach ($clients as $cli) {
         .modal h3 {
             margin-bottom: 1rem;
         }
+
+        /* ═══════ CELULAR: que nada se salga de la pantalla ═══════ */
+        @media (max-width: 768px) {
+            .admin-header {
+                flex-wrap: wrap;
+                gap: 0.75rem;
+                padding: 0.75rem 1rem;
+            }
+
+            .admin-header > .flex {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .admin-container {
+                padding: 1rem;
+            }
+
+            .clients-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            /* Botones cómodos para el dedo (mínimo ~40px de alto) */
+            .btn {
+                min-height: 40px;
+            }
+
+            /* iPhone hace zoom al tocar una casilla con letra menor a 16px */
+            input:not([type=checkbox]):not([type=radio]),
+            select,
+            textarea {
+                font-size: 16px !important;
+            }
+        }
     </style>
 </head>
 

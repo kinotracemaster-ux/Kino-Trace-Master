@@ -251,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['codigo'])) {
             <h3>🔐 Acceso Administrador</h3>
             <form method="post">
                 <div class="form-group">
-                    <input type="password" name="admin_secret" class="form-input" placeholder="•••" maxlength="10"
+                    <input type="password" name="admin_secret" class="form-input" placeholder="•••" autocomplete="off"
                         autofocus>
                     <?php if ($adminError): ?>
                         <p class="admin-error"><?= htmlspecialchars($adminError) ?></p>

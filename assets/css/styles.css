@@ -317,6 +317,9 @@ button {
 /* Main Content Area */
 .main-content {
     flex: 1;
+    /* Sin esto, una tabla o un PDF ancho estira toda la página y en el celular
+       se sale de la pantalla: con min-width 0 el contenido ancho hace scroll dentro de su caja */
+    min-width: 0;
     margin-left: var(--sidebar-width);
     transition: margin-left var(--transition-normal);
 }
@@ -902,8 +905,29 @@ button {
         visibility: visible;
     }
 
+    /* Cifras en una fila compacta: antes las 3 tarjetas ocupaban toda la primera
+       pantalla del celular y la búsqueda quedaba abajo, fuera de la vista */
     .stats-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+        gap: 0.5rem;
+        margin-bottom: 1rem !important;
+    }
+
+    .stat-card {
+        padding: 0.6rem 0.75rem;
+        gap: 0;
+    }
+
+    .stat-icon {
+        display: none;
+    }
+
+    .stat-value {
+        font-size: 1.15rem;
+    }
+
+    .stat-label {
+        font-size: 0.72rem;
     }
 
     .tabs {
@@ -916,6 +940,13 @@ button {
 
     .page-content {
         padding: 1rem;
+    }
+
+    /* iPhone hace zoom al tocar una casilla con letra menor a 16px */
+    input:not([type=checkbox]):not([type=radio]),
+    select,
+    textarea {
+        font-size: 16px !important;
     }
 }
 

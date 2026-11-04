@@ -261,6 +261,36 @@ class DocumentController extends BaseController
         ]);
     }
 
+    /**
+     * Descarga los documentos (con sus códigos) en CSV para abrir en Excel: una fila
+     * por código, separado por ";" y con BOM UTF-8 (así Excel en español lo abre bien).
+     * Se escribe fila por fila: no carga toda la base en memoria.
+     */
+    public function exportCsv($get)
+    {
+        $tipo = (string) ($get['tipo'] ?? '');
+        $where = $tipo !== '' ? 'WHERE LOWER(d.tipo) = LOWER(?)' : '';
+        $stmt = $this->db->prepare("SELECT d.tipo, d.numero, d.fecha, d.proveedor, c.codigo, c.descripcion, c.validado
+            FROM documentos d LEFT JOIN codigos c ON c.documento_id = d.id
+            $where ORDER BY d.fecha DESC, d.id DESC, c.id");
+        $stmt->execute($tipo !== '' ? [$tipo] : []);
+
+        $nombre = 'documentos_' . preg_replace('/[^a-z0-9_]/i', '', $this->clientCode)
+            . ($tipo !== '' ? '_' . preg_replace('/[^a-z0-9_]/i', '', $tipo) : '') . '_' . date('Y-m-d') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $nombre . '"');
+        header('Cache-Control: no-store');
+        $out = fopen('php://output', 'w');
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, ['Tipo', 'Documento', 'Fecha', 'Proveedor', 'Código', 'Descripción', 'Validado'], ';');
+        while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+            fputcsv($out, [$r['tipo'], $r['numero'], $r['fecha'], $r['proveedor'], $r['codigo'], $r['descripcion'],
+                $r['codigo'] === null ? '' : ((int) $r['validado'] ? 'Sí' : 'No')], ';');
+        }
+        fclose($out);
+        exit;
+    }
+
     public function list($get)
     {
         $page = max(1, (int) ($get['page'] ?? 1));

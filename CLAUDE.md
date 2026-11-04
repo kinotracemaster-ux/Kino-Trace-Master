@@ -11,7 +11,7 @@ KINO TRACE — sistema PHP multi-cliente (multi-tenant) de gestión documental p
 - Usuario escribe en español: responder en español, explicaciones simples (está aprendiendo git).
 - **Una rama por tarea, PR a `main`, nunca commit directo a `main`.** Guía completa: `docs/FLUJO_RAMAS.md`.
 - Este archivo es la memoria del proyecto: leerlo antes de explorar el código y actualizarlo en el mismo PR si algo aquí deja de ser cierto. Para detalle, `MAPA_TECNICO.md` en vez de recorrer el repo.
-- Prioridades actuales: 1) velocidad del resaltado (`modules/resaltar/`, PR #12), 2) responsive, 3) seguridad.
+- Prioridades actuales: 1) velocidad del resaltado (`modules/resaltar/`, PR #12), 2) responsive (ver "UX y celular"), 3) seguridad.
 
 ## Commands
 
@@ -96,6 +96,12 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 ### Motor de búsqueda voraz (`helpers/search_engine.php`)
 
 `greedy_search()`: dado un set de códigos buscados, selecciona iterativamente el documento que cubre más códigos pendientes hasta cubrir todos o agotar candidatos — devuelve el conjunto mínimo de documentos. Complementado por `search_by_code()`, `fulltext_search()`, `suggest_codes()`. `search_by_code()` y `greedy_search()` van **sin caché** a propósito (antes cacheaban 5–10 min sin invalidar al subir/borrar/re-enlazar: un PDF recién subido "no aparecía"). No volver a cachearlas sin borrar la caché en cada escritura. Comparan códigos **ignorando espacios, guiones, puntos, comas, `;`, `:`, `_` y `/`** (`code_match_key()` / `code_match_sql()` en `helpers/tenant.php`, índice por expresión `idx_codigos_match`): en Los Montañeros el mismo código está guardado como "BL-1258" y "BL1258", "DS 230166" y "DS230166", o "NS377675,". Los códigos se guardan y muestran **tal como los escribió el cliente** (a veces usa puntos/guiones/espacios para distinguir productos): la coincidencia exacta tiene prioridad (`exacta=1`, sale primero; en la voraz, si existe la escritura exacta solo cuentan esos documentos) y las variantes solo se suman en la búsqueda por código, marcadas "Escrito en el documento como…". Cualquier consulta nueva por código debe usar esas dos funciones (también `Buscador/api_public.php`). Las sugerencias mientras se escribe (`suggest_codes()`, interno y público) siguen la misma regla: "bl1" sugiere "BL-1258". Cada resultado muestra **"Por qué aparece"** (`motivoBox()` en `index.php`): búsqueda por código y voraz usan `exacta` / `match_info`; "Buscar en Contenido" (`fulltextSearch`, busca en el texto del PDF) devuelve `motivo` {codigos registrados que contienen lo buscado, nombre, veces en el texto}, así se ve cuando un documento sale solo porque el código está en su texto (p. ej. la factura que lista los productos).
+
+### UX y celular (chequeo en navegador real)
+
+- `tests/ux/chequeo_ux.js` (Playwright, CI: `.github/workflows/ux.yml`) abre 14 pantallas en iPhone 13 y en computador sobre la plantilla `kino` y falla si: alguna **se sale de lado** en el celular, alguna casilla tiene letra **< 16px** (iPhone hace zoom), hay **errores de JavaScript**, **Validar** pesa > 500 KB o tarda > 3 s, el **resaltado** no aparece / no cae sobre el código / la hoja no cabe en la pantalla, o el **CSV** no descarga. Local: `npm install --no-save playwright@1.63.0 && node tests/ux/chequeo_ux.js` (sin internet: `KT_CDN_LOCAL=carpeta/con/pdf.min.js`).
+- Reglas: `.main-content` lleva `min-width: 0` (si no, una tabla o PDF ancho estira toda la página); tablas anchas dentro de un contenedor con `overflow-x: auto`; en ≤768px las casillas van a 16px (`styles.css`); toda página con `<meta name="viewport">`; listados largos **siempre paginados** (nunca dibujar todos los códigos).
+- Visores de PDF: la hoja se ajusta al ancho disponible (máx. escala 1.5) y el canvas se dibuja × `devicePixelRatio` (nítido al ampliar); los resaltados se posicionan con el tamaño **CSS** del canvas, no el físico. En celular el panel lateral del visor no es `sticky` (tapaba el PDF).
 
 ### Resaltado de PDFs (visor interno y público)
 
