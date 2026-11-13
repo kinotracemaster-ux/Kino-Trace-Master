@@ -290,6 +290,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['zip_file'])) {
             <?php include __DIR__ . '/../../includes/header.php'; ?>
 
             <div class="page-content">
+                <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.35); padding: 0.85rem 1rem; border-radius: var(--radius-md); margin-bottom: 1rem;">
+                    ⚠️ Esta pantalla crea un documento <b>nuevo</b> por cada PDF del ZIP. Si los documentos ya existen
+                    (importados por SQL o Excel) y solo les falta el PDF, usa
+                    <a href="../importar_datos/enlazar_pdfs.php"><b>Enlazar PDFs</b></a>: no crea duplicados y sube archivos grandes.
+                </div>
                 <?php if ($error): ?>
                     <div class="alert alert-error"
                         style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: var(--accent-danger); padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1rem;">

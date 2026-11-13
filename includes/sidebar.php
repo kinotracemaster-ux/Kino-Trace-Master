@@ -149,6 +149,11 @@ $currentSection = $currentSection ?? 'voraz';
                     Importar Backup (SQL)
                 </a>
                 <?php endif; ?>
+                <?php if ($ktOn('importar')): ?>
+                <a href="<?= $baseUrl ?? '' ?>modules/importar_datos/enlazar_pdfs.php" class="nav-subitem">
+                    Enlazar PDFs
+                </a>
+                <?php endif; ?>
                 <?php if ($ktOn('subir')): ?>
                 <a href="<?= $baseUrl ?? '' ?>modules/lote/" class="nav-subitem">
                     Subida por Lote
