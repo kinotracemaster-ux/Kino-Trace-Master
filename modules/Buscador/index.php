@@ -43,13 +43,15 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Búsqueda por Código - KINO COMPANY</title>
-    <link rel="stylesheet" href="../../assets/css/styles.css">
     <?php
     $clientConfig = get_client_config($clientCode);
     $cP = $clientConfig['color_primario'] ?? '#c41e3a';
     $cS = $clientConfig['color_secundario'] ?? '#333';
     $clientName = $clientConfig['titulo'] ?? $clientConfig['nombre'] ?? 'KINO COMPANY';
+    ?>
+    <title>Búsqueda por Código - <?= htmlspecialchars($clientName) ?></title>
+    <link rel="stylesheet" href="../../assets/css/styles.css">
+    <?php
 
     // Detect logo
     $clientLogo = '';
@@ -673,20 +675,23 @@ $ppAvisoLegal = $ppData['aviso_legal'] ?? '';
                 }
 
                 resultsContainer.classList.remove('hidden');
+                const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';');
                 resultsList.innerHTML = result.documents.map(doc => `
                     <div class="result-item">
                         <div class="result-header">
-                            <span class="result-badge">${(doc.tipo || 'DOCUMENTO').toUpperCase()}</span>
-                            <span class="result-date">${doc.fecha || ''}</span>
+                            <span class="result-badge">${esc((doc.tipo || 'DOCUMENTO').toUpperCase())}</span>
+                            <span class="result-date">${esc(doc.fecha)}</span>
                         </div>
-                        <div class="result-title">${doc.numero || 'Sin nombre'}</div>
-                        ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Registrado en este documento como ${String(doc.codigo_encontrado).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')} (escrito distinto a lo que buscaste)</div>` : ''}
+                        <div class="result-title">${esc(doc.numero || 'Sin nombre')}</div>
+                        ${doc.exacta == 0 ? `<div style="font-size: 0.85rem; color: #b45309;">Registrado en este documento como ${esc(doc.codigo_encontrado)} (escrito distinto a lo que buscaste)</div>` : ''}
                         <div class="result-actions">
-                            <a href="viewer_publico.php?cliente=${clientCode}&doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || codigo)}" 
-                               target="_blank" 
+                            ${doc.tiene_pdf === false
+                                ? `<span class="btn-ver-pdf" style="background:#9ca3af; cursor:default;" title="El documento está registrado pero su PDF aún no se ha cargado">📄 PDF no disponible</span>`
+                                : `<a href="viewer_publico.php?cliente=${encodeURIComponent(clientCode)}&doc=${doc.id}&term=${encodeURIComponent(doc.codigo_encontrado || codigo)}"
+                               target="_blank"
                                class="btn-ver-pdf">
                                 📄 VER PDF
-                            </a>
+                            </a>`}
                         </div>
                     </div>
                 `).join('');
