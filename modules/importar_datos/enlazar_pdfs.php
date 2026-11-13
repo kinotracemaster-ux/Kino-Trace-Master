@@ -53,6 +53,138 @@ function kt_enlazar_nombre(string $nombre): string
     return mb_strlen($base, 'UTF-8') > 200 ? '' : $base;
 }
 
+/** Clave tolerante: sin fecha inicial, sin ".pdf", sin tildes, solo letras y números. */
+function kt_enlazar_clave(string $t): string
+{
+    $t = preg_replace('/\.pdf$/i', '', stripTimestamp(trim($t)));
+    $t = strtr(mb_strtolower($t, 'UTF-8'), [
+        'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u', 'ñ' => 'n',
+        'à' => 'a', 'è' => 'e', 'ì' => 'i', 'ò' => 'o', 'ù' => 'u', 'â' => 'a', 'ê' => 'e', 'ô' => 'o',
+    ]);
+    return preg_replace('/[^a-z0-9]+/', '', $t);
+}
+
+/** Números largos (8+ cifras, como el de un manifiesto), uniendo cifras separadas por espacio, punto o guion. */
+function kt_enlazar_numeros_largos(string $t): array
+{
+    preg_match_all('/\d{8,}/', preg_replace('/(?<=\d)[\s.\-]+(?=\d)/', '', $t), $m);
+    return array_values(array_unique($m[0]));
+}
+
+/** Documentos sin PDF: clave de cada número, índice por número largo y nombre original. */
+function kt_enlazar_pendientes(PDO $db): array
+{
+    $p = ['claves' => [], 'numeros' => [], 'nombres' => []];
+    $q = $db->query("SELECT id, numero FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = '' ORDER BY id");
+    while ($r = $q->fetch(PDO::FETCH_ASSOC)) {
+        $id = (int) $r['id'];
+        $p['nombres'][$id] = (string) $r['numero'];
+        $p['claves'][$id] = kt_enlazar_clave((string) $r['numero']);
+        foreach (kt_enlazar_numeros_largos((string) $r['numero']) as $n) {
+            $p['numeros'][$n][] = $id;
+        }
+    }
+    return $p;
+}
+
+/**
+ * Documento sin PDF para un archivo. Primero las reglas del enlazador de ZIP
+ * (kt_linker_emparejar); si no, en este orden:
+ *   4. mismo nombre ignorando tildes, mayúsculas, espacios y signos;
+ *   5. el mismo número largo (8+ cifras, como el del manifiesto o la declaración);
+ *   6. el nombre del documento está dentro del nombre del archivo, o al revés (6+ caracteres).
+ *
+ * @return array{id: ?int, metodo: string, exacto: bool}
+ */
+function kt_enlazar_emparejar(array $idx, array $pend, array $usados, string $base, ?int $sugerido = null): array
+{
+    $m = kt_linker_emparejar($idx, $usados, $base);
+    if ($m['id'] !== null || $m['exacto']) {
+        return $m;
+    }
+    $libres = array_diff_key($pend['claves'], $usados);
+    $clave = kt_enlazar_clave($base);
+    if ($clave === '') {
+        return $m;
+    }
+    // Varios documentos con el MISMO nombre (p. ej. cuatro "RELOJ KARDOO MARZO-2024") y
+    // varios archivos con ese nombre: se reparten en orden (archivo más antiguo → documento
+    // de id menor), que es el orden en que se importaron. $sugerido: el que dio el plan.
+    $elegir = function (array $ids) use ($sugerido) {
+        sort($ids);
+        if ($sugerido !== null && in_array($sugerido, $ids, true)) {
+            return $sugerido;
+        }
+        return $ids[0] ?? null;
+    };
+    $iguales = array_keys($libres, $clave, true);
+    if ($iguales) {
+        return ['id' => $elegir($iguales), 'metodo' => 'NOMBRE_TOLERANTE', 'exacto' => false];
+    }
+    $unico = function (array $ids) {
+        $ids = array_values(array_unique($ids));
+        return count($ids) === 1 ? $ids[0] : null;
+    };
+    $porNumero = [];
+    foreach (kt_enlazar_numeros_largos(stripTimestamp($base)) as $n) {
+        foreach ($pend['numeros'][$n] ?? [] as $id) {
+            if (isset($libres[$id])) {
+                $porNumero[] = $id;
+            }
+        }
+    }
+    if (($id = $unico($porNumero)) !== null) {
+        return ['id' => $id, 'metodo' => 'NUMERO', 'exacto' => false];
+    }
+    // El nombre del documento está dentro del del archivo (el archivo suele llevar además el
+    // número del manifiesto) o al revés. Gana el nombre de documento más largo.
+    $contiene = [];
+    foreach ($libres as $id => $c) {
+        if (strlen($c) >= 6 && strlen($clave) >= 6 && (strpos($clave, $c) !== false || strpos($c, $clave) !== false)) {
+            $contiene[$id] = strlen($c);
+        }
+    }
+    if ($contiene) {
+        $max = max($contiene);
+        $mejores = array_keys($contiene, $max, true);
+        $clavesMejores = array_unique(array_map(fn($id) => $libres[$id], $mejores));
+        if (count($clavesMejores) === 1) {
+            return ['id' => $elegir($mejores), 'metodo' => 'NOMBRE_CONTENIDO', 'exacto' => false];
+        }
+    }
+    return $m;
+}
+
+/** ¿Algún documento ya tiene este archivo (por nombre de archivo o número)? */
+function kt_enlazar_ya_tiene(PDO $db, string $base): bool
+{
+    static $enlazados = null;
+    if ($enlazados === null) {
+        $enlazados = [];
+        foreach ($db->query("SELECT ruta_archivo, numero FROM documentos WHERE ruta_archivo IS NOT NULL AND ruta_archivo NOT IN ('', 'pending')") as $r) {
+            $enlazados[kt_enlazar_clave(basename(str_replace('\\', '/', (string) $r['ruta_archivo'])))] = true;
+            $enlazados[kt_enlazar_clave((string) $r['numero'])] = true;
+        }
+    }
+    return isset($enlazados[kt_enlazar_clave($base)]);
+}
+
+/** Documento sin PDF de nombre más parecido (para mostrar por qué no coincidió). */
+function kt_enlazar_parecido(array $pend, string $base): ?string
+{
+    $clave = kt_enlazar_clave($base);
+    $mejor = null;
+    $mejorPct = 0.0;
+    foreach ($pend['claves'] as $id => $c) {
+        similar_text($clave, $c, $pct);
+        if ($pct > $mejorPct) {
+            $mejorPct = $pct;
+            $mejor = $pend['nombres'][$id];
+        }
+    }
+    return $mejorPct >= 40 ? $mejor : null;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
     ini_set('display_errors', '0');
@@ -78,22 +210,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $responder(['ok' => false, 'error' => 'Lista de archivos no válida.'], 400);
             }
             $idx = kt_linker_indices($db);
+            $pend = kt_enlazar_pendientes($db);
+            $nombres = array_slice(array_values($nombres), 0, 50000);
+            // En orden de la fecha del nombre ("1748270811_..."): con nombres repetidos, el
+            // archivo más antiguo va al documento de id menor (ver kt_enlazar_emparejar)
+            $orden = array_keys($nombres);
+            usort($orden, function ($a, $b) use ($nombres) {
+                $fa = preg_match('/^(\d{6,})[_\-\s]/', basename((string) $nombres[$a]), $x) ? $x[1] : '';
+                $fb = preg_match('/^(\d{6,})[_\-\s]/', basename((string) $nombres[$b]), $y) ? $y[1] : '';
+                return [strlen($fa), $fa, $a] <=> [strlen($fb), $fb, $b];
+            });
             $usados = [];
-            $plan = [];
-            foreach (array_slice($nombres, 0, 50000) as $n) {
-                $base = kt_enlazar_nombre((string) $n);
+            $plan = array_fill(0, count($nombres), null);
+            $metodos = [];
+            $sinDoc = [];
+            $yaEnlazados = 0;
+            foreach ($orden as $i) {
+                $base = kt_enlazar_nombre((string) $nombres[$i]);
                 if ($base === '') {
-                    $plan[] = null;
                     continue;
                 }
-                $m = kt_linker_emparejar($idx, $usados, $base);
+                $m = kt_enlazar_emparejar($idx, $pend, $usados, $base);
                 if ($m['id'] !== null) {
                     $usados[$m['id']] = true;
+                    $plan[$i] = $m['id'];
+                    $metodos[$m['metodo']] = ($metodos[$m['metodo']] ?? 0) + 1;
+                } elseif ($m['exacto'] || kt_enlazar_ya_tiene($db, $base)) {
+                    $yaEnlazados++;
+                } elseif (count($sinDoc) < 25) {
+                    $sinDoc[] = ['archivo' => $base, 'parecido' => kt_enlazar_parecido($pend, $base)];
                 }
-                $plan[] = $m['id'];
             }
-            $pendientes = (int) $db->query("SELECT COUNT(*) FROM documentos WHERE ruta_archivo = 'pending' OR ruta_archivo IS NULL OR ruta_archivo = ''")->fetchColumn();
-            $responder(['ok' => true, 'plan' => $plan, 'pendientes' => $pendientes]);
+            $responder([
+                'ok' => true,
+                'plan' => $plan,
+                'pendientes' => count($pend['nombres']),
+                'ya_enlazados' => $yaEnlazados,
+                'metodos' => $metodos,
+                'sin_documento' => $sinDoc,
+                // Documentos sin PDF que ningún archivo cubre (para comparar nombres)
+                'documentos_sin_archivo' => array_slice(array_values(array_diff_key($pend['nombres'], $usados)), 0, 25),
+                'documentos_sin_archivo_total' => count(array_diff_key($pend['nombres'], $usados)),
+            ]);
         }
 
         if ($action === 'subir') {
@@ -111,7 +269,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Documento: se vuelve a calcular aquí (no se confía en el id que manda el navegador)
-            $m = kt_linker_emparejar(kt_linker_indices($db), [], $base);
+            $sugerido = (int) ($_POST['doc'] ?? 0) ?: null;
+            $m = kt_enlazar_emparejar(kt_linker_indices($db), kt_enlazar_pendientes($db), [], $base, $sugerido);
             if ($m['id'] === null) {
                 $responder(['ok' => true, 'estado' => $m['exacto'] ? 'ya_enlazado' : 'sin_documento', 'nombre' => $base]);
             }
@@ -286,10 +445,17 @@ $pageTitle = 'Enlazar PDFs';
 
                 $('epEstado').textContent = `🔎 Buscando a qué documento corresponde cada uno de los ${archivos.length} PDF…`;
                 const plan = await post({ action: 'plan', nombres: JSON.stringify(archivos.map(a => a.nombre)) });
-                const tareas = archivos.filter((a, i) => plan.plan[i] !== null);
+                const tareas = archivos.map((a, i) => ({ ...a, doc: plan.plan[i] })).filter(a => a.doc !== null);
                 const sobran = archivos.length - tareas.length;
-                log(`${archivos.length} PDF en total · ${tareas.length} tienen documento sin PDF · ${sobran} no se suben (ya enlazados o sin documento)`);
-                if (!tareas.length) { $('epEstado').textContent = '✅ No hay nada que subir: ningún PDF corresponde a un documento sin PDF.'; return; }
+                if (plan.documentos_sin_archivo.length) {
+                    log(`Documentos sin PDF que no encontraron archivo (${plan.documentos_sin_archivo_total}; ejemplos):\n  ` + plan.documentos_sin_archivo.join('\n  '), 'ep-muted');
+                }
+                if (plan.sin_documento.length) {
+                    log('PDF sin documento (ejemplos) → documento sin PDF más parecido:\n  '
+                        + plan.sin_documento.map(x => `${x.archivo}  →  ${x.parecido || '(ninguno parecido)'}`).join('\n  '), 'ep-warn');
+                }
+                log(`${archivos.length} PDF en total · ${tareas.length} tienen documento sin PDF · ${plan.ya_enlazados} ya estaban enlazados · ${sobran - plan.ya_enlazados} sin documento`);
+                if (!tareas.length) { $('epEstado').textContent = '⚠️ Ningún PDF corresponde a un documento sin PDF. Abajo hay ejemplos de nombres para comparar.'; return; }
 
                 let hechos = 0, enlazados = 0, fallidos = 0, siguiente = 0;
                 const pintar = () => {
@@ -303,7 +469,7 @@ $pageTitle = 'Enlazar PDFs';
                         const t = tareas[siguiente++];
                         try {
                             const blob = await t.leer();
-                            const r = await post({ action: 'subir', nombre: t.nombre, pdf: [blob, t.nombre] });
+                            const r = await post({ action: 'subir', nombre: t.nombre, doc: String(t.doc), pdf: [blob, t.nombre] });
                             if (r.estado === 'enlazado') { enlazados++; log(`✅ ${t.nombre} → ${r.doc.numero}`, 'ep-ok'); }
                             else log(`↷ ${t.nombre}: ${r.estado === 'ya_enlazado' ? 'su documento ya tiene PDF' : 'sin documento'}`, 'ep-warn');
                         } catch (e) {
