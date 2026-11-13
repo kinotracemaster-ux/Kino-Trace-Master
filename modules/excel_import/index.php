@@ -134,6 +134,12 @@ $pageTitle = 'Importación Masiva (CSV)';
             box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
         }
 
+        @media (max-width: 768px) {
+            .btn-process {
+                padding: 0.9rem 1.25rem;
+            }
+        }
+
         .btn-process:disabled {
             opacity: 0.7;
             cursor: not-allowed;
@@ -250,7 +256,7 @@ $pageTitle = 'Importación Masiva (CSV)';
                         </div>
                     </div>
 
-                    <div class="flex gap-4" style="display: flex; gap: 1rem;">
+                    <div class="flex gap-4" style="display: flex; gap: 1rem; flex-wrap: wrap;">
                         <button type="button" class="btn-process" id="processBtn" disabled>
                             <span class="btn-text">PROCESAR ARCHIVO</span>
                             <div class="loading-spinner hidden" id="spinner"></div>

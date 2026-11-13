@@ -9,7 +9,7 @@ Si algo de acá contradice `CLAUDE.md` o `DOCUMENTACION_TECNICA.md`, **este arch
 ## 0. Inconsistencias / deuda técnica ya detectadas (para no perder tiempo re-descubriéndolas)
 
 - **`optimize_db.php` NO EXISTE** en el repo, aunque `CLAUDE.md` lo documenta como comando (`php optimize_db.php`). Toda la optimización de índices real vive en `client_schema_migrations()` (`helpers/tenant.php`), aplicada por `ensure_client_schema()` solo si `PRAGMA user_version` de la base está atrasado (ver CLAUDE.md, "Cambios para todos los clientes").
-- **Botón "CSV" roto**: `index.php` (tab Consultar, función `downloadCSV()`) llama a `api.php?action=export_csv&tipo=...`, pero esa acción **no existe** en el switch de `api.php` → siempre devuelve `{"error":"Acción no válida"}`.
+- ~~**Botón "CSV" roto**~~: arreglado (PR UX): `api.php?action=export_csv&tipo=` → `DocumentController::exportCsv()`, una fila por código, `;` y BOM UTF-8 para Excel.
 - **Dos "core helpers" fantasma**: `autoload.php` intenta cargar `helpers/db.php` y `helpers/config_helper.php` como parte de la lista fija de helpers "core", pero **ninguno de los dos archivos existe**. El loop usa `file_exists()` antes de `require_once`, así que se saltan en silencio — no rompe nada, es solo ruido en la lista.
 - **`helpers/ai_engine.php` es un stub no funcional** (`ai_extract_data_from_pdf`, `ai_chat_with_docs`, `ai_generate_report` devuelven `[]` o mensajes "no implementada"). Lo siguen llamando `modules/declaraciones/upload.php` y `modules/manifiestos/upload.php` — en esos dos módulos específicos la "extracción con IA" no hace nada. La integración real con IA es `helpers/gemini_ai.php`, usada desde `src/Api/AiController.php` (acciones `ai_extract`/`ai_chat`/`smart_chat`).
 - **`helpers/validator.php::validate_document()` es un stub** que siempre devuelve `{'status':'ok','messages':[]}` sin validar nada. Lo usan `modules/declaraciones/view.php` y `modules/manifiestos/view.php`.
@@ -63,7 +63,8 @@ Si algo de acá contradice `CLAUDE.md` o `DOCUMENTACION_TECNICA.md`, **este arch
 | `pdf_diagnostic` | `SystemController::diagnostic($_REQUEST)` | `doc_id` opcional | |
 | `update_password` | `SystemController::updatePassword($_POST)` | `new_password, confirm_password` | abre `clients/central.db` directo, bypassa `$db` de cliente |
 | `clear_cache` | inline en `api.php` (no controller) | — | `CacheManager::clear($clientCode)` |
-| *(cualquier otra / vacía)* | — | — | `{"error":"Acción no válida"}` — incluye `export_csv`, que no existe |
+| `export_csv` | `DocumentController::exportCsv($_GET)` | `tipo` opcional | descarga CSV (no JSON): una fila por código, `;` + BOM para Excel |
+| *(cualquier otra / vacía)* | — | — | `{"error":"Acción no válida"}` |
 
 ---
 
@@ -265,7 +266,7 @@ Entrada real de usuario: `SearchController::search()` toma el textarea `#bulkInp
 | `resaltar/` | `index.php` usa `api.php?action=fulltext_search`; el resto (`viewer.php`, `ocr_text.php`, `download.php`, `generate_unified.php`) son endpoints propios | Visor PDF.js con resaltado (primero busca en la capa de texto del PDF en el navegador, sin servidor; solo las páginas escaneadas van a `ocr_text.php`; botón "Buscar faltantes con OCR" para códigos dentro de imágenes), OCR con coordenadas, generación de PDF unificado para resultados de la búsqueda voraz. Es el módulo que abre `index.php` (raíz) al hacer clic en "Resaltar"/"PDF Unificado" desde el tab Voraz. Si el PDF de un documento no aparece, `download.php` y `viewer.php` redirigen a `pdf_faltante.php`: buscarlo en el servidor (`relinkFromServer` solo para ese documento) o subirlo de nuevo; al lograrlo vuelve a la página de origen. |
 | `sincronizar/` | Standalone | Depende de un archivo SQL legado específico en la raíz del proyecto. |
 | `subir/` | Mixto: guardado (`action=save/update`) es POST a sí mismo; pero `extractCodes()`/`aiExtract()` en su JS sí llaman a `api.php` | Módulo principal de subida/edición, embebido como `<iframe>` en `index.php` tab Subir. Dispara extracción async fire-and-forget vía `fsockopen()` a `process_extraction.php`. |
-| `trazabilidad/` | `dashboard.php` usa `api.php?action=reindex_documents`; `validar.php`/`vincular.php` son standalone | Dashboard, validación de códigos (`codigos.validado=1`), vinculación manifiesto↔declaración (tabla `vinculos`). |
+| `trazabilidad/` | `dashboard.php` usa `api.php?action=reindex_documents`; `validar.php`/`vincular.php` son standalone (`validar.php` paginado de a 100 con filtros pendientes/validados/código) | Dashboard, validación de códigos (`codigos.validado=1`), vinculación manifiesto↔declaración (tabla `vinculos`). |
 
 Todos los módulos (excepto `Buscador/*`) requieren `$_SESSION['client_code']`.
 
@@ -279,7 +280,7 @@ Secciones (`id="section-*"`, activadas por `switchSection()` en `includes/sideba
 |---|---|---|
 | `section-voraz` (default) | Textarea `#bulkInput` | `processBulkSearch()` → `POST action=search`; resultados abren `voraz_highlightAllCodes()` (→ `modules/resaltar/viewer.php`) o `voraz_generateUnifiedPDF()` (→ `modules/resaltar/generate_unified.php`), ninguno de los dos pasa por `api.php` |
 | `section-subir` | `<iframe src="modules/subir/">` | delega todo al módulo `subir/` |
-| `section-consultar` | Tabla + filtros + full-text | `loadDocuments()` → `action=list`; `searchFulltext()` → `action=fulltext_search`; `reindexDocuments()` → loop `action=reindex_documents`; `deleteDoc()` → `action=delete`; `downloadCSV()` → `action=export_csv` **(roto, ver §0)** |
+| `section-consultar` | Tabla + filtros + full-text | `loadDocuments()` → `action=list`; `searchFulltext()` → `action=fulltext_search`; `reindexDocuments()` → loop `action=reindex_documents`; `deleteDoc()` → `action=delete`; `downloadCSV()` → `action=export_csv`. El filtro de tipo se arma con los tipos reales de la base; los códigos de cada fila se dibujan solo al abrir "Ver Códigos" |
 | `section-codigo` | Input + autocompletado | `selectCode()`/input → `action=suggest`; `searchSingleCode()` → `action=search_by_code` |
 | `section-backup` | Placeholder cargado por fetch | `fetch('Admin-gestor/backup.php?partial=1')`. La descarga (`?download=1`) manda el ZIP mientras lo arma (`helpers/zip_stream.php`, sin comprimir ni archivo temporal); si pasa de 700 MB se baja en partes por rango de nombres (`desde`/`hasta`), la base va en la parte 1; `solo_bd=1` baja solo la base |
 
