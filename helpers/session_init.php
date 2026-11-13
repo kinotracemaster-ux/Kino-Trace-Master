@@ -31,6 +31,19 @@ $_sessionName = 'KT_' . substr($_safeName, 0, 30);
 
 session_name($_sessionName);
 
+// Sesiones en el volumen persistente (clients/_sesiones, 404 por web): antes quedaban en /tmp
+// del contenedor y CADA deploy de Railway cerraba la sesión de todos (clientes y admin); una
+// pantalla ya abierta recibía la página de login en vez de JSON ("Unexpected token '<'").
+// 8 horas sin actividad antes de que la sesión caduque (antes 24 minutos).
+if (PHP_SAPI !== 'cli') {
+    $_dirSesiones = (getenv('KT_CLIENTS_DIR') ?: dirname(__DIR__) . DIRECTORY_SEPARATOR . 'clients') . DIRECTORY_SEPARATOR . '_sesiones';
+    if ((is_dir($_dirSesiones) || @mkdir($_dirSesiones, 0700, true)) && is_writable($_dirSesiones)) {
+        session_save_path($_dirSesiones);
+    }
+    ini_set('session.gc_maxlifetime', '28800');
+    unset($_dirSesiones);
+}
+
 // Cookie limitada al hostname EXACTO (no al dominio base .kino-trace.com)
 session_set_cookie_params([
     'lifetime' => 0,
