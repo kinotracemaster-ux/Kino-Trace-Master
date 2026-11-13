@@ -129,4 +129,4 @@ Paquete Windows portable (PHP + `php -S` en 127.0.0.1, navegador como interfaz) 
 
 ### Deploy
 
-Railway vía Docker (`Dockerfile`: PHP 8.2 + Apache, poppler-utils + tesseract-ocr para procesamiento de PDF/OCR). Volumen obligatorio en `/var/www/html/clients`. Variables relevantes: `GEMINI_API_KEY` (IA opcional), `ADMIN_RESET_PASSWORD`, `RESEND_API_KEY`/SMTP (recuperación de contraseña, ver `.env.example`), `APP_BRANCH` (indicador visual de rama activa).
+Railway vía Docker (`Dockerfile`: PHP 8.2 + Apache, poppler-utils + tesseract-ocr para procesamiento de PDF/OCR). Volumen obligatorio en `/var/www/html/clients`. Las sesiones PHP se guardan en `clients/_sesiones` (volumen, 404 por web, 8 h sin actividad; `helpers/session_init.php`): antes iban a `/tmp` y cada deploy cerraba la sesión de todos. Las llamadas AJAX del panel admin usan `leerJson()`, que avisa "sesión cerrada" en vez de "Unexpected token '<'". Variables relevantes: `GEMINI_API_KEY` (IA opcional), `ADMIN_RESET_PASSWORD`, `RESEND_API_KEY`/SMTP (recuperación de contraseña, ver `.env.example`), `APP_BRANCH` (indicador visual de rama activa).

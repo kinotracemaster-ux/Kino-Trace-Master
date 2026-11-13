@@ -1960,7 +1960,7 @@ foreach ($clients as $cli) {
                 formData.append('client_code', code);
 
                 const resp = await fetch('panel.php', { method: 'POST', body: formData });
-                const data = await resp.json();
+                const data = await leerJson(resp);
 
                 if (data.success) {
                     btn.textContent = '✅ Enviado';
@@ -2068,7 +2068,7 @@ foreach ($clients as $cli) {
             let loaded = false;
             try {
                 const resp = await fetch('panel.php?get_public_page=' + encodeURIComponent(code));
-                const data = await resp.json();
+                const data = await leerJson(resp);
                 if (data && data.codigo) {
                     document.getElementById('ppIntroTitulo').value = data.intro_titulo || '';
                     document.getElementById('ppIntroTexto').value = data.intro_texto || '';
@@ -2263,6 +2263,21 @@ foreach ($clients as $cli) {
             document.getElementById('progressOverlay').classList.remove('active');
         }
 
+        // Respuesta JSON del panel. Si la sesión de admin se cerró (p. ej. tras un deploy),
+        // el servidor manda la página de login: avisar claro en vez de "Unexpected token '<'".
+        async function leerJson(resp) {
+            const tipo = resp.headers.get('content-type') || '';
+            if (resp.redirected && /login\.php/.test(resp.url) || !tipo.includes('json')) {
+                const texto = await resp.text();
+                if (resp.redirected || /Acceso Admin|admin_secret/.test(texto)) {
+                    if (confirm('Tu sesión de administrador se cerró. ¿Ir a iniciar sesión otra vez?')) location.href = 'login.php';
+                    throw new Error('Sesión de administrador cerrada: vuelve a entrar.');
+                }
+                throw new Error('El servidor respondió con un error (' + resp.status + '). Intenta de nuevo en un momento.');
+            }
+            return resp.json();
+        }
+
         // ═══════ DIAGNOSE ORPHANS — AJAX DIRECT ═══════
         async function diagnoseOrphans(clientCode, clientName) {
             showProgress('diagnose_orphans');
@@ -2275,7 +2290,7 @@ foreach ($clients as $cli) {
                     body: formData,
                     headers: { 'X-Requested-With': 'XMLHttpRequest' }
                 });
-                const data = await resp.json();
+                const data = await leerJson(resp);
                 closeProgressNoReload();
                 if (data.success && data.orphan_data) {
                     showOrphanModal(data.orphan_data, clientName);
@@ -2300,7 +2315,7 @@ foreach ($clients as $cli) {
                 formData.append('diag_code', clientCode);
                 formData.append('aplicar', aplicar ? '1' : '0');
                 const resp = await fetch('panel.php', { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-                const data = await resp.json();
+                const data = await leerJson(resp);
                 if (!data.success || !data.relink_data) { if (box) box.innerHTML = '❌ ' + escHtml(data.error || 'Error'); return; }
                 const r = data.relink_data;
                 const metodos = { ARCHIVO: 'nombre exacto', CRUCE_REPARADO: 'cruce reparado', NOMBRE_REPARADO: 'tildes corregidas', ARCHIVO_SIN_FECHA: 'nombre sin fecha', NOMBRE: 'nombre del documento' };
