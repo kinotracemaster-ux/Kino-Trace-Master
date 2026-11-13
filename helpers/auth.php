@@ -21,12 +21,15 @@ function is_logged_in()
         return false;
     }
 
-    // Validar fingerprint de sesión (si existe - backward compatible)
-    if (isset($_SESSION['ip']) && isset($_SESSION['user_agent'])) {
-        $currentIp = $_SERVER['REMOTE_ADDR'] ?? '';
+    // Validar fingerprint de sesión (si existe - backward compatible).
+    // Solo el navegador (User-Agent), NO la IP: en Railway/Cloudflare REMOTE_ADDR es la IP
+    // del proxy y cambia entre peticiones, así que comparar la IP cerraba la sesión sola
+    // (el código de "Administrador" del gestor respondía "Sesión expirada" y sacaba al
+    // cliente aunque la clave fuera correcta).
+    if (isset($_SESSION['user_agent'])) {
         $currentAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-        if ($_SESSION['ip'] !== $currentIp || $_SESSION['user_agent'] !== $currentAgent) {
+        if ($_SESSION['user_agent'] !== $currentAgent) {
             // Posible secuestro de sesión: invalidar
             session_unset();
             session_destroy();
