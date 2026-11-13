@@ -30,6 +30,22 @@ if (isset($centralDb)) {
 $ppFooterTexto = $ppData['footer_texto'] ?? '';
 $ppFooterUrl = $ppData['footer_url'] ?? '';
 
+/** Página simple cuando el documento existe pero su PDF todavía no está cargado. */
+function kt_visor_sin_pdf(string $numero): void
+{
+    http_response_code(404);
+    $n = htmlspecialchars($numero, ENT_QUOTES, 'UTF-8');
+    echo '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">'
+        . '<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>PDF no disponible</title></head>'
+        . '<body style="font-family:Segoe UI,Arial,sans-serif;background:#f0f2f5;margin:0;padding:40px 16px;text-align:center;color:#333">'
+        . '<div style="max-width:480px;margin:0 auto;background:#fff;border-radius:10px;padding:28px;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
+        . '<h2 style="margin-top:0">PDF no disponible</h2>'
+        . ($n !== '' ? "<p><strong>{$n}</strong></p>" : '')
+        . '<p>El documento está registrado, pero su archivo PDF todavía no se ha cargado.</p>'
+        . '<p><a href="index.php">← Volver al buscador</a></p></div></body></html>';
+    exit;
+}
+
 // Get parameters
 $documentId = isset($_GET['doc']) ? (int) $_GET['doc'] : 0;
 $searchTerm = isset($_GET['term']) ? trim($_GET['term']) : '';
@@ -52,7 +68,7 @@ $uploadsDir = CLIENTS_DIR . "/{$clientCode}/uploads/";
 $pdfPath = resolve_pdf_path($clientCode, $document);
 
 if (!$pdfPath || !file_exists($pdfPath)) {
-    die('Archivo PDF no encontrado');
+    kt_visor_sin_pdf($document['numero'] ?? '');
 }
 
 // PDFs privados: enlace firmado que vence en unas horas (helpers/pdf_acceso.php), nunca la
@@ -60,7 +76,7 @@ if (!$pdfPath || !file_exists($pdfPath)) {
 require_once __DIR__ . '/../../helpers/pdf_acceso.php';
 $pdfUrl = pdf_path_belongs_to_client($pdfPath, $clientCode) ? kt_pdf_url($pdfPath, KT_PDF_TTL_PUBLICO, '../../') : null;
 if ($pdfUrl === null) {
-    die('Archivo PDF no encontrado');
+    kt_visor_sin_pdf($document['numero'] ?? '');
 }
 
 // Preparar términos a resaltar. Solo se separa por coma, punto y coma o salto

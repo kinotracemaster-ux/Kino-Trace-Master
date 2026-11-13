@@ -378,6 +378,19 @@ function resolve_pdf_path(string $clientCode, array $document): ?string
 }
 
 /**
+ * ¿El documento tiene un PDF que se pueda abrir? Sin buscar en disco cuando la ruta es
+ * "pending" o vacía (documentos importados por SQL/Excel sin su archivo todavía).
+ */
+function kt_documento_tiene_pdf(string $clientCode, array $document): bool
+{
+    $ruta = trim((string) ($document['ruta_archivo'] ?? ''));
+    if ($ruta === '' || strtolower($ruta) === 'pending') {
+        return false;
+    }
+    return resolve_pdf_path($clientCode, $document) !== null;
+}
+
+/**
  * ¿La ruta (ya existente) está dentro de la carpeta de ESTE cliente?
  * Acepta clients/{codigo}/... y la carpeta antigua clients/uploads/client_{codigo}/...
  * Resuelve "..", enlaces simbólicos y mayúsculas/minúsculas no se confunden con otro cliente.

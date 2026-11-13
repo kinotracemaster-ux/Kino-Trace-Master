@@ -70,6 +70,15 @@ switch ($action) {
         $stmt->execute([$code, $code, code_match_key($code)]);
         $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        // ¿El documento tiene su PDF? Los importados por SQL/Excel quedan con ruta "pending"
+        // hasta que se sube o enlaza el archivo: el buscador muestra "PDF no disponible" en
+        // vez de un botón que abre "Archivo PDF no encontrado". La ruta no sale al público.
+        foreach ($docs as &$doc) {
+            $doc['tiene_pdf'] = kt_documento_tiene_pdf($clientCode, $doc);
+            unset($doc['ruta_archivo']);
+        }
+        unset($doc);
+
         echo json_encode(['documents' => $docs]);
         break;
 
