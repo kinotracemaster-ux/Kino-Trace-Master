@@ -697,6 +697,8 @@ foreach ($clients as $cli) {
             // y el aviso "No se pudo extraer texto..." (va por el índice de códigos, es rápido)
             $h['basura'] = (int) $ro->query("SELECT COUNT(*) FROM codigos WHERE codigo IN ('', '1', 'Array')
                 OR (codigo >= 'No se pudo extraer' AND codigo < 'No se pudo extraes')")->fetchColumn();
+            // Lo más buscado en los últimos 30 días sin encontrar nada (helpers/busquedas_sin_resultado.php)
+            $h['sin_resultado'] = kt_busquedas_sin_resultado_top($ro, 30, 8);
         } catch (Throwable $e) {
             $h['docs'] = null;
         }
@@ -1225,6 +1227,15 @@ foreach ($clients as $cli) {
                             <div class="client-meta">📄 <?= $hl['docs'] === null ? 'sin base' : number_format($hl['docs']) . ' documentos' ?></div>
                             <?php if (!empty($hl['basura'])): ?>
                                 <div class="client-meta" style="color:#b45309;font-weight:600;">⚠️ <?= number_format($hl['basura']) ?> códigos basura de la subida masiva (ZIP) antigua</div>
+                            <?php endif; ?>
+                            <?php if (!empty($hl['sin_resultado'])): ?>
+                                <details class="client-meta">
+                                    <summary style="cursor:pointer;">🔎 <?= count($hl['sin_resultado']) ?> búsquedas sin resultado (30 días)</summary>
+                                    <?php foreach ($hl['sin_resultado'] as $b): ?>
+                                        <div style="font-size:0.8rem;"><b><?= htmlspecialchars($b['codigo']) ?></b>
+                                            ×<?= (int) $b['veces'] ?> · <?= htmlspecialchars($b['origen']) ?> · <?= htmlspecialchars(substr($b['ultima'], 0, 10)) ?></div>
+                                    <?php endforeach; ?>
+                                </details>
                             <?php endif; ?>
                             <?php if ($hl['schema'] !== null && $hl['schema'] < client_schema_version()): ?>
                                 <div class="client-meta" style="color:#b45309;font-weight:600;">⚠️ Base desactualizada (v<?= (int) $hl['schema'] ?> de v<?= client_schema_version() ?>): se actualiza sola al entrar, o con «🗄️ Actualizar bases»</div>

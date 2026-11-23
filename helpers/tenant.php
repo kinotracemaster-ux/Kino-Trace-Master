@@ -9,6 +9,7 @@
  */
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/busquedas_sin_resultado.php';
 
 /**
  * Sanitiza un código de cliente para asegurar que solo contenga letras
@@ -652,7 +653,23 @@ function client_schema_migrations(): array
             }
         },
 
-        // 3 — (siguiente cambio de esquema aquí)
+        // 3 — Búsquedas que no encontraron nada (helpers/busquedas_sin_resultado.php):
+        //     tabla pequeña (tope 2.000 filas) para ver qué piden los clientes y no hay.
+        3 => function (PDO $db): void {
+            $db->exec('CREATE TABLE IF NOT EXISTS busquedas_sin_resultado (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                clave TEXT NOT NULL,
+                origen TEXT NOT NULL,
+                codigo TEXT NOT NULL,
+                veces INTEGER NOT NULL DEFAULT 1,
+                primera TEXT NOT NULL,
+                ultima TEXT NOT NULL,
+                UNIQUE (clave, origen)
+            )');
+            $db->exec('CREATE INDEX IF NOT EXISTS idx_bsr_ultima ON busquedas_sin_resultado(ultima)');
+        },
+
+        // 4 — (siguiente cambio de esquema aquí)
     ];
 }
 
