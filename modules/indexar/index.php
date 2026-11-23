@@ -299,9 +299,9 @@ $pendingCount = $pendingStmt->fetchColumn();
                                 <div class="control-group">
                                     <label for="batchSize">Tamaño del Lote:</label>
                                     <select id="batchSize" class="form-select">
-                                        <option value="10">10 (Lento/Seguro)</option>
-                                        <option value="20">20</option>
-                                        <option value="50" selected>50 (Recomendado)</option>
+                                        <option value="10">10</option>
+                                        <option value="20" selected>20 (Recomendado)</option>
+                                        <option value="50">50</option>
                                         <option value="100">100 (Rápido)</option>
                                         <option value="150">150 (Máx)</option>
                                     </select>
@@ -359,6 +359,7 @@ $pendingCount = $pendingStmt->fetchColumn();
         let currentIndexed = <?= $totalPdfCount - $pendingCount ?>;
 
         let isRunning = false;
+        let offsetGuardado = 0; // en "Forzar", para continuar donde quedó tras un corte
 
         // UI Updates based on selection
         const forceCheck = document.getElementById('forceReindex');
@@ -382,12 +383,50 @@ $pendingCount = $pendingStmt->fetchColumn();
             log.insertBefore(entry, log.firstChild);
         }
 
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        // Una petición al servidor. Devuelve el JSON o lanza un error claro.
+        // El servidor trabaja ~25 s por petición; 90 s es margen de sobra.
+        async function pedirLote(url) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 90000);
+            try {
+                const response = await fetch(url, { signal: ctrl.signal, credentials: 'same-origin' });
+                const raw = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) {
+                    if (/login|iniciar sesi/i.test(raw)) throw new Error('La sesión se cerró. Vuelva a iniciar sesión y presione Iniciar otra vez.');
+                    throw new Error(`El servidor no respondió bien (HTTP ${response.status}: ${raw.trim().substring(0, 60) || 'vacío'})`);
+                }
+                return data;
+            } catch (e) {
+                if (e.name === 'AbortError') throw new Error('El servidor tardó demasiado en responder');
+                throw e;
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        function setFinal(tipo, titulo, texto) {
+            const box = document.getElementById('completeMessage');
+            const colores = { ok: '#10b981', aviso: '#f59e0b', error: '#ef4444' };
+            box.querySelector('h3').textContent = titulo;
+            box.querySelector('h3').style.color = colores[tipo];
+            box.style.borderColor = colores[tipo];
+            box.style.background = colores[tipo] + '1a';
+            document.getElementById('completeSummary').innerText = texto;
+            box.classList.add('show');
+            document.getElementById('progressBar').style.background = colores[tipo];
+        }
+
         async function startIndexing() {
             if (isRunning) return;
             isRunning = true;
 
             const btn = document.getElementById('startBtn');
-            const batchSize = parseInt(document.getElementById('batchSize').value) || 50;
+            const batchSize = parseInt(document.getElementById('batchSize').value) || 20;
             const force = document.getElementById('forceReindex').checked;
 
             const progressSection = document.getElementById('progressSection');
@@ -395,143 +434,121 @@ $pendingCount = $pendingStmt->fetchColumn();
             const progressText = document.getElementById('progressText');
             const actionArea = document.getElementById('actionArea');
 
-            // Lock UI
             btn.disabled = true;
             document.getElementById('batchSize').disabled = true;
             forceCheck.disabled = true;
+            document.getElementById('completeMessage').classList.remove('show');
+            progressBar.style.background = '';
 
             document.getElementById('btnIcon').innerHTML = '<div class="spinner"></div>';
             document.getElementById('btnText').textContent = force ? 'Reindexando TODO...' : 'Indexando...';
 
             progressSection.classList.add('active');
-            addLog(`Iniciando: Lote=${batchSize}, Forzar=${force ? 'SÍ' : 'NO'}`, 'info');
+            addLog(`Iniciando: hasta ${batchSize} documentos por vuelta, Forzar=${force ? 'SÍ' : 'NO'}. Los PDF escaneados se leen con OCR página por página (puede tardar).`, 'info');
 
-            let processedCount = 0;
-            let offset = 0;
-            let keepGoing = true;
-            let batchNum = 0;
+            const MAX_FALLOS_SEGUIDOS = 4;
+            let processedCount = 0, indexedCount = 0, errorCount = 0;
+            let offset = force ? offsetGuardado : 0, vuelta = 0, fallosSeguidos = 0, sinAvance = 0;
+            let ultimoParcial = null;
+            let estado = 'corriendo'; // 'ok' | 'detenido' | 'atascado'
+            let ultimoError = '';
+            let newPending = initialPending;
 
-            // If forcing, we process ALL docs by offset.
-            // If NOT forcing, we process until pending == 0.
+            while (estado === 'corriendo') {
+                vuelta++;
+                let url = `${apiUrl}?action=reindex_documents&batch=${batchSize}`;
+                if (force) url += `&force=1&offset=${offset}`;
 
-            const targetTotal = force ? totalDocs : initialPending;
-            // Note: If NOT forcing, targetTotal might decrease dynamically, but we use it for progress bar estimation.
-
-            while (keepGoing) {
-                batchNum++;
-                addLog(`Procesando lote #${batchNum} (Offset: ${offset})...`, 'info');
-
+                let result;
                 try {
-                    // Build URL
-                    let url = `${apiUrl}?action=reindex_documents&batch=${batchSize}`;
-                    if (force) {
-                        url += `&force=1&offset=${offset}`;
-                    } else {
-                        // Regular mode: always grab the top X pending (offset usually 0, or implicitly handled by DB query)
-                        // Actually, our API logic for pending uses 'LIMIT N', so offset isn't strictly needed if we just want "next N pending",
-                        // BUT if we want to be safe against "stuck" docs, maybe. 
-                        // However, standard logic is just "get next N".
-                    }
-
-                    const response = await fetch(url);
-                    const result = await response.json();
-
-                    if (!result.success) {
-                        addLog(`Error en servidor: ${result.error || 'Desconocido'}`, 'error');
-                        keepGoing = false;
+                    result = await pedirLote(url);
+                    if (!result.success) throw new Error(result.error || 'Error desconocido del servidor');
+                    fallosSeguidos = 0;
+                } catch (error) {
+                    fallosSeguidos++;
+                    ultimoError = error.message;
+                    if (/sesión se cerró/.test(error.message) || fallosSeguidos >= MAX_FALLOS_SEGUIDOS) {
+                        addLog(`✗ ${error.message}`, 'error');
+                        estado = 'detenido';
                         break;
                     }
-
-                    const docsInBatch = result.indexed + (result.errors ? result.errors.length : 0);
-                    processedCount += docsInBatch;
-
-                    // Update global counters
-                    let newPending = result.pending; // accurate from server
-
-                    if (force) {
-                        // In force mode, we rely on offset
-                        offset += batchSize;
-                        // If we processed fewer than batchSize, we are likely at the end
-                        // However, be careful: result.indexed might be 0 if all failed? 
-                        // Safer to check if docsInBatch < batchSize or if offset >= totalDocs
-                        if (docsInBatch < batchSize && offset >= totalDocs) {
-                            keepGoing = false;
-                        }
-                        if (offset >= totalDocs) {
-                            keepGoing = false;
-                        }
-                    } else {
-                        // Standard mode
-                        if (newPending === 0) {
-                            keepGoing = false;
-                        }
-                        // Safety: if we didn't index anything and pending > 0, we might be stuck on broken docs
-                        if (docsInBatch === 0 && newPending > 0) {
-                            addLog(`⚠️ Alerta: No se procesaron documentos pero quedan ${newPending}. Posibles archivos faltantes.`, 'error');
-                            keepGoing = false;
-                        }
-                    }
-
-                    // Update UI Progress
-                    // Estimation for progress bar calculate
-                    let progressPercent = 0;
-                    if (force) {
-                        progressPercent = Math.min(100, Math.round((offset / totalDocs) * 100));
-                        // Correction for end
-                        if (!keepGoing) progressPercent = 100;
-                    } else {
-                        // Pending mode: (Initial - CurrentPending) / Initial
-                        if (initialPending > 0) {
-                            progressPercent = Math.min(100, Math.round(((initialPending - newPending) / initialPending) * 100));
-                        } else {
-                            progressPercent = 100;
-                        }
-                    }
-
-                    progressBar.style.width = progressPercent + '%';
-
-                    // Stats Update
-                    document.getElementById('pendingCount').textContent = newPending;
-                    // For "Indexed", if forceful, we just show total - pending usually
-                    document.getElementById('indexedCount').textContent = totalDocs - newPending;
-
-                    progressText.textContent = `${progressPercent}% | Lote: ${docsInBatch} docs`;
-
-                    // Batch logs
-                    if (result.indexed > 0) {
-                        addLog(`✓ Lote completado: ${result.indexed} indexados.`, 'success');
-                    }
-                    if (result.errors && result.errors.length > 0) {
-                        // Show first few errors only to avoid spam
-                        result.errors.slice(0, 3).forEach(err => addLog(`✗ ${err}`, 'error'));
-                        if (result.errors.length > 3) addLog(`... y ${result.errors.length - 3} errores más.`, 'error');
-                    }
-
-                } catch (error) {
-                    addLog(`Error de red/timeout: ${error.message}`, 'error');
-                    // In robust mode, maybe we want to retry? For now, break to avoid infinite loops
-                    keepGoing = false;
-                    break;
+                    const espera = 5 * fallosSeguidos;
+                    addLog(`⚠️ ${error.message}. Reintento ${fallosSeguidos}/${MAX_FALLOS_SEGUIDOS - 1} en ${espera} s (lo ya leído queda guardado)...`, 'error');
+                    await sleep(espera * 1000);
+                    continue;
                 }
+
+                const avanceParcial = result.partial && (!ultimoParcial || result.partial.id !== ultimoParcial.id || result.partial.pagina !== ultimoParcial.pagina);
+                ultimoParcial = result.partial || null;
+                processedCount += result.processed || 0;
+                indexedCount += result.indexed || 0;
+                errorCount += (result.errors || []).length;
+                newPending = result.pending;
+                if (force) { offset = result.next_offset ?? (offset + batchSize); offsetGuardado = offset; }
+
+                if (result.indexed > 0) addLog(`✓ ${result.indexed} indexados en esta vuelta (${result.seconds ?? '?'} s).`, 'success');
+                if (result.errors && result.errors.length > 0) {
+                    result.errors.slice(0, 3).forEach(err => addLog(`✗ ${err}`, 'error'));
+                    if (result.errors.length > 3) addLog(`... y ${result.errors.length - 3} errores más.`, 'error');
+                }
+                if (result.partial) {
+                    const p = result.partial;
+                    addLog(`📄 Documento #${p.id} escaneado: leídas ${p.pagina - 1}${p.paginas ? ' de ' + p.paginas : ''} páginas, sigue...`, 'info');
+                }
+
+                // ¿Terminó? ¿Está atascado?
+                if (result.done) {
+                    estado = 'ok';
+                } else if ((result.processed || 0) === 0 && !avanceParcial) {
+                    sinAvance++;
+                    if (sinAvance >= 2) {
+                        addLog(`⚠️ No hubo avance en ${sinAvance} vueltas seguidas; quedan ${newPending} pendientes.`, 'error');
+                        estado = 'atascado';
+                    }
+                } else {
+                    sinAvance = 0;
+                }
+
+                // Progreso
+                let pct;
+                if (force) pct = totalDocs > 0 ? Math.round((Math.min(offset, totalDocs) / totalDocs) * 100) : 100;
+                else pct = initialPending > 0 ? Math.round(((initialPending - newPending) / initialPending) * 100) : 100;
+                pct = Math.max(0, Math.min(100, pct));
+                if (estado === 'ok') pct = 100;
+                progressBar.style.width = pct + '%';
+                document.getElementById('pendingCount').textContent = newPending;
+                document.getElementById('indexedCount').textContent = totalDocs - newPending;
+                progressText.textContent = `${pct}% | Vuelta ${vuelta} | Indexados en esta sesión: ${indexedCount}`;
             }
 
-            // Finshed
-            progressBar.style.width = '100%';
-            progressBar.style.background = '#10b981';
+            const resumen = `Indexados en esta sesión: ${indexedCount}.\nCon error (archivo faltante o PDF ilegible): ${errorCount}.\nPendientes ahora: ${newPending}.`;
+            if (estado === 'ok' && errorCount === 0) {
+                setFinal('ok', '✅ ¡Indexación completada!', resumen);
+                addLog('🏁 Proceso finalizado.', 'success');
+                actionArea.style.display = 'none';
+            } else if (estado === 'ok') {
+                setFinal('aviso', '⚠️ Indexación terminada con errores', resumen + '\nLos documentos con error no se vuelven a intentar salvo con "Forzar".');
+                addLog('🏁 Proceso finalizado con errores.', 'error');
+                actionArea.style.display = 'none';
+            } else {
+                const motivo = estado === 'atascado'
+                    ? 'El proceso dejó de avanzar.'
+                    : `Se detuvo por un problema de conexión: ${ultimoError}`;
+                setFinal('error', '❌ La indexación NO terminó', `${motivo}\n${resumen}\nLo ya leído quedó guardado: presione "Iniciar" otra vez y sigue donde quedó.`);
+                addLog('⛔ Proceso detenido sin terminar.', 'error');
+                btn.disabled = false;
+                document.getElementById('batchSize').disabled = false;
+                forceCheck.disabled = false;
+                document.getElementById('btnIcon').innerHTML = '🔁';
+                document.getElementById('btnText').textContent = 'Continuar indexación';
+                initialPending = newPending;
+            }
 
-            const finalPending = document.getElementById('pendingCount').textContent;
-
-            document.getElementById('completeMessage').classList.add('show');
-            document.getElementById('completeSummary').innerText =
-                `Proceso finalizado.\nDocs procesados en esta sesión: ${processedCount}.\nPendientes actuales: ${finalPending}`;
-
-            addLog('🏁 Proceso finalizado.', 'success');
-
-            // Re-enable (optional, but usually we leave it done)
-            // btn.disabled = false;
-            document.getElementById('btnIcon').innerHTML = '✅';
-            document.getElementById('btnText').textContent = 'Finalizado';
-            actionArea.style.display = 'none'; // hide controls to look clean
+            if (estado === 'ok') {
+                document.getElementById('btnIcon').innerHTML = '✅';
+                document.getElementById('btnText').textContent = 'Finalizado';
+            }
+            isRunning = false;
         }
     </script>
 </body>

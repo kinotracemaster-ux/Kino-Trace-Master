@@ -828,11 +828,12 @@ COD001
             // First call to get initial pending count
             let pending = 999;
             let batchNum = 0;
+            let nextOffset = 0;
             const batchSize = force ? 50 : 10;
 
             while (pending > 0) {
                 batchNum++;
-                const offset = (batchNum - 1) * batchSize;
+                const offset = nextOffset;
                 status.innerHTML = `🔄 Procesando lote #${batchNum}... (Indexados: ${totalIndexedSession})`;
 
                 try {
@@ -847,6 +848,7 @@ COD001
 
                     totalIndexedSession += result.indexed;
                     pending = result.pending;
+                    nextOffset = result.next_offset ?? (nextOffset + batchSize);
 
                     status.innerHTML = `✅ Indexados: ${totalIndexedSession}, Pendientes: ${pending}`;
 
@@ -855,12 +857,12 @@ COD001
                     }
 
                     // Stop conditions
-                    if (!force && result.indexed === 0 && pending > 0) {
+                    if (!force && result.indexed === 0 && !result.partial && pending > 0) {
                         status.innerHTML += ` <span style="color: var(--warning);">(${pending} archivos no encontrados o ilegibles)</span>`;
                         break;
                     }
 
-                    if (force && result.indexed === 0) {
+                    if (force && (result.done || (result.processed === 0 && !result.partial))) {
                         status.innerHTML = `✅ Proceso finalizado. ${totalIndexedSession} documentos procesados.`;
                         break;
                     }

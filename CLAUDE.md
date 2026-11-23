@@ -111,6 +111,10 @@ Cada subcarpeta es una feature server-rendered independiente con su propio `inde
 
 `helpers/pdf_extractor.php` extrae texto (Smalot\PdfParser / `pdftotext` CLI como fallback) y detecta códigos alfanuméricos con regex (mínimo 3 caracteres, admite guiones/espacios). `helpers/gemini_ai.php` ofrece extracción/chat asistido por Google Gemini cuando `GEMINI_API_KEY` está configurada (opcional, degrada sin IA si falta).
 
+### Indexar PDFs (OCR) sin pasar el tiempo del proxy
+
+`reindex_documents` (`SystemController::reindex`) trabaja un **presupuesto de ~25 s por petición** (`REINDEX_PRESUPUESTO_SEG`) y devuelve `processed`, `done`, `partial`, `next_offset`. Los PDFs escaneados se leen con OCR **página por página** (`helpers/indexar_pdf.php`, `kt_indexar_pdf()`): si se acaba el tiempo a mitad de un PDF, el avance queda en `datos_extraidos` (`ocr_pagina`, `ocr_texto`; sin clave `text`/`error`, así sigue "pendiente") y la siguiente petición continúa. `modules/indexar/index.php` hace reintentos (3) ante respuesta no-JSON/timeout y solo dice "completada" si el servidor responde `done`; si se corta, muestra "NO terminó" y "Continuar". Cualquier cliente JS nuevo debe usar `partial`/`done`, no suponer que un lote termina en una petición.
+
 ### Enlazar PDFs a documentos importados
 
 Los documentos importados por SQL/Excel quedan con `ruta_archivo = 'pending'` hasta tener su PDF. **Administrador → Enlazar PDFs** (`modules/importar_datos/enlazar_pdfs.php`) abre el ZIP o la carpeta en el navegador (zip.js en `assets/vendor/zipjs/`), pide al servidor el plan solo con los nombres (`action=plan`, mismas reglas que `kt_linker_emparejar()`) y sube de a un PDF, 3 a la vez, solo los que tienen documento (`action=subir`: guarda en `uploads/sql_import/` y enlaza si sigue pendiente). Sin límite de tamaño total, se retoma eligiendo el mismo ZIP, no crea documentos ni extrae códigos. "Subida por Lote" (`modules/lote/`) en cambio **crea un documento nuevo por PDF**. El buscador público marca `tiene_pdf` (`kt_documento_tiene_pdf()`) y muestra "PDF no disponible".

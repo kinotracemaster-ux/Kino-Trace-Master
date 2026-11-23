@@ -19,16 +19,24 @@ class SystemController extends BaseController
         OR (datos_extraidos NOT LIKE '%\"text\":%' AND datos_extraidos NOT LIKE '%\"error\":%')
     )";
 
+    /** Segundos de trabajo por petición: muy por debajo del corte del proxy (Railway/Cloudflare ~100 s). */
+    private const REINDEX_PRESUPUESTO_SEG = 25;
+
     public function reindex($request)
     {
         // Start output buffering to catch any stray warnings/errors
         ob_start();
-        $docs = [];
         $indexed = 0;
         $errors = [];
+        $procesados = 0;   // documentos terminados (bien o con error) en esta petición
+        $parcial = null;   // documento escaneado a medio leer (se retoma en la próxima petición)
+        $tiempoAgotado = false;
 
         try {
-            set_time_limit(300);
+            \load_helper('indexar_pdf');
+            $inicio = microtime(true);
+            $deadline = $inicio + self::REINDEX_PRESUPUESTO_SEG;
+            set_time_limit(120);
             session_write_close(); // Prevent session locking during long process
 
             // Silence fontconfig warnings - ensure valid temp dir
@@ -36,25 +44,19 @@ class SystemController extends BaseController
             putenv("FONTCONFIG_PATH=$tmpDir");
 
             $forceAll = isset($request['force']);
-            // Increased batch size to 200 for faster processing of large workloads
-            $batchSize = min(200, max(1, (int) ($request['batch'] ?? 120)));
-            $offset = (int) ($request['offset'] ?? 0);
-
-            error_log("Reindex started: forceAll=" . ($forceAll ? 'true' : 'false') . ", batchSize=$batchSize, offset=$offset");
+            // "batch" es un máximo de documentos; el que manda es el tiempo por petición.
+            $batchSize = min(200, max(1, (int) ($request['batch'] ?? 50)));
+            $offset = max(0, (int) ($request['offset'] ?? 0));
 
             if ($forceAll) {
                 $stmt = $this->db->prepare("
-                SELECT id, ruta_archivo, tipo 
+                SELECT id, ruta_archivo, tipo, datos_extraidos
                 FROM documentos 
                 WHERE ruta_archivo LIKE '%.pdf'
                 ORDER BY id DESC
                 LIMIT $batchSize OFFSET $offset
             ");
-                $stmt->execute();
-                $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             } else {
-                // Optimized: Select only potential candidates for reindexing
-                // (Null data, empty string, or missing "text" key in JSON)
                 $stmt = $this->db->prepare("
                 SELECT id, ruta_archivo, tipo, datos_extraidos
                 FROM documentos 
@@ -63,97 +65,82 @@ class SystemController extends BaseController
                 ORDER BY id DESC
                 LIMIT $batchSize
             ");
-                $stmt->execute();
-                $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             }
-
-            error_log("Docs to process: " . count($docs));
+            $stmt->execute();
+            $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             $updateStmt = $this->db->prepare("UPDATE documentos SET datos_extraidos = ? WHERE id = ?");
 
             foreach ($docs as $doc) {
-                // error_log("Processing doc #{$doc['id']}");
+                // No empezar un documento nuevo si ya se usó el tiempo de esta petición.
+                if ($procesados > 0 && microtime(true) >= $deadline) {
+                    $tiempoAgotado = true;
+                    break;
+                }
 
-                // Robust path resolution via centralized helper
                 $pdfPath = resolve_pdf_path($this->clientCode, $doc);
                 $type = strtolower($doc['tipo']);
 
-                // 3. Verify physical existence
                 if (!$pdfPath || !file_exists($pdfPath)) {
-                    $uploadsDir = CLIENTS_DIR . "/{$this->clientCode}/uploads/";
-                    $existingFolders = get_available_folders($this->clientCode);
-
-                    $triedPaths = [
-                        $uploadsDir . $doc['ruta_archivo'],
-                        $uploadsDir . $type . '/' . basename($doc['ruta_archivo']),
-                        "Resolved was NULL"
-                    ];
-                    $folderList = implode(', ', array_slice($existingFolders, 0, 10));
-                    $errorMsg = "Archivo no encontrado. Carpetas en uploads/: [$folderList]";
-                    $errors[] = "#{$doc['id']}: $errorMsg";
-                    error_log("Doc #{$doc['id']} error: $errorMsg");
-
-                    // Save error to DB so we don't retry forever
-                    $errorData = json_encode([
+                    $errors[] = "#{$doc['id']}: Archivo no encontrado";
+                    // Guardar el error para no reintentarlo en cada lote
+                    $updateStmt->execute([json_encode([
                         'error' => 'Archivo no encontrado',
                         'type_expected' => $type,
                         'timestamp' => time()
-                    ]);
-                    $updateStmt->execute([$errorData, $doc['id']]);
-
+                    ]), $doc['id']]);
+                    $procesados++;
                     continue;
                 }
 
+                $previo = json_decode((string) ($doc['datos_extraidos'] ?? ''), true);
+                // En "forzar" se relee desde cero salvo que haya un OCR a medias que retomar.
+                if (!is_array($previo) || !isset($previo['ocr_pagina'])) {
+                    $previo = null;
+                }
+
                 try {
-                    // Suppress fontconfig warnings temporarily
                     $originalErrorReporting = error_reporting();
                     error_reporting($originalErrorReporting & ~E_NOTICE & ~E_WARNING);
+                    try {
+                        $r = kt_indexar_pdf($pdfPath, $previo, $deadline);
+                    } finally {
+                        error_reporting($originalErrorReporting);
+                    }
 
-                    $extractResult = extract_codes_from_pdf($pdfPath);
+                    if ($r['estado'] === 'parcial') {
+                        $updateStmt->execute([json_encode($r['avance'], JSON_UNESCAPED_UNICODE), $doc['id']]);
+                        $parcial = ['id' => (int) $doc['id'], 'pagina' => $r['pagina'], 'paginas' => $r['paginas']];
+                        $tiempoAgotado = true;
+                        break; // la próxima petición sigue en este mismo documento
+                    }
 
-                    // Restore error reporting
-                    error_reporting($originalErrorReporting);
-
-                    // 5. Validate extraction result
-                    if (!isset($extractResult['success']) || !$extractResult['success'] || empty($extractResult['text'])) {
-                        $msg = $extractResult['error'] ?? 'Extracción fallida o sin texto';
-                        $errors[] = "#{$doc['id']}: $msg";
-
-                        // Save error status
-                        $errorData = json_encode(['error' => $msg, 'timestamp' => time()]);
-                        $updateStmt->execute([$errorData, $doc['id']]);
+                    if ($r['estado'] === 'error') {
+                        $errors[] = "#{$doc['id']}: {$r['error']}";
+                        $updateStmt->execute([json_encode(['error' => $r['error'], 'timestamp' => time()], JSON_UNESCAPED_UNICODE), $doc['id']]);
                     } else {
-                        // Success
-                        $datosExtraidos = [
-                            'text' => substr($extractResult['text'], 0, 50000),
-                            'auto_codes' => $extractResult['codes'],
+                        $updateStmt->execute([json_encode([
+                            'text' => mb_substr($r['text'], 0, 50000),
+                            'auto_codes' => $r['codes'],
                             'indexed_at' => date('Y-m-d H:i:s')
-                        ];
-                        $updateStmt->execute([json_encode($datosExtraidos, JSON_UNESCAPED_UNICODE), $doc['id']]);
+                        ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), $doc['id']]);
                         $indexed++;
                     }
                 } catch (\Throwable $e) {
                     $errors[] = "#{$doc['id']}: " . $e->getMessage();
-                    error_log("Doc #{$doc['id']} fatal match: " . $e->getMessage());
-
+                    error_log("Reindex doc #{$doc['id']}: " . $e->getMessage());
                     // Guardar el error para que el documento salga de la cola de pendientes
-                    $errorData = json_encode(['error' => $e->getMessage(), 'timestamp' => time()]);
-                    $updateStmt->execute([$errorData, $doc['id']]);
+                    $updateStmt->execute([json_encode(['error' => $e->getMessage(), 'timestamp' => time()]), $doc['id']]);
                 }
-
-                // Free memory after each iteration
+                $procesados++;
                 gc_collect_cycles();
             }
 
-            // 4. Optimized Pending Count using SQL
-            $stmtCount = $this->db->prepare("
-                SELECT COUNT(*) as total
-                FROM documentos 
+            $pending = (int) $this->db->query("
+                SELECT COUNT(*) FROM documentos 
                 WHERE ruta_archivo LIKE '%.pdf'
                 AND " . self::PENDING_CONDITION . "
-            ");
-            $stmtCount->execute();
-            $pending = (int) $stmtCount->fetchColumn();
+            ")->fetchColumn();
 
             // Documentos que ya fallaron (archivo faltante, PDF sin texto, etc.).
             // Se reintentan solo con force=1.
@@ -170,6 +157,13 @@ class SystemController extends BaseController
                 'errors' => $errors,
                 'pending' => $pending,
                 'failed' => $failed,
+                'processed' => $procesados,
+                // En modo forzar: desde dónde pedir el siguiente lote (el doc a medias se repite y se retoma).
+                'next_offset' => $offset + $procesados,
+                'partial' => $parcial,
+                'time_up' => $tiempoAgotado,
+                'done' => $forceAll ? ($parcial === null && !$tiempoAgotado && count($docs) < $batchSize) : ($pending === 0),
+                'seconds' => round(microtime(true) - $inicio, 1),
                 'message' => "Indexados: $indexed, Pendientes: $pending, Con error: $failed"
             ];
 
