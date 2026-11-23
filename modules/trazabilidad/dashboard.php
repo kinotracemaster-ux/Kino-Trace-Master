@@ -392,7 +392,7 @@ while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
                         progressText.textContent = `Indexados: ${totalIndexed}, Pendientes: ${pending}`;
 
                         // Safety break if no progress is made (los fallidos quedan marcados y salen de la cola)
-                        const processed = result.indexed + (result.errors ? result.errors.length : 0);
+                        const processed = result.indexed + (result.errors ? result.errors.length : 0) + (result.partial ? 1 : 0); // partial = PDF escaneado a medio leer (OCR), sigue en la próxima vuelta
                         if (processed === 0 && pending > 0) {
                             throw new Error(`El proceso se detuvo. ${pending} documentos no se pudieron procesar (posiblemente archivos faltantes).`);
                         }

@@ -1203,7 +1203,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                     }
 
                     // Los que fallan quedan marcados y salen de la cola; solo se corta si el lote no avanzó nada
-                    const processed = result.indexed + (result.errors ? result.errors.length : 0);
+                    const processed = result.indexed + (result.errors ? result.errors.length : 0) + (result.partial ? 1 : 0); // partial = PDF escaneado a medio leer (OCR), sigue en la próxima vuelta
                     if (processed === 0 && pending > 0) {
                         status.innerHTML += ` <span style="color: var(--warning);">(${pending} sin procesar)</span>`;
                         break;
