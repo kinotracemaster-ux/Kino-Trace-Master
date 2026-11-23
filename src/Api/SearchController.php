@@ -34,6 +34,10 @@ class SearchController extends BaseController
 
         // Global helper
         $result = greedy_search($this->db, $codes);
+        // Lo que no apareció en ningún documento queda anotado (helpers/busquedas_sin_resultado.php)
+        if (!empty($result['not_found'])) {
+            kt_busquedas_sin_resultado($this->db, $result['not_found'], 'voraz');
+        }
         $this->jsonExit($result);
     }
 
@@ -41,6 +45,9 @@ class SearchController extends BaseController
     {
         $code = trim($request['code'] ?? '');
         $result = search_by_code($this->db, $code);
+        if (!$result) {
+            kt_busqueda_sin_resultado($this->db, $code, 'interno');
+        }
         $this->jsonExit(['documents' => $result]);
     }
 

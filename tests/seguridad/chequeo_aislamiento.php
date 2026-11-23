@@ -181,6 +181,34 @@ try {
     ok(strpos($log, '"accion":"search_by_code"') !== false && strpos($log, '"cliente":"alfa"') !== false, 'registro de páginas lentas anota página, acción y cliente');
     ok(strpos($log, 'BETA-001') === false && strpos($log, 'clave-') === false, 'el registro de páginas lentas no guarda lo buscado ni contraseñas');
     ok(strpos($r['body'], 'Páginas lentas') !== false, 'el panel admin muestra el resumen de páginas lentas');
+    // --- Búsquedas que no encontraron nada (helpers/busquedas_sin_resultado.php)
+    foreach (['ZZ-9999', 'zz 9999', 'ALFA-001', 'AB'] as $cod) {
+        pedir("$base/api.php?action=search_by_code&code=" . rawurlencode($cod), null, $alfa);
+    }
+    pedir("$base/api.php?action=search&codes=" . rawurlencode("ALFA-001 descripcion\nVORAZ-77 otra cosa"), null, $alfa);
+    $bsr = fn(string $cli) => (new PDO("sqlite:$app/clients/$cli/$cli.db"))
+        ->query('SELECT clave, origen, veces FROM busquedas_sin_resultado')->fetchAll(PDO::FETCH_ASSOC);
+    $filas = [];
+    foreach ($bsr('alfa') as $f) { $filas[$f['clave'] . '|' . $f['origen']] = (int) $f['veces']; }
+    ok(($filas['ZZ9999|interno'] ?? 0) === 2, 'sin resultado: "ZZ-9999" y "zz 9999" cuentan como la misma búsqueda (2 veces)');
+    ok(isset($filas['BETA001|publico']), 'sin resultado: lo buscado en el buscador público también queda anotado');
+    ok(isset($filas['VORAZ77|voraz']) && !isset($filas['ALFA001|voraz']), 'sin resultado: la búsqueda voraz anota solo lo que no encontró');
+    ok(!isset($filas['ALFA001|interno']) && !isset($filas['AB|interno']), 'sin resultado: no anota lo que sí existe ni textos de 2 letras');
+    $claves = array_map(fn($f) => $f['clave'], $bsr('beta'));
+    ok(!in_array('ZZ9999', $claves, true) && !in_array('BETA001', $claves, true), 'sin resultado: la base de beta no recibe lo buscado en alfa');
+    $r = pedir("$base/Admin-gestor/panel.php", null, $mae);
+    ok(strpos($r['body'], 'búsquedas sin resultado') !== false && strpos($r['body'], 'zz 9999') !== false,
+        'sin resultado: el panel admin lo muestra en la tarjeta del cliente');
+    // Una pegada enorme no llena la base: tope de 2.000 filas, quedan las más recientes
+    for ($lote = 0; $lote < 5; $lote++) {
+        $lista = [];
+        for ($i = 0; $i < 500; $i++) { $lista[] = sprintf('TOPE-%d-%03d', $lote, $i); }
+        pedir("$base/api.php?action=search&codes=" . rawurlencode(implode("\n", $lista)), null, $alfa);
+    }
+    $filas = $bsr('alfa');
+    $claves = array_map(fn($f) => $f['clave'], $filas);
+    ok(count($filas) <= 2000 && in_array('TOPE4499', $claves, true) && !in_array('TOPE0000', $claves, true),
+        'sin resultado: tope de 2.000 filas, se borran las más viejas (' . count($filas) . ' filas)');
     ok(pedir("$base/Admin-gestor/respaldos.php", null, $alfa)['code'] === 302, 'respaldos con sesión de cliente: no entra');
     $r = pedir("$base/index.php", null, $alfa, true);
     ok(strpos($r['body'], 'Admin-gestor/panel.php') === false, 'el menú de un cliente no muestra el gestor de clientes');

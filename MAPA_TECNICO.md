@@ -153,6 +153,20 @@ CREATE TABLE configuracion_extraccion (
 - Índices en `codigos`: `idx_codigos_documento_id`, `idx_codigos_codigo`.
 - Índices en `vinculos`: `idx_vinculos_origen`, `idx_vinculos_destino`.
 
+```sql
+-- Migración 3 (v3). Búsquedas que no encontraron nada (helpers/busquedas_sin_resultado.php)
+CREATE TABLE busquedas_sin_resultado (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  clave TEXT NOT NULL,      -- code_match_key() del código buscado
+  origen TEXT NOT NULL,     -- 'interno' | 'publico' | 'voraz'
+  codigo TEXT NOT NULL,     -- como lo escribió quien buscó (máx. 60)
+  veces INTEGER NOT NULL DEFAULT 1,
+  primera TEXT NOT NULL, ultima TEXT NOT NULL,
+  UNIQUE (clave, origen)
+);
+```
+Tope 2.000 filas y 90 días (se podan al escribir). El panel admin muestra por cliente lo más buscado sin resultado en 30 días, sin lo que ya existe.
+
 Confirmado leyendo `clients/kino/kino.db` directamente: el esquema vigente de `documentos` incluye todas las columnas originales + `original_path` (insertada entre `ruta_archivo` y `hash_archivo`) + `texto_extraido`/`estado_extraccion` al final. Las DBs plantilla en `database_initial/{0001,admin,cliente}/` **todavía no** tienen `tipos_documento`/`log_actividad` ni las columnas nuevas — se aplican solas la primera vez que se abren.
 
 No se detectaron columnas usadas en queries (`helpers/search_engine.php`, `src/Api/*`) que falten en el esquema real.
