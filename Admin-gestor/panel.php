@@ -623,10 +623,17 @@ try {
                 // hacía que esa dirección abriera el cliente equivocado
                 $error = $p;
             } elseif ($code !== '' && $code !== 'admin') {
+                $antes = $centralDb->prepare('SELECT subdominio FROM control_clientes WHERE codigo = ?');
+                $antes->execute([$code]);
+                $subAntes = (string) ($antes->fetchColumn() ?: $code);
                 $stmt = $centralDb->prepare('UPDATE control_clientes SET subdominio = ? WHERE codigo = ?');
                 $stmt->execute([$newSub ?: null, $code]);
                 $subLabel = $newSub ?: $code;
-                $message = "✅ Subdominio de '{$code}' actualizado a '{$subLabel}.kino-trace.com'.";
+                $message = "✅ Enlace de '{$code}' actualizado a '{$subLabel}." . APP_BASE_DOMAIN . "'.";
+                if ($subAntes !== $subLabel && $subAntes !== $code) {
+                    // El código siempre abre al cliente (resolveClientCode); un subdominio propio viejo no
+                    $message .= " El enlace anterior '{$subAntes}." . APP_BASE_DOMAIN . "' ya no abre este cliente: avísale.";
+                }
             }
         }
     }
@@ -1234,9 +1241,13 @@ foreach ($clients as $cli) {
                         <?php endif; ?>
                         <?php if ($cli['codigo'] !== 'admin'): ?>
                             <?php $subLabel = $cli['subdominio'] ?: $cli['codigo']; ?>
-                            <div class="client-meta">🌐 <a href="//<?= htmlspecialchars($subLabel) ?>.kino-trace.com"
+                            <div class="client-meta">🔐 Entrar: <a href="https://<?= htmlspecialchars($subLabel . '.' . APP_BASE_DOMAIN) ?>/"
                                     target="_blank"
-                                    style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel) ?>.kino-trace.com</a>
+                                    style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel . '.' . APP_BASE_DOMAIN) ?></a>
+                            </div>
+                            <div class="client-meta">🔎 Buscador público: <a href="https://<?= htmlspecialchars($subLabel . '.' . APP_BASE_DOMAIN) ?>/modules/Buscador/"
+                                    target="_blank"
+                                    style="color: var(--accent-primary); text-decoration: none;"><?= htmlspecialchars($subLabel . '.' . APP_BASE_DOMAIN) ?>/modules/Buscador/</a>
                             </div>
                         <?php endif; ?>
 
@@ -1275,9 +1286,9 @@ foreach ($clients as $cli) {
                                 </button>
                             <?php endif; ?>
                             <?php if ($cli['codigo'] !== 'admin'): ?>
-                                <button class="btn btn-secondary btn-xs" title="Editar subdominio"
+                                <button class="btn btn-secondary btn-xs" title="Ver, copiar y editar los enlaces para entrar"
                                     onclick="openSubdomainModal('<?= htmlspecialchars($cli['codigo']) ?>', '<?= htmlspecialchars($cli['subdominio'] ?? '') ?>')">
-                                    🔗 Subdominio
+                                    🔗 Enlaces
                                 </button>
                                 <button class="btn btn-secondary btn-xs" title="Editar página pública"
                                     onclick="openPublicPageModal('<?= htmlspecialchars($cli['codigo']) ?>')">
@@ -1651,7 +1662,7 @@ foreach ($clients as $cli) {
     <!-- Subdomain Modal -->
     <div id="subdomainModal" class="modal-overlay">
         <div class="modal">
-            <h3>🔗 Editar Subdominio</h3>
+            <h3>🔗 Enlaces del cliente</h3>
             <form method="post">
                 <input type="hidden" name="action" value="update_subdomain">
                 <input type="hidden" name="sub_code" id="subCode">
@@ -1660,23 +1671,24 @@ foreach ($clients as $cli) {
                     <input type="text" id="subClientDisplay" class="form-input" disabled>
                 </div>
                 <div class="form-group" style="margin-bottom: 1rem;">
-                    <label class="form-label">Subdominio personalizado</label>
+                    <label class="form-label">Enlace (subdominio)</label>
                     <div style="display: flex; align-items: center; gap: 0;">
                         <input type="text" name="subdominio" id="subdomainInput" class="form-input"
                             placeholder="mi-empresa" pattern="[a-z0-9\-]+"
                             style="border-radius: var(--radius-sm) 0 0 var(--radius-sm); text-align: right;">
                         <span
-                            style="background: var(--bg-primary); border: 1px solid var(--border-color); border-left: none; padding: 0.5rem 0.75rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">.kino-trace.com</span>
+                            style="background: var(--bg-primary); border: 1px solid var(--border-color); border-left: none; padding: 0.5rem 0.75rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">.<?= htmlspecialchars(APP_BASE_DOMAIN) ?></span>
                     </div>
                     <small style="color: var(--text-muted); display: block; margin-top: 0.25rem;">Solo letras, números y
                         guiones. Dejar vacío usa el código del cliente.</small>
                 </div>
                 <div id="subPreview" style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-secondary);">
                 </div>
+                <div id="subWarn" style="display:none; margin-bottom: 1rem; font-size: 0.8rem; color: #b45309;"></div>
                 <div class="flex gap-2">
-                    <button type="submit" class="btn btn-primary">Guardar</button>
+                    <button type="submit" class="btn btn-primary">Guardar enlace</button>
                     <button type="button" class="btn btn-secondary"
-                        onclick="closeModal('subdomainModal')">Cancelar</button>
+                        onclick="closeModal('subdomainModal')">Cerrar</button>
                 </div>
             </form>
         </div>
@@ -1799,7 +1811,10 @@ foreach ($clients as $cli) {
             return true;
         }
 
+        const KT_BASE_DOMAIN = <?= json_encode(APP_BASE_DOMAIN) ?>;
+        let ktSubAntes = '';
         function openSubdomainModal(code, currentSub) {
+            ktSubAntes = currentSub || code;
             document.getElementById('subCode').value = code;
             document.getElementById('subClientDisplay').value = code;
             document.getElementById('subdomainInput').value = currentSub || '';
@@ -1811,8 +1826,42 @@ foreach ($clients as $cli) {
         function updateSubPreview() {
             const input = document.getElementById('subdomainInput');
             const code = document.getElementById('subCode').value;
-            const val = input.value.trim() || code;
-            document.getElementById('subPreview').innerHTML = '🌐 URL resultante: <strong>' + val + '.kino-trace.com</strong>';
+            const val = (input.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || code);
+            const host = 'https://' + val + '.' + KT_BASE_DOMAIN;
+            const enlaces = [
+                ['🔐 Entrar (usuarios del cliente)', host + '/'],
+                ['🔎 Buscador público', host + '/modules/Buscador/'],
+                ['🔎 Buscador público (enlace largo)', 'https://' + KT_BASE_DOMAIN + '/modules/Buscador/?cliente=' + encodeURIComponent(code)],
+            ];
+            if (val !== code) enlaces.push(['↪️ También entra con el código', 'https://' + code + '.' + KT_BASE_DOMAIN + '/']);
+            const box = document.getElementById('subPreview');
+            box.innerHTML = '<div style="font-weight:600;margin-bottom:.35rem;">Enlaces para entrar:</div>';
+            enlaces.forEach(([nombre, url]) => {
+                const fila = document.createElement('div');
+                fila.style.cssText = 'display:flex;align-items:center;gap:.4rem;margin-bottom:.35rem;flex-wrap:wrap;';
+                const txt = document.createElement('div');
+                txt.style.cssText = 'flex:1;min-width:0;overflow-wrap:anywhere;';
+                txt.innerHTML = '<small>' + nombre + '</small><br>';
+                const a = document.createElement('a');
+                a.href = url; a.target = '_blank'; a.textContent = url;
+                a.style.color = 'var(--accent-primary)';
+                txt.appendChild(a);
+                const b = document.createElement('button');
+                b.type = 'button'; b.className = 'btn btn-secondary btn-xs'; b.textContent = '📋 Copiar';
+                b.onclick = () => {
+                    const listo = () => { b.textContent = '✓ Copiado'; setTimeout(() => b.textContent = '📋 Copiar', 1500); };
+                    if (navigator.clipboard) navigator.clipboard.writeText(url).then(listo, () => prompt('Copia el enlace:', url));
+                    else prompt('Copia el enlace:', url);
+                };
+                fila.appendChild(txt); fila.appendChild(b); box.appendChild(fila);
+            });
+            const warn = document.getElementById('subWarn');
+            if (val !== ktSubAntes && ktSubAntes !== code) {
+                warn.style.display = 'block';
+                warn.textContent = '⚠️ Al guardar, el enlace actual ' + ktSubAntes + '.' + KT_BASE_DOMAIN + ' deja de funcionar. Avisa al cliente del enlace nuevo.';
+            } else {
+                warn.style.display = 'none';
+            }
         }
         document.addEventListener('DOMContentLoaded', () => {
             const subInput = document.getElementById('subdomainInput');
@@ -2119,7 +2168,7 @@ foreach ($clients as $cli) {
             'delete': ['🗑️ Eliminando archivos...', 'Eliminando registros...', 'Limpiando...'],
             'diagnose_orphans': ['🔍 Analizando documentos...', 'Contando huérfanos...'],
             'update_public_page': ['🌐 Guardando página pública...'],
-            'update_subdomain': ['🌐 Actualizando subdominio...']
+            'update_subdomain': ['🔗 Guardando enlace...']
         };
 
         const progressTitles = {
@@ -2132,7 +2181,7 @@ foreach ($clients as $cli) {
             'delete': 'Eliminando Cliente',
             'diagnose_orphans': 'Diagnosticando',
             'update_public_page': 'Guardando Página Pública',
-            'update_subdomain': 'Actualizando Subdominio'
+            'update_subdomain': 'Guardando enlace'
         };
 
         let progressInterval = null;
