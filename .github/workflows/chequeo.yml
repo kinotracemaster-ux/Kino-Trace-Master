@@ -26,3 +26,6 @@ jobs:
 
       - name: Sintaxis + migración de todos los clientes + cliente nuevo
         run: php tools/chequeo.php
+
+      - name: Resaltado sin el "-N" final (1980-1 encuentra 1980)
+        run: php tests/resaltado/chequeo_sin_sufijo.php

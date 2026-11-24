@@ -194,17 +194,21 @@ function ocr_hl_match_terms(array $words, array $terms): array
         }
     }
 
-    foreach ($terms as $term) {
-        $needle = ocr_hl_key((string) $term);
+    // Busca una clave; devuelve cuántas veces la encontró. $via = texto con el
+    // que se encontró cuando no es el término exacto (búsqueda sin el "-N").
+    $scan = function (string $needle, string $term, ?string $via) use ($words, $stream, $owner, $chars, &$matches, &$highlights): int {
         $nLen = mb_strlen($needle, 'UTF-8');
-        if ($nLen === 0) {
-            continue;
-        }
+        $found = 0;
         $from = 0;
         while (($pos = mb_strpos($stream, $needle, $from, 'UTF-8')) !== false) {
             $from = $pos + $nLen;
+            $end = $owner[$pos + $nLen - 1];
             if (!ocr_hl_edge_ok($chars, $owner[$pos], -1, mb_substr($needle, 0, 1, 'UTF-8'))
-                || !ocr_hl_edge_ok($chars, $owner[$pos + $nLen - 1], 1, mb_substr($needle, -1, 1, 'UTF-8'))) {
+                || !ocr_hl_edge_ok($chars, $end, 1, mb_substr($needle, -1, 1, 'UTF-8'))) {
+                continue;
+            }
+            // Sin el -N: "1980" seguido de "-2" es OTRO ítem, no el "1980-1" buscado
+            if ($via !== null && ocr_hl_otro_sufijo($chars, $words, $end)) {
                 continue;
             }
             $wordIdx = array_values(array_unique(array_column(array_slice($owner, $pos, $nLen), 0)));
@@ -213,7 +217,7 @@ function ocr_hl_match_terms(array $words, array $terms): array
             foreach ($wordIdx as $i) {
                 $w = $words[$i];
                 $box = ['x' => $w['x'], 'y' => $w['y'], 'w' => $w['w'], 'h' => $w['h']];
-                $highlights[] = $box + ['term' => $term, 'match' => $matchNum];
+                $highlights[] = $box + ['term' => $term, 'match' => $matchNum] + ($via !== null ? ['via' => $via] : []);
                 $texts[] = $w['text'];
             }
             $first = $words[$wordIdx[0]];
@@ -221,11 +225,60 @@ function ocr_hl_match_terms(array $words, array $terms): array
                 'term' => $term,
                 'word' => implode(' ', $texts),
                 'x' => $first['x'], 'y' => $first['y'], 'w' => $first['w'], 'h' => $first['h'],
-            ];
+            ] + ($via !== null ? ['via' => $via] : []);
+            $found++;
+        }
+        return $found;
+    };
+
+    foreach ($terms as $term) {
+        $term = (string) $term;
+        $needle = ocr_hl_key($term);
+        if ($needle === '') {
+            continue;
+        }
+        if ($scan($needle, $term, null) > 0) {
+            continue;
+        }
+        // No está tal cual: probar sin el "-N" final ("1980-1" → "1980")
+        $base = ocr_hl_base_sin_sufijo($term);
+        if ($base !== null) {
+            $scan(ocr_hl_key($base), $term, $base);
         }
     }
 
     return ['matches' => $matches, 'highlights' => $highlights];
+}
+
+/**
+ * "1980-1" → "1980", "NO.2519A-5" → "NO.2519A". En las listas de búsqueda el
+ * "-N" final suele ser número de ítem/copia que el PDF no trae. Solo 1-2 cifras
+ * y la base debe tener al menos 3 letras/números ("BL-12" no se recorta).
+ * Misma regla que ktBaseSinSufijo() en los visores. null si no aplica.
+ */
+function ocr_hl_base_sin_sufijo(string $term): ?string
+{
+    if (!preg_match('/^(.*[\p{L}\p{N}])\s*-\s*\d{1,2}$/u', trim($term), $m)) {
+        return null;
+    }
+    return mb_strlen(ocr_hl_key($m[1]), 'UTF-8') >= 3 ? trim($m[1]) : null;
+}
+
+/**
+ * ¿Después de la coincidencia viene "-<cifra>"? (en la misma palabra o en la
+ * siguiente). Entonces es otro ítem: buscando "1980-1" no se resalta "1980-2".
+ */
+function ocr_hl_otro_sufijo(array $chars, array $words, array $at): bool
+{
+    [$i, $k] = $at;
+    $rest = implode('', array_slice($chars[$i], $k + 1));
+    if ($rest === '' && isset($words[$i + 1])) {
+        $rest = (string) ($words[$i + 1]['text'] ?? '');
+        if (isset($words[$i + 2]) && preg_match('/^-$/', $rest)) {
+            $rest .= (string) ($words[$i + 2]['text'] ?? '');
+        }
+    }
+    return (bool) preg_match('/^\s*-\s*\d/u', $rest);
 }
 
 /**

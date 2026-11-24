@@ -543,7 +543,23 @@ if (!empty($searchTerm)) {
         const SEP_RE = /[\s\-.,;:_\/ ]/;
         const normChar = ch => ch.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
         const keyOf = str => { let o = ''; for (const ch of str) if (!SEP_RE.test(ch)) o += normChar(ch); return o; };
-        const termKeys = termsToHighlight.map(term => ({ term, key: keyOf(term) })).filter(t => t.key);
+        // "1980-1" → "1980": el "-N" final suele ser número de ítem/copia que el
+        // PDF no trae. Misma regla que ocr_hl_base_sin_sufijo() (servidor).
+        function baseSinSufijo(term) {
+            const m = String(term).trim().match(/^(.*[\p{L}\p{N}])\s*-\s*\d{1,2}$/u);
+            if (!m) return null;
+            return keyOf(m[1]).length >= 3 ? m[1].trim() : null;
+        }
+        const termKeys = termsToHighlight.map(term => {
+            const base = baseSinSufijo(term);
+            return { term, key: keyOf(term), base, baseKey: base ? keyOf(base) : '' };
+        }).filter(t => t.key);
+        // ¿Después de la base viene "-<cifra>"? Entonces es otro ítem ("1980-2").
+        function otroSufijo(tc, [idx, k]) {
+            let rest = (tc.items[idx].str || '').slice(k + 1);
+            if (!rest.trim()) rest += ((tc.items[idx + 1] || {}).str || '') + ((tc.items[idx + 2] || {}).str || '');
+            return /^\s*-\s*\d/.test(rest);
+        }
 
         // ── Búsqueda en la capa de texto (navegador) ──────────────────
         // Coordenadas en puntos PDF (escala 1): mismo formato que el servidor.
@@ -571,11 +587,14 @@ if (!empty($searchTerm)) {
 
             const highlights = [];
             const matches = [];
-            for (const { term, key } of termKeys) {
-                let from = 0, pos;
+            const scan = (key, term, via) => {
+                let from = 0, pos, found = 0;
                 while ((pos = stream.indexOf(key, from)) !== -1) {
                     from = pos + key.length;
-                    if (!edgeOk(tc, map[pos], -1, key[0]) || !edgeOk(tc, map[pos + key.length - 1], 1, key[key.length - 1])) continue;
+                    const end = map[pos + key.length - 1];
+                    if (!edgeOk(tc, map[pos], -1, key[0]) || !edgeOk(tc, end, 1, key[key.length - 1])) continue;
+                    // Sin el -N: "1980" seguido de "-2" es OTRO ítem
+                    if (via && otroSufijo(tc, end)) continue;
                     // Un rectángulo por fragmento (item) que toca la coincidencia
                     const segments = [];
                     for (let c = pos; c < pos + key.length; c++) {
@@ -587,10 +606,16 @@ if (!empty($searchTerm)) {
                     const matchNum = matches.length;
                     for (const seg of segments) {
                         const box = itemSubstringBox(tc, tc.items[seg.idx], seg.start, seg.end, vp);
-                        if (box) highlights.push({ ...box, term, match: matchNum });
+                        if (box) highlights.push({ ...box, term, match: matchNum, via: via || undefined });
                     }
-                    matches.push({ term });
+                    matches.push(via ? { term, via } : { term });
+                    found++;
                 }
+                return found;
+            };
+            for (const { term, key, base, baseKey } of termKeys) {
+                // Exacto primero; si no está en la hoja, sin el "-N" final
+                if (scan(key, term, null) === 0 && baseKey) scan(baseKey, term, base);
             }
 
             return {
@@ -834,7 +859,7 @@ if (!empty($searchTerm)) {
                 const padY = Math.max(hl.h * 0.18, 1.5);
                 const rect = document.createElement('div');
                 rect.dataset.match = hl.match ?? i;
-                rect.title = hl.term || '';
+                rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via})` : (hl.term || '');
                 rect.style.left = ((hl.x - padX) * sx) + 'px';
                 rect.style.top = ((hl.y - padY) * sy) + 'px';
                 rect.style.width = ((hl.w + padX * 2) * sx) + 'px';

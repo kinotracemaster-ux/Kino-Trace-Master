@@ -305,6 +305,11 @@ $docIdForOcr = $documentId; // For OCR fallback
         }
 
         /* Fallback para índice >= 5 */
+        /* Encontrado sin el "-N" final de la lista (1980-1 → 1980): borde punteado */
+        .ocr-highlight.hl-sin-sufijo {
+            outline: 2px dashed #b45309;
+        }
+
         .ocr-highlight:not([data-term-index]) {
             background: linear-gradient(180deg, rgba(85, 140, 45, 0.50) 0%, rgba(85, 140, 45, 0.35) 100%) !important;
         }
@@ -720,6 +725,39 @@ $docIdForOcr = $documentId; // For OCR fallback
 
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+        // ── Comparación de códigos (misma regla que code_match_key y ocr_hl_key) ──
+        // Sin mayúsculas, tildes ni separadores (espacio, guion, punto, coma...).
+        const KT_SEP_RE = /[\s\-.,;:_\/ ]/;
+        const ktNormChar = ch => ch.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        const ktKeyOf = str => { let o = ''; for (const ch of String(str)) if (!KT_SEP_RE.test(ch)) o += ktNormChar(ch); return o; };
+        // "1980-1" → "1980", "NO.2519A-5" → "NO.2519A": el "-N" final de la lista
+        // suele ser número de ítem/copia que el PDF no trae. Solo 1-2 cifras y la
+        // base debe tener al menos 3 letras/números ("BL-12" no se recorta).
+        // Misma regla que ocr_hl_base_sin_sufijo() en helpers/ocr_highlight.php.
+        function ktBaseSinSufijo(term) {
+            const m = String(term).trim().match(/^(.*[\p{L}\p{N}])\s*-\s*\d{1,2}$/u);
+            if (!m) return null;
+            return ktKeyOf(m[1]).length >= 3 ? m[1].trim() : null;
+        }
+        // Bordes del código: no puede ir pegado a otra letra/número ("11251" no es
+        // "1251") ni ser parte de una cifra con puntos ("1.251.000" no es "1251").
+        function ktEdgeOk(tc, [idx, k], dir, termEdge) {
+            const s = tc.items[idx].str || '';
+            let j = k + dir, skipped = 0;
+            while (j >= 0 && j < s.length && /[.,]/.test(s[j])) { j += dir; skipped++; }
+            if (j < 0 || j >= s.length) return true;
+            const ch = s[j];
+            if (!/[\p{L}\p{N}]/u.test(ch)) return true;
+            return skipped > 0 && !(/\p{N}/u.test(ch) && /\p{N}/u.test(termEdge));
+        }
+        // ¿Después de la base viene "-<cifra>"? Entonces es otro ítem ("1980-2").
+        function ktOtroSufijo(tc, [idx, k]) {
+            let rest = (tc.items[idx].str || '').slice(k + 1);
+            if (!rest.trim()) rest += ((tc.items[idx + 1] || {}).str || '') + ((tc.items[idx + 2] || {}).str || '');
+            return /^\s*-\s*\d/.test(rest);
+        }
+
+
         // Limita peticiones simultáneas al servidor (el OCR es costoso)
         function createLimiter(max) {
             let active = 0;
@@ -763,10 +801,10 @@ $docIdForOcr = $documentId; // For OCR fallback
             const vp = page.getViewport({ scale: 1 });
             const tc = await page.getTextContent();
 
-            // Texto continuo en minúsculas + mapa carácter → (item, posición).
-            // Los espacios se colapsan a uno; los saltos de línea (hasEOL) se unen
-            // SIN espacio porque estos PDFs parten códigos al final de línea
-            // (ej. "M:" + "8278").
+            // Texto continuo SIN separadores + mapa carácter → (item, posición).
+            // Misma regla que el visor público y code_match_key(): "BL-1258"
+            // también resalta "BL1258". Los saltos de línea se unen, así un
+            // código partido al final de línea ("M:" + "8278") se encuentra.
             let stream = '';
             const map = [];
             let textChars = 0;
@@ -774,43 +812,49 @@ $docIdForOcr = $documentId; // For OCR fallback
                 const s = item.str || '';
                 for (let k = 0; k < s.length; k++) {
                     const ch = s[k];
-                    if (/\s/.test(ch)) {
-                        if (stream.length && stream[stream.length - 1] !== ' ') {
-                            stream += ' ';
-                            map.push(null);
-                        }
-                    } else {
-                        const low = ch.toLowerCase();
-                        stream += low.length === 1 ? low : ch;
-                        map.push([idx, k]);
-                        textChars++;
-                    }
+                    if (/\s/.test(ch)) continue;
+                    textChars++;
+                    if (KT_SEP_RE.test(ch)) continue;
+                    for (const c of ktNormChar(ch)) { stream += c; map.push([idx, k]); }
                 }
             });
 
             const highlights = [];
             const matches = [];
-            for (const term of terms) {
-                const needle = term.toLowerCase().replace(/\s+/g, ' ').trim();
-                if (!needle) continue;
-                let from = 0, pos;
-                while ((pos = stream.indexOf(needle, from)) !== -1) {
-                    from = pos + needle.length;
-                    // Agrupar los caracteres del match por item (un rect por fragmento)
+            // Busca una clave en la hoja; devuelve cuántas veces la encontró.
+            // via = texto con el que se encontró cuando no es el término exacto.
+            const scan = (key, term, via) => {
+                let from = 0, pos, found = 0;
+                while ((pos = stream.indexOf(key, from)) !== -1) {
+                    from = pos + key.length;
+                    const end = map[pos + key.length - 1];
+                    if (!ktEdgeOk(tc, map[pos], -1, key[0]) || !ktEdgeOk(tc, end, 1, key[key.length - 1])) continue;
+                    // Sin el -N: "1980" seguido de "-2" es OTRO ítem, no el "1980-1" buscado
+                    if (via && ktOtroSufijo(tc, end)) continue;
                     const segments = [];
-                    for (let c = pos; c < pos + needle.length; c++) {
-                        const m = map[c];
-                        if (!m) continue;
+                    for (let c = pos; c < pos + key.length; c++) {
+                        const [idx, k] = map[c];
                         const last = segments[segments.length - 1];
-                        if (last && last.idx === m[0]) last.end = m[1] + 1;
-                        else segments.push({ idx: m[0], start: m[1], end: m[1] + 1 });
+                        if (last && last.idx === idx) last.end = k + 1;
+                        else segments.push({ idx, start: k, end: k + 1 });
                     }
+                    const matchNum = matches.length;
                     for (const seg of segments) {
                         const box = itemSubstringBox(tc, tc.items[seg.idx], seg.start, seg.end, vp);
-                        if (box) highlights.push({ ...box, term });
+                        if (box) highlights.push({ ...box, term, match: matchNum, via: via || undefined });
                     }
-                    matches.push({ term });
+                    matches.push(via ? { term, via } : { term });
+                    found++;
                 }
+                return found;
+            };
+            for (const term of terms) {
+                const key = ktKeyOf(term);
+                if (!key) continue;
+                if (scan(key, term, null) > 0) continue;
+                // No está tal cual: probar sin el "-N" final ("1980-1" → "1980")
+                const base = ktBaseSinSufijo(term);
+                if (base) scan(ktKeyOf(base), term, base);
             }
 
             return {
@@ -967,7 +1011,8 @@ $docIdForOcr = $documentId; // For OCR fallback
             const foundTermsSet = new Set();
             let pagesScanned = 0;
             let firstMatchHandled = false;
-            scanState = { pagesWithMatches, foundTermsSet, totalPages };
+            const viaTerms = new Map(); // término → como aparece en el PDF (sin el -N)
+            scanState = { pagesWithMatches, foundTermsSet, totalPages, viaTerms };
 
             const renderStatus = (isComplete) => updateScanStatus(isComplete, pagesScanned);
 
@@ -975,7 +1020,10 @@ $docIdForOcr = $documentId; // For OCR fallback
                 try {
                     const result = await getHighlightsForPage(i);
                     if (result && result.success && result.match_count > 0) {
-                        (result.matches || []).forEach(m => foundTermsSet.add(m.term));
+                        (result.matches || []).forEach(m => {
+                            foundTermsSet.add(m.term);
+                            if (m.via) viaTerms.set(m.term, m.via);
+                        });
                         pagesWithMatches.add(i);
 
                         const wrapper = document.getElementById('page-' + i);
@@ -1014,8 +1062,15 @@ $docIdForOcr = $documentId; // For OCR fallback
         function updateScanStatus(isComplete, pagesScanned) {
             const statusDiv = document.getElementById('simpleStatus');
             if (!statusDiv || !scanState) return;
-            const { pagesWithMatches, foundTermsSet, totalPages } = scanState;
+            const { pagesWithMatches, foundTermsSet, totalPages, viaTerms } = scanState;
             const pages = [...pagesWithMatches].sort((a, b) => a - b);
+            const escHtml = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            // Encontrados sin el "-N" final: se avisa para que el usuario lo sepa
+            const viaHtml = isComplete && viaTerms.size > 0
+                ? `<div style="margin-top:8px; background:#fef3c7; color:#92400e; padding:8px; border-radius:6px; font-size:0.9em;">
+                    ≈ Encontrado sin el número final (borde punteado): ${[...viaTerms].map(([t, v]) => `${escHtml(t)} → ${escHtml(v)}`).join(', ')}
+                </div>`
+                : '';
             const missingTerms = allTerms.filter(t => !foundTermsSet.has(t));
             const pct = Math.round((pagesScanned / totalPages) * 100);
             let html = '';
@@ -1061,7 +1116,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             }
 
-            statusDiv.innerHTML = html;
+            statusDiv.innerHTML = html + viaHtml;
         }
 
         // OCR profundo: solo términos faltantes, solo en hojas que se resolvieron por texto
@@ -1090,11 +1145,14 @@ $docIdForOcr = $documentId; // For OCR fallback
                             matches: [...base.matches, ...ocr.matches],
                             match_count: base.match_count + ocr.match_count,
                             highlights: [...base.highlights, ...ocr.highlights.map(h => ({
-                                x: h.x * sx, y: h.y * sy, w: h.w * sx, h: h.h * sy, term: h.term
+                                x: h.x * sx, y: h.y * sy, w: h.w * sx, h: h.h * sy, term: h.term, via: h.via
                             }))]
                         };
                         highlightCache.set(pageNum, Promise.resolve(merged));
-                        ocr.matches.forEach(m => foundTermsSet.add(m.term));
+                        ocr.matches.forEach(m => {
+                            foundTermsSet.add(m.term);
+                            if (m.via) scanState.viaTerms.set(m.term, m.via);
+                        });
                         pagesWithMatches.add(pageNum);
                         const wrapper = document.getElementById('page-' + pageNum);
                         if (wrapper && wrapper.querySelector('canvas')) paintHighlights(wrapper, pageNum, merged);
@@ -1228,7 +1286,8 @@ $docIdForOcr = $documentId; // For OCR fallback
                     width: ${(hl.w + padX * 2) * scaleX}px;
                     height: ${(hl.h + padY * 2) * scaleY}px;
                 `;
-                rect.title = hl.term;
+                rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via})` : hl.term;
+                if (hl.via) rect.classList.add('hl-sin-sufijo');
                 frag.appendChild(rect);
             }
             overlay.appendChild(frag);
