@@ -564,9 +564,18 @@ if (!empty($searchTerm)) {
             if (!m) return null;
             return keyOf(m[1]).length >= 3 ? m[1].trim() : null;
         }
+        // "1523H-1" → "1523": las declaraciones suelen imprimir solo los números
+        // ("Ref: 1523.////"); la letra final es del inventario. Solo si no está ni
+        // el código ni su base con la letra. Misma regla que ocr_hl_base_digitos().
+        function baseDigitos(term) {
+            const base = baseSinSufijo(term);
+            const m = base && base.match(/^(\d{3,})\s*-?\s*[A-Za-z]{1,3}$/);
+            return m ? m[1] : null;
+        }
         const termKeys = termsToHighlight.map(term => {
             const base = baseSinSufijo(term);
-            return { term, key: keyOf(term), base, baseKey: base ? keyOf(base) : '' };
+            const dig = baseDigitos(term);
+            return { term, key: keyOf(term), base, baseKey: base ? keyOf(base) : '', dig, digKey: dig ? keyOf(dig) : '' };
         }).filter(t => t.key);
         // Si después de la base viene "-<cifra>" devuelve ese texto ("-2"), si no ''.
         // Ya NO descarta la coincidencia: se resalta igual y se avisa (la base está en el documento).
@@ -633,9 +642,12 @@ if (!empty($searchTerm)) {
                 }
                 return cands.length;
             };
-            for (const { term, key, base, baseKey } of termKeys) {
-                // Exacto primero; si no está en la hoja, sin el "-N" final
-                if (scan(key, term, null) === 0 && baseKey) scan(baseKey, term, base);
+            for (const { term, key, base, baseKey, dig, digKey } of termKeys) {
+                // Exacto primero; si no está en la hoja, sin el "-N" final y, si tampoco,
+                // sin la letra ("1523H-1" → "1523")
+                if (scan(key, term, null) > 0) continue;
+                if (baseKey && scan(baseKey, term, base) > 0) continue;
+                if (digKey) scan(digKey, term, dig);
             }
 
             return {
@@ -1039,7 +1051,7 @@ if (!empty($searchTerm)) {
             const solo = [...via].filter(([t]) => !exactos.has(t));
             if (!solo.length) { nota.hidden = true; return; }
             const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            nota.innerHTML = `ℹ️ No está exacto en el documento, se resaltó sin el número final (borde punteado): `
+            nota.innerHTML = `ℹ️ No está exacto en el documento, se resaltó sin el número final o la letra (borde punteado): `
                 + solo.map(([t, v]) => `<b>${esc(t)}</b> → <b>${esc(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].join(', ')})${v.otros.size ? ` · en el PDF figura como ${[...v.otros].map(esc).join(', ')}` : ''}`).join(' · ');
             nota.hidden = false;
         }

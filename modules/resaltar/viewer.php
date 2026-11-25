@@ -749,6 +749,15 @@ $docIdForOcr = $documentId; // For OCR fallback
             if (!m) return null;
             return ktKeyOf(m[1]).length >= 3 ? m[1].trim() : null;
         }
+        // "1523H-1" → "1523": en las declaraciones muchas referencias se imprimen solo con
+        // los números ("Ref: 1523.////") y la letra final (H, G, B...) es del inventario.
+        // Solo se usa si no se encontró ni el código exacto ni su base con la letra.
+        // Misma regla que ocr_hl_base_digitos() (servidor/OCR).
+        function ktBaseDigitos(term) {
+            const base = ktBaseSinSufijo(term);
+            const m = base && base.match(/^(\d{3,})\s*-?\s*[A-Za-z]{1,3}$/);
+            return m ? m[1] : null;
+        }
         // Bordes del código: no puede ir pegado a otra letra/número ("11251" no es
         // "1251") ni ser parte de una cifra con puntos ("1.251.000" no es "1251").
         function ktEdgeOk(tc, [idx, k], dir, termEdge) {
@@ -871,7 +880,10 @@ $docIdForOcr = $documentId; // For OCR fallback
                 if (scan(key, term, null) > 0) continue;
                 // No está tal cual: probar sin el "-N" final ("1980-1" → "1980")
                 const base = ktBaseSinSufijo(term);
-                if (base) scan(ktKeyOf(base), term, base);
+                if (base && scan(ktKeyOf(base), term, base) > 0) continue;
+                // Tampoco con la letra ("1523H-1" → "1523")
+                const dig = ktBaseDigitos(term);
+                if (dig) scan(ktKeyOf(dig), term, dig);
             }
 
             return {
@@ -1121,7 +1133,7 @@ $docIdForOcr = $documentId; // For OCR fallback
             const notaAbierta = notaPrev ? notaPrev.open : true;
             const viaHtml = soloVia.length > 0
                 ? `<details class="nota-sin-sufijo"${notaAbierta ? ' open' : ''}>
-                    <summary>ℹ️ ${soloVia.length} código${soloVia.length > 1 ? 's' : ''} no está${soloVia.length > 1 ? 'n' : ''} exacto${soloVia.length > 1 ? 's' : ''}: se resaltó sin el número final</summary>
+                    <summary>ℹ️ ${soloVia.length} código${soloVia.length > 1 ? 's' : ''} no está${soloVia.length > 1 ? 'n' : ''} exacto${soloVia.length > 1 ? 's' : ''}: se resaltó sin el número final o la letra</summary>
                     <ul>${soloVia.map(([t, v]) => `<li><b>${escHtml(t)}</b> no aparece así; se resaltó <b>${escHtml(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].sort((x, y) => x - y).join(', ')})${v.otros.size ? ` · en el PDF figura como ${[...v.otros].map(escHtml).join(', ')}` : ''}</li>`).join('')}</ul>
                     <div class="nota-pie">Borde punteado en el PDF. Revisa que sea el ítem correcto.</div>
                 </details>`
@@ -1160,7 +1172,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                         ? `Todo encontrado (${foundTermsSet.size} término${foundTermsSet.size > 1 ? 's' : ''}).`
                         : [
                             `${nExactos} exacto${nExactos !== 1 ? 's' : ''}`,
-                            soloVia.length ? `${soloVia.length} sin el número final` : '',
+                            soloVia.length ? `${soloVia.length} sin el número final o la letra` : '',
                             cubiertos.size ? `${cubiertos.size} cubierto${cubiertos.size > 1 ? 's' : ''} por su base` : ''
                           ].filter(Boolean).join(', ') + '.'}
                 </div>
