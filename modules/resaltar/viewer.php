@@ -305,6 +305,16 @@ $docIdForOcr = $documentId; // For OCR fallback
         }
 
         /* Fallback para índice >= 5 */
+        /* Lista discreta de códigos resaltados sin su "-N" final */
+        .nota-sin-sufijo {
+            margin-top: 8px; padding: 6px 8px; border-radius: 6px;
+            background: #f8fafc; border: 1px solid #e2e8f0; color: #475569; font-size: 0.85em;
+        }
+        .nota-sin-sufijo summary { cursor: pointer; }
+        .nota-sin-sufijo ul { margin: 6px 0 4px 18px; padding: 0; }
+        .nota-sin-sufijo li { margin: 2px 0; }
+        .nota-sin-sufijo .nota-pie { font-size: 0.9em; color: #64748b; }
+
         /* Encontrado sin el "-N" final de la lista (1980-1 → 1980): borde punteado */
         .ocr-highlight.hl-sin-sufijo {
             outline: 2px dashed #b45309;
@@ -1011,8 +1021,11 @@ $docIdForOcr = $documentId; // For OCR fallback
             const foundTermsSet = new Set();
             let pagesScanned = 0;
             let firstMatchHandled = false;
-            const viaTerms = new Map(); // término → como aparece en el PDF (sin el -N)
-            scanState = { pagesWithMatches, foundTermsSet, totalPages, viaTerms };
+            // Términos que NO están exactos y se resaltaron sin el "-N" final:
+            // término → { via: como aparece en el PDF, pages: hojas }
+            const viaTerms = new Map();
+            const exactTerms = new Set();
+            scanState = { pagesWithMatches, foundTermsSet, totalPages, viaTerms, exactTerms };
 
             const renderStatus = (isComplete) => updateScanStatus(isComplete, pagesScanned);
 
@@ -1022,7 +1035,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                     if (result && result.success && result.match_count > 0) {
                         (result.matches || []).forEach(m => {
                             foundTermsSet.add(m.term);
-                            if (m.via) viaTerms.set(m.term, m.via);
+                            anotarVia(m, i);
                         });
                         pagesWithMatches.add(i);
 
@@ -1059,18 +1072,35 @@ $docIdForOcr = $documentId; // For OCR fallback
             renderStatus(true);
         }
 
+        // Anota si un término se encontró exacto o solo sin su "-N" final
+        function anotarVia(m, pageNum) {
+            if (!scanState) return;
+            if (!m.via) { scanState.exactTerms.add(m.term); return; }
+            const v = scanState.viaTerms.get(m.term) || { via: m.via, pages: new Set() };
+            v.pages.add(pageNum);
+            scanState.viaTerms.set(m.term, v);
+        }
+
         function updateScanStatus(isComplete, pagesScanned) {
             const statusDiv = document.getElementById('simpleStatus');
             if (!statusDiv || !scanState) return;
-            const { pagesWithMatches, foundTermsSet, totalPages, viaTerms } = scanState;
+            const { pagesWithMatches, foundTermsSet, totalPages, viaTerms, exactTerms } = scanState;
             const pages = [...pagesWithMatches].sort((a, b) => a - b);
             const escHtml = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            // Encontrados sin el "-N" final: se avisa para que el usuario lo sepa
-            const viaHtml = isComplete && viaTerms.size > 0
-                ? `<div style="margin-top:8px; background:#fef3c7; color:#92400e; padding:8px; border-radius:6px; font-size:0.9em;">
-                    ≈ Encontrado sin el número final (borde punteado): ${[...viaTerms].map(([t, v]) => `${escHtml(t)} → ${escHtml(v)}`).join(', ')}
-                </div>`
+            // Encontrados SOLO sin el "-N" final: lista discreta (plegable) para que
+            // quede claro que el código exacto no está y qué se resaltó en su lugar
+            const soloVia = [...viaTerms].filter(([t]) => !exactTerms.has(t));
+            // Abierta al principio; si el usuario la cerró, se respeta al redibujar
+            const notaPrev = statusDiv.querySelector('.nota-sin-sufijo');
+            const notaAbierta = notaPrev ? notaPrev.open : true;
+            const viaHtml = soloVia.length > 0
+                ? `<details class="nota-sin-sufijo"${notaAbierta ? ' open' : ''}>
+                    <summary>ℹ️ ${soloVia.length} código${soloVia.length > 1 ? 's' : ''} no está${soloVia.length > 1 ? 'n' : ''} exacto${soloVia.length > 1 ? 's' : ''}: se resaltó sin el número final</summary>
+                    <ul>${soloVia.map(([t, v]) => `<li><b>${escHtml(t)}</b> no aparece así; se resaltó <b>${escHtml(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].sort((x, y) => x - y).join(', ')})</li>`).join('')}</ul>
+                    <div class="nota-pie">Borde punteado en el PDF. Revisa que sea el ítem correcto.</div>
+                </details>`
                 : '';
+            const nExactos = foundTermsSet.size - soloVia.length;
             const missingTerms = allTerms.filter(t => !foundTermsSet.has(t));
             const pct = Math.round((pagesScanned / totalPages) * 100);
             let html = '';
@@ -1094,7 +1124,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             } else if (missingTerms.length === 0) {
                 html = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:0.9em;">
-                    ✅ <strong>Completo:</strong> Todo encontrado (${foundTermsSet.size} término${foundTermsSet.size > 1 ? 's' : ''}).
+                    ✅ <strong>Completo:</strong> ${soloVia.length === 0
+                        ? `Todo encontrado (${foundTermsSet.size} término${foundTermsSet.size > 1 ? 's' : ''}).`
+                        : nExactos === 0
+                            ? `Ninguno exacto; ${soloVia.length} resaltado${soloVia.length > 1 ? 's' : ''} sin el número final.`
+                            : `${nExactos} exacto${nExactos !== 1 ? 's' : ''} y ${soloVia.length} sin el número final.`}
                 </div>
                 <div style="margin-top:8px; background:#eff6ff; color:#1e40af; padding:8px; border-radius:6px; font-size:0.9em;">
                     📄 Resaltado en hojas: ${pages.join(', ')}
@@ -1151,7 +1185,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                         highlightCache.set(pageNum, Promise.resolve(merged));
                         ocr.matches.forEach(m => {
                             foundTermsSet.add(m.term);
-                            if (m.via) scanState.viaTerms.set(m.term, m.via);
+                            anotarVia(m, pageNum);
                         });
                         pagesWithMatches.add(pageNum);
                         const wrapper = document.getElementById('page-' + pageNum);
