@@ -579,6 +579,45 @@ function kt_resp_auto(string $clientsDir, ?int $ahora = null): array
 }
 
 // ---------------------------------------------------------------------------
+// Alertas: ¿el respaldo automático realmente está corriendo?
+// ---------------------------------------------------------------------------
+
+const KT_RESP_ALERTA_HORAS = 48;     // sin respaldo nuevo en este tiempo = algo falla (se espera cada 20 h)
+const KT_RESP_ALERTA_PRUEBA_DIAS = 14; // sin prueba de restauración en este tiempo (se espera cada 7 días)
+
+/**
+ * Lista de problemas con los respaldos (vacía = todo bien). Cada uno: ['nivel' => 'alto'|'medio', 'texto' => ...].
+ * Solo lee estado.json; nunca toca las bases de los clientes.
+ */
+function kt_resp_alertas(string $clientsDir, ?int $ahora = null): array
+{
+    $ahora = $ahora ?? time();
+    $estado = kt_resp_estado(kt_resp_dir($clientsDir));
+    $alertas = [];
+    $ult = $estado['ultimo_respaldo'] ?? null;
+    $fecha = $ult ? (strtotime((string) ($ult['fecha'] ?? '')) ?: 0) : 0;
+    if (!$fecha) {
+        $alertas[] = ['nivel' => 'alto', 'texto' => 'Todavía no hay ningún respaldo automático registrado.'];
+    } else {
+        $horas = (int) floor(($ahora - $fecha) / 3600);
+        if ($horas > KT_RESP_ALERTA_HORAS) {
+            $alertas[] = ['nivel' => 'alto', 'texto' => "El último respaldo fue hace {$horas} horas (debería haber uno cada " . KT_RESP_CADA_HORAS . ' h).'];
+        }
+        if ((int) ($ult['errores'] ?? 0) > 0) {
+            $alertas[] = ['nivel' => 'alto', 'texto' => 'El último respaldo terminó con ' . (int) $ult['errores'] . ' error(es); mira 🛟 Respaldos.'];
+        }
+    }
+    $pr = $estado['ultima_prueba'] ?? null;
+    $fp = $pr ? (strtotime((string) ($pr['fecha'] ?? '')) ?: 0) : 0;
+    if ($pr && empty($pr['ok'])) {
+        $alertas[] = ['nivel' => 'alto', 'texto' => 'La última prueba de restauración FALLÓ: no hay garantía de poder recuperar un cliente.'];
+    } elseif (!$fp || $ahora - $fp > KT_RESP_ALERTA_PRUEBA_DIAS * 86400) {
+        $alertas[] = ['nivel' => 'medio', 'texto' => 'No hay una prueba de restauración reciente (se hace cada ' . KT_RESP_PRUEBA_DIAS . ' días).'];
+    }
+    return $alertas;
+}
+
+// ---------------------------------------------------------------------------
 // Nube S3 / Cloudflare R2 (opcional)
 //   KT_S3_ENDPOINT  p. ej. https://<cuenta>.r2.cloudflarestorage.com
 //   KT_S3_BUCKET    nombre del bucket

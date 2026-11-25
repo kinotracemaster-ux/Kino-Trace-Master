@@ -30,6 +30,9 @@ jobs:
       - name: Sintaxis + migración de todos los clientes + cliente nuevo
         run: php tools/chequeo.php
 
+      - name: Salud (healthcheck) y alertas de respaldo
+        run: php tests/salud/chequeo_salud.php
+
       - name: Tope diario de IA por cliente
         run: php tests/ia/chequeo_tope_ia.php
 
