@@ -106,7 +106,7 @@ $pageTitle = 'Importación Masiva (CSV)';
         }
 
         .console-time {
-            color: #666;
+            color: #9ca3af;
             user-select: none;
             min-width: 65px;
         }

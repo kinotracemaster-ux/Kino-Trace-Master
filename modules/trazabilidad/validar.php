@@ -218,6 +218,13 @@ function kt_validar_url(array $cambios = []): string
             white-space: nowrap;
         }
 
+        @media (max-width: 768px) {
+            .btn-mini {
+                min-height: 44px;
+                min-width: 44px;
+            }
+        }
+
         .btn-valid {
             background: #15803d;
             color: #fff;
@@ -234,12 +241,12 @@ function kt_validar_url(array $cambios = []): string
         }
 
         .estado-ok {
-            color: #16a34a;
+            color: #15803d;
             font-weight: 600;
         }
 
         .estado-pend {
-            color: #d97706;
+            color: #b45309;
             font-weight: 600;
         }
 

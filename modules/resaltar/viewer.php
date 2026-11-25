@@ -1254,7 +1254,7 @@ $docIdForOcr = $documentId; // For OCR fallback
             div.className = "page-outer-wrapper print-hide"; // Hidden by default for print
             div.innerHTML = `
                 <div id="page-${pageNum}" class="pdf-page-wrapper" data-page-num="${pageNum}" style="width:${viewport.width}px; height:${viewport.height}px; display:flex; align-items:center; justify-content:center;">
-                    <span class="loading-placeholder" style="color:#999;">Cargando pág ${pageNum}...</span>
+                    <span class="loading-placeholder" style="color:#566579;">Cargando pág ${pageNum}...</span>
                 </div>
                 <div class="page-number">Página ${pageNum}</div>
             `;

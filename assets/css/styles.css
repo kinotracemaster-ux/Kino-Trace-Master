@@ -20,7 +20,7 @@
     --accent-secondary: #64748b;
     --accent-success: #10b981;
     --accent-warning: #f59e0b;
-    --accent-danger: #ef4444;
+    --accent-danger: #dc2626;
 
     /* Text */
     --text-primary: #1e293b;
@@ -723,7 +723,7 @@ button {
 
 .badge-primary {
     background: rgba(59, 130, 246, 0.1);
-    color: var(--accent-primary);
+    color: var(--accent-primary-hover);
 }
 
 .badge-success {
@@ -1316,4 +1316,27 @@ button {
 
 .upload-area.hidden {
     display: none;
+}
+/* =========================================
+   Celular: áreas táctiles de al menos 44x44 px (skill impeccable)
+   ========================================= */
+@media (max-width: 768px) {
+    .sidebar-toggle {
+        width: 44px;
+        height: 44px;
+    }
+
+    .btn,
+    .btn-icon,
+    .btn-mini {
+        min-height: 44px;
+    }
+
+    .table td a,
+    .table td button,
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
 }
