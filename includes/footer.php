@@ -581,6 +581,19 @@
                 title: message
             });
         };
+        // Avisos: todo alert() de las pantallas se muestra con SweetAlert2 (más claro, sin bloquear el navegador)
+        window.alert = function (message) {
+            const texto = String(message == null ? '' : message);
+            const esError = /^\s*(❌|error|no se pudo|no hay|por favor|selecciona)/i.test(texto);
+            const esOk = /^\s*✅|correctamente|exitosamente/i.test(texto);
+            Swal.fire({
+                icon: esError ? 'error' : (esOk ? 'success' : 'info'),
+                text: texto.replace(/^\s*[✅❌]\s*/, ''),
+                confirmButtonText: 'Entendido',
+                confirmButtonColor: '#2563eb',
+                didOpen: function (el) { el.querySelector('.swal2-html-container').style.whiteSpace = 'pre-line'; }
+            });
+        };
         // === Pegado solo texto plano en todos los campos ===
         document.addEventListener('paste', function (e) {
             var tag = (e.target.tagName || '').toLowerCase();
