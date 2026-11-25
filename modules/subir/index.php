@@ -498,12 +498,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         .btn-success {
-            background: #22c55e;
+            background: #15803d;
             color: white;
         }
 
         .btn-success:hover {
-            background: #16a34a;
+            background: #166534;
         }
 
         .btn-secondary {
@@ -844,11 +844,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </div>
                     <div class="form-group" style="margin-bottom:0">
                         <label>Long. Mínima</label>
-                        <input type="number" id="minLength" value="4" min="1" max="100">
+                        <input type="number" aria-label="Largo mínimo del código" id="minLength" value="4" min="1" max="100">
                     </div>
                     <div class="form-group" style="margin-bottom:0">
                         <label>Long. Máxima</label>
-                        <input type="number" id="maxLength" value="50" min="1" max="200">
+                        <input type="number" aria-label="Largo máximo del código" id="maxLength" value="50" min="1" max="200">
                     </div>
                 </div>
 
@@ -892,7 +892,7 @@ También puedes escribirlos manualmente (uno por línea)"><?= $isEditMode ? html
                 <div class="form-grid">
                     <div class="form-group">
                         <label>Tipo de Documento</label>
-                        <select name="tipo" id="tipoDoc" required>
+                        <select name="tipo" aria-label="Tipo de documento" id="tipoDoc" required>
                             <?php
                             $types = ['declaracion' => '📄 Declaración', 'factura' => '💰 Factura', 'otro' => '📁 Otro'];
                             $currentType = $isEditMode ? $editDoc['tipo'] : 'documento';
@@ -909,7 +909,7 @@ También puedes escribirlos manualmente (uno por línea)"><?= $isEditMode ? html
                     </div>
                     <div class="form-group">
                         <label>Fecha</label>
-                        <input type="date" name="fecha" id="fechaDoc" required
+                        <input type="date" aria-label="Fecha del documento" name="fecha" id="fechaDoc" required
                             value="<?= $isEditMode ? htmlspecialchars($editDoc['fecha']) : date('Y-m-d') ?>">
                     </div>
                     <div class="form-group">

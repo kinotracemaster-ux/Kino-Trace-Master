@@ -494,7 +494,7 @@ Se extraerán solo los códigos de la izquierda."></textarea>
                         <div class="flex justify-between items-center mb-4" style="flex-wrap: wrap; gap: 0.5rem;">
                             <h3>Lista de Documentos</h3>
                             <div class="flex gap-2" style="flex-wrap: wrap;">
-                                <select class="form-select" id="filterTipo" style="width: auto;">
+                                <select class="form-select" aria-label="Filtrar por tipo" id="filterTipo" style="width: auto;">
                                     <option value="">Todos los tipos</option>
                                     <?php foreach ($tiposDoc as $t => $n): ?>
                                         <option value="<?= htmlspecialchars($t) ?>"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $t))) ?> (<?= number_format($n) ?>)</option>

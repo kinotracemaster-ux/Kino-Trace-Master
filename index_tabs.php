@@ -318,7 +318,7 @@ COD001
                         <div class="flex justify-between items-center mb-4">
                             <h3>Lista de Documentos</h3>
                             <div class="flex gap-2">
-                                <select class="form-select" id="filterTipo" style="width: auto;">
+                                <select class="form-select" aria-label="Filtrar por tipo" id="filterTipo" style="width: auto;">
                                     <option value="">Todos los tipos</option>
                                     <option value="manifiesto">Manifiestos</option>
                                     <option value="declaracion">Declaraciones</option>

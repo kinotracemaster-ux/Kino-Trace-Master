@@ -472,6 +472,7 @@
 
 <!-- SweetAlert2 for confirmation modals -->
 <script src="/assets/vendor/sweetalert2/sweetalert2.all.min.js"></script>
+<script src="/assets/js/a11y-labels.js"></script>
 <script>
     // Global confirmation handler for forms with data-confirm attribute
     document.addEventListener('DOMContentLoaded', function () {

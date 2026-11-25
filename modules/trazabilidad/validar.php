@@ -219,17 +219,17 @@ function kt_validar_url(array $cambios = []): string
         }
 
         .btn-valid {
-            background: #16a34a;
+            background: #15803d;
             color: #fff;
         }
 
         .btn-invalid {
-            background: #ef4444;
+            background: #dc2626;
             color: #fff;
         }
 
         .btn-todo {
-            background: #0ea5e9;
+            background: #0369a1;
             color: #fff;
         }
 
@@ -336,7 +336,7 @@ function kt_validar_url(array $cambios = []): string
                                 <tr>
                                     <td style="text-align: center;">
                                         <?php if (!$r['validado']): ?>
-                                            <input type="checkbox" name="ids[]" value="<?= (int) $r['id'] ?>" class="row-checkbox">
+                                            <input type="checkbox" name="ids[]" value="<?= (int) $r['id'] ?>" class="row-checkbox" aria-label="Seleccionar documento <?= (int) $r['id'] ?>">
                                         <?php endif; ?>
                                     </td>
                                     <td class="codigo"><?= htmlspecialchars($r['codigo_text']) ?></td>
