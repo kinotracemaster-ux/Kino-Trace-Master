@@ -760,11 +760,13 @@ $docIdForOcr = $documentId; // For OCR fallback
             if (!/[\p{L}\p{N}]/u.test(ch)) return true;
             return skipped > 0 && !(/\p{N}/u.test(ch) && /\p{N}/u.test(termEdge));
         }
-        // ¿Después de la base viene "-<cifra>"? Entonces es otro ítem ("1980-2").
-        function ktOtroSufijo(tc, [idx, k]) {
+        // Si después de la base viene "-<cifra>" devuelve ese texto ("-2"), si no ''.
+        // Ya NO descarta la coincidencia: se resalta igual y se avisa (la base está en el documento).
+        function ktSufijoSiguiente(tc, [idx, k]) {
             let rest = (tc.items[idx].str || '').slice(k + 1);
             if (!rest.trim()) rest += ((tc.items[idx + 1] || {}).str || '') + ((tc.items[idx + 2] || {}).str || '');
-            return /^\s*-\s*\d/.test(rest);
+            const m = rest.match(/^\s*-\s*(\d+)/);
+            return m ? '-' + m[1] : '';
         }
 
 
@@ -834,13 +836,19 @@ $docIdForOcr = $documentId; // For OCR fallback
             // Busca una clave en la hoja; devuelve cuántas veces la encontró.
             // via = texto con el que se encontró cuando no es el término exacto.
             const scan = (key, term, via) => {
-                let from = 0, pos, found = 0;
+                // 1) todas las apariciones válidas (con bordes); 2) con via, si alguna no va
+                // seguida de otro "-N" se usan solo esas; si todas van seguidas de uno, se
+                // resaltan igual (la base SÍ está en el documento) y se avisa cuál figura.
+                let from = 0, pos;
+                let cands = [];
                 while ((pos = stream.indexOf(key, from)) !== -1) {
                     from = pos + key.length;
                     const end = map[pos + key.length - 1];
                     if (!ktEdgeOk(tc, map[pos], -1, key[0]) || !ktEdgeOk(tc, end, 1, key[key.length - 1])) continue;
-                    // Sin el -N: "1980" seguido de "-2" es OTRO ítem, no el "1980-1" buscado
-                    if (via && ktOtroSufijo(tc, end)) continue;
+                    cands.push({ pos, otro: via ? ktSufijoSiguiente(tc, end) : '' });
+                }
+                if (via && cands.some(c => !c.otro)) cands = cands.filter(c => !c.otro);
+                for (const { pos, otro } of cands) {
                     const segments = [];
                     for (let c = pos; c < pos + key.length; c++) {
                         const [idx, k] = map[c];
@@ -851,12 +859,11 @@ $docIdForOcr = $documentId; // For OCR fallback
                     const matchNum = matches.length;
                     for (const seg of segments) {
                         const box = itemSubstringBox(tc, tc.items[seg.idx], seg.start, seg.end, vp);
-                        if (box) highlights.push({ ...box, term, match: matchNum, via: via || undefined });
+                        if (box) highlights.push({ ...box, term, match: matchNum, via: via || undefined, otro: otro || undefined });
                     }
-                    matches.push(via ? { term, via } : { term });
-                    found++;
+                    matches.push(via ? { term, via, otro: otro || undefined } : { term });
                 }
-                return found;
+                return cands.length;
             };
             for (const term of terms) {
                 const key = ktKeyOf(term);
@@ -1076,8 +1083,9 @@ $docIdForOcr = $documentId; // For OCR fallback
         function anotarVia(m, pageNum) {
             if (!scanState) return;
             if (!m.via) { scanState.exactTerms.add(m.term); return; }
-            const v = scanState.viaTerms.get(m.term) || { via: m.via, pages: new Set() };
+            const v = scanState.viaTerms.get(m.term) || { via: m.via, pages: new Set(), otros: new Set() };
             v.pages.add(pageNum);
+            if (m.otro) v.otros.add(m.via + m.otro);
             scanState.viaTerms.set(m.term, v);
         }
 
@@ -1096,7 +1104,7 @@ $docIdForOcr = $documentId; // For OCR fallback
             const viaHtml = soloVia.length > 0
                 ? `<details class="nota-sin-sufijo"${notaAbierta ? ' open' : ''}>
                     <summary>ℹ️ ${soloVia.length} código${soloVia.length > 1 ? 's' : ''} no está${soloVia.length > 1 ? 'n' : ''} exacto${soloVia.length > 1 ? 's' : ''}: se resaltó sin el número final</summary>
-                    <ul>${soloVia.map(([t, v]) => `<li><b>${escHtml(t)}</b> no aparece así; se resaltó <b>${escHtml(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].sort((x, y) => x - y).join(', ')})</li>`).join('')}</ul>
+                    <ul>${soloVia.map(([t, v]) => `<li><b>${escHtml(t)}</b> no aparece así; se resaltó <b>${escHtml(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].sort((x, y) => x - y).join(', ')})${v.otros.size ? ` · en el PDF figura como ${[...v.otros].map(escHtml).join(', ')}` : ''}</li>`).join('')}</ul>
                     <div class="nota-pie">Borde punteado en el PDF. Revisa que sea el ítem correcto.</div>
                 </details>`
                 : '';
@@ -1179,7 +1187,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                             matches: [...base.matches, ...ocr.matches],
                             match_count: base.match_count + ocr.match_count,
                             highlights: [...base.highlights, ...ocr.highlights.map(h => ({
-                                x: h.x * sx, y: h.y * sy, w: h.w * sx, h: h.h * sy, term: h.term, via: h.via
+                                x: h.x * sx, y: h.y * sy, w: h.w * sx, h: h.h * sy, term: h.term, via: h.via, otro: h.otro
                             }))]
                         };
                         highlightCache.set(pageNum, Promise.resolve(merged));
@@ -1320,7 +1328,7 @@ $docIdForOcr = $documentId; // For OCR fallback
                     width: ${(hl.w + padX * 2) * scaleX}px;
                     height: ${(hl.h + padY * 2) * scaleY}px;
                 `;
-                rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via})` : hl.term;
+                rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via}${hl.otro || ''})` : hl.term;
                 if (hl.via) rect.classList.add('hl-sin-sufijo');
                 frag.appendChild(rect);
             }

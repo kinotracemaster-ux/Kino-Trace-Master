@@ -32,8 +32,13 @@ ok(count(buscar('REF NO.2519A TOTAL', ['NO.2519A-5'])) === 1, 'NO.2519A-5 encuen
 ok(count(buscar('REF NO. 2519A TOTAL', ['NO.2519A-5'])) === 1, 'NO.2519A-5 encuentra "NO. 2519A"');
 ok(count(buscar('VALOR 1560 Y 11560', ['156-1'])) === 0, '156-1 no cae dentro de 1560 ni 11560');
 ok(count(buscar('TOTAL 1.156.000', ['156-1'])) === 0, '156-1 no cae dentro de 1.156.000');
-ok(count(buscar('ITEM 1980-2', ['1980-1'])) === 0, '1980-1 no resalta 1980-2 (otro ítem)');
-ok(count(buscar('ITEM 1980 -2', ['1980-1'])) === 0, '1980-1 no resalta "1980 -2"');
+$m = buscar('ITEM 1980-2', ['1980-1']);
+ok(count($m) === 1 && ($m[0]['via'] ?? '') === '1980' && ($m[0]['otro'] ?? '') === '-2', '1980-1 con solo 1980-2 en el PDF: resalta la base y avisa que figura 1980-2');
+$m = buscar('ITEM 1980 -2', ['1980-1']);
+ok(count($m) === 1 && ($m[0]['otro'] ?? '') === '-2', '"1980 -2" también se avisa como otro ítem');
+$m = buscar('ITEM 1980-2 Y 1980 CAJAS', ['1980-1']);
+ok(count($m) === 1 && !isset($m[0]['otro']), 'si hay una base limpia, se prefiere sobre la que va seguida de otro -N');
+ok(count(buscar('ITEM 2000 CAJAS', ['1980-1'])) === 0, 'sin la base en el documento sigue sin encontrarse (queda en Faltan)');
 ok(count(buscar('ITEM 156 CAJAS', ['156-1', '156-2'])) === 2, '156-1 y 156-2 cuentan como encontrados con 156');
 
 echo $fallos ? "\n$fallos FALLA(S)\n" : "\nTodo bien\n";

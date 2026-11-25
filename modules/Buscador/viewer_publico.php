@@ -568,11 +568,13 @@ if (!empty($searchTerm)) {
             const base = baseSinSufijo(term);
             return { term, key: keyOf(term), base, baseKey: base ? keyOf(base) : '' };
         }).filter(t => t.key);
-        // ¿Después de la base viene "-<cifra>"? Entonces es otro ítem ("1980-2").
-        function otroSufijo(tc, [idx, k]) {
+        // Si después de la base viene "-<cifra>" devuelve ese texto ("-2"), si no ''.
+        // Ya NO descarta la coincidencia: se resalta igual y se avisa (la base está en el documento).
+        function sufijoSiguiente(tc, [idx, k]) {
             let rest = (tc.items[idx].str || '').slice(k + 1);
             if (!rest.trim()) rest += ((tc.items[idx + 1] || {}).str || '') + ((tc.items[idx + 2] || {}).str || '');
-            return /^\s*-\s*\d/.test(rest);
+            const m = rest.match(/^\s*-\s*(\d+)/);
+            return m ? '-' + m[1] : '';
         }
 
         // ── Búsqueda en la capa de texto (navegador) ──────────────────
@@ -602,14 +604,19 @@ if (!empty($searchTerm)) {
             const highlights = [];
             const matches = [];
             const scan = (key, term, via) => {
-                let from = 0, pos, found = 0;
+                // 1) todas las apariciones válidas (con bordes); 2) con via, si alguna no va
+                // seguida de otro "-N" se usan solo esas; si todas van seguidas de uno, se
+                // resaltan igual (la base SÍ está en el documento) y se avisa cuál figura.
+                let from = 0, pos;
+                let cands = [];
                 while ((pos = stream.indexOf(key, from)) !== -1) {
                     from = pos + key.length;
                     const end = map[pos + key.length - 1];
                     if (!edgeOk(tc, map[pos], -1, key[0]) || !edgeOk(tc, end, 1, key[key.length - 1])) continue;
-                    // Sin el -N: "1980" seguido de "-2" es OTRO ítem
-                    if (via && otroSufijo(tc, end)) continue;
-                    // Un rectángulo por fragmento (item) que toca la coincidencia
+                    cands.push({ pos, otro: via ? sufijoSiguiente(tc, end) : '' });
+                }
+                if (via && cands.some(c => !c.otro)) cands = cands.filter(c => !c.otro);
+                for (const { pos, otro } of cands) {
                     const segments = [];
                     for (let c = pos; c < pos + key.length; c++) {
                         const [idx, k] = map[c];
@@ -620,12 +627,11 @@ if (!empty($searchTerm)) {
                     const matchNum = matches.length;
                     for (const seg of segments) {
                         const box = itemSubstringBox(tc, tc.items[seg.idx], seg.start, seg.end, vp);
-                        if (box) highlights.push({ ...box, term, match: matchNum, via: via || undefined });
+                        if (box) highlights.push({ ...box, term, match: matchNum, via: via || undefined, otro: otro || undefined });
                     }
-                    matches.push(via ? { term, via } : { term });
-                    found++;
+                    matches.push(via ? { term, via, otro: otro || undefined } : { term });
                 }
-                return found;
+                return cands.length;
             };
             for (const { term, key, base, baseKey } of termKeys) {
                 // Exacto primero; si no está en la hoja, sin el "-N" final
@@ -873,7 +879,7 @@ if (!empty($searchTerm)) {
                 const padY = Math.max(hl.h * 0.18, 1.5);
                 const rect = document.createElement('div');
                 rect.dataset.match = hl.match ?? i;
-                rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via})` : (hl.term || '');
+                rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via}${hl.otro || ''})` : (hl.term || '');
                 if (hl.via) rect.classList.add('hl-sin-sufijo');
                 rect.style.left = ((hl.x - padX) * sx) + 'px';
                 rect.style.top = ((hl.y - padY) * sy) + 'px';
@@ -1024,8 +1030,9 @@ if (!empty($searchTerm)) {
             [...pageResults.keys()].sort((a, b) => a - b).forEach(page => {
                 (pageResults.get(page).matches || []).forEach(m => {
                     if (!m.via) { exactos.add(m.term); return; }
-                    const v = via.get(m.term) || { via: m.via, pages: new Set() };
+                    const v = via.get(m.term) || { via: m.via, pages: new Set(), otros: new Set() };
                     v.pages.add(page);
+                    if (m.otro) v.otros.add(m.via + m.otro);
                     via.set(m.term, v);
                 });
             });
@@ -1033,7 +1040,7 @@ if (!empty($searchTerm)) {
             if (!solo.length) { nota.hidden = true; return; }
             const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
             nota.innerHTML = `ℹ️ No está exacto en el documento, se resaltó sin el número final (borde punteado): `
-                + solo.map(([t, v]) => `<b>${esc(t)}</b> → <b>${esc(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].join(', ')})`).join(' · ');
+                + solo.map(([t, v]) => `<b>${esc(t)}</b> → <b>${esc(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].join(', ')})${v.otros.size ? ` · en el PDF figura como ${[...v.otros].map(esc).join(', ')}` : ''}`).join(' · ');
             nota.hidden = false;
         }
 
