@@ -13,6 +13,17 @@ KINO TRACE — sistema PHP multi-cliente (multi-tenant) de gestión documental p
 - Este archivo es la memoria del proyecto: leerlo antes de explorar el código y actualizarlo en el mismo PR si algo aquí deja de ser cierto. Para detalle, `MAPA_TECNICO.md` en vez de recorrer el repo.
 - Prioridades actuales: 1) velocidad del resaltado (`modules/resaltar/`, PR #12), 2) responsive (ver "UX y celular"), 3) seguridad.
 
+## Agentes (orquestador + lector + escritor)
+
+Subagentes en `.claude/agents/`. La sesión principal (Opus) es el **orquestador**: al entrar un requerimiento de código sigue este orden:
+
+1. **`lector`** (Haiku, solo lectura): ubica archivos, funciones y reglas de este archivo que aplican; devuelve un resumen corto con `ruta:línea`.
+2. El orquestador decide el plan (qué cambiar, en qué archivos, qué chequeos) con lo que trajo el lector.
+3. **`escritor`** (Sonnet): implementa ese plan concreto, corre `php -l` / `php tools/chequeo.php` / chequeos específicos y reporta el diff. No hace commit ni PR.
+4. El orquestador revisa el diff, pide correcciones al escritor si hace falta, y hace rama → commit → PR.
+
+Preguntas simples o cambios de una línea no necesitan agentes. Para varias búsquedas independientes se pueden lanzar varios `lector` en paralelo.
+
 ## Commands
 
 ```bash
