@@ -196,10 +196,13 @@ function ocr_hl_match_terms(array $words, array $terms): array
 
     // Busca una clave; devuelve cuántas veces la encontró. $via = texto con el
     // que se encontró cuando no es el término exacto (búsqueda sin el "-N").
+    // Con $via, si alguna aparición no va seguida de otro "-N" se usan solo esas;
+    // si todas van seguidas de uno ("1980" en "1980-2") se resaltan igual (la base
+    // SÍ está en el documento) y se anota cuál figura en el campo 'otro'.
     $scan = function (string $needle, string $term, ?string $via) use ($words, $stream, $owner, $chars, &$matches, &$highlights): int {
         $nLen = mb_strlen($needle, 'UTF-8');
-        $found = 0;
         $from = 0;
+        $cands = [];
         while (($pos = mb_strpos($stream, $needle, $from, 'UTF-8')) !== false) {
             $from = $pos + $nLen;
             $end = $owner[$pos + $nLen - 1];
@@ -207,17 +210,21 @@ function ocr_hl_match_terms(array $words, array $terms): array
                 || !ocr_hl_edge_ok($chars, $end, 1, mb_substr($needle, -1, 1, 'UTF-8'))) {
                 continue;
             }
-            // Sin el -N: "1980" seguido de "-2" es OTRO ítem, no el "1980-1" buscado
-            if ($via !== null && ocr_hl_otro_sufijo($chars, $words, $end)) {
-                continue;
-            }
+            $cands[] = ['pos' => $pos, 'otro' => $via !== null ? ocr_hl_sufijo_siguiente($chars, $words, $end) : ''];
+        }
+        if ($via !== null && array_filter($cands, fn($c) => $c['otro'] === '')) {
+            $cands = array_values(array_filter($cands, fn($c) => $c['otro'] === ''));
+        }
+        foreach ($cands as $c) {
+            $pos = $c['pos'];
+            $extra = $via !== null ? ['via' => $via] + ($c['otro'] !== '' ? ['otro' => $c['otro']] : []) : [];
             $wordIdx = array_values(array_unique(array_column(array_slice($owner, $pos, $nLen), 0)));
             $matchNum = count($matches); // enlaza cada caja con su coincidencia
             $texts = [];
             foreach ($wordIdx as $i) {
                 $w = $words[$i];
                 $box = ['x' => $w['x'], 'y' => $w['y'], 'w' => $w['w'], 'h' => $w['h']];
-                $highlights[] = $box + ['term' => $term, 'match' => $matchNum] + ($via !== null ? ['via' => $via] : []);
+                $highlights[] = $box + ['term' => $term, 'match' => $matchNum] + $extra;
                 $texts[] = $w['text'];
             }
             $first = $words[$wordIdx[0]];
@@ -225,10 +232,9 @@ function ocr_hl_match_terms(array $words, array $terms): array
                 'term' => $term,
                 'word' => implode(' ', $texts),
                 'x' => $first['x'], 'y' => $first['y'], 'w' => $first['w'], 'h' => $first['h'],
-            ] + ($via !== null ? ['via' => $via] : []);
-            $found++;
+            ] + $extra;
         }
-        return $found;
+        return count($cands);
     };
 
     foreach ($terms as $term) {
@@ -265,10 +271,11 @@ function ocr_hl_base_sin_sufijo(string $term): ?string
 }
 
 /**
- * ¿Después de la coincidencia viene "-<cifra>"? (en la misma palabra o en la
- * siguiente). Entonces es otro ítem: buscando "1980-1" no se resalta "1980-2".
+ * Si después de la coincidencia viene "-<cifras>" (en la misma palabra o en las
+ * siguientes) devuelve ese texto ("-2"); si no, ''. Sirve para avisar que la
+ * base figura en el documento como otro ítem ("1980-2") al buscar "1980-1".
  */
-function ocr_hl_otro_sufijo(array $chars, array $words, array $at): bool
+function ocr_hl_sufijo_siguiente(array $chars, array $words, array $at): string
 {
     [$i, $k] = $at;
     $rest = implode('', array_slice($chars[$i], $k + 1));
@@ -278,7 +285,7 @@ function ocr_hl_otro_sufijo(array $chars, array $words, array $at): bool
             $rest .= (string) ($words[$i + 2]['text'] ?? '');
         }
     }
-    return (bool) preg_match('/^\s*-\s*\d/u', $rest);
+    return preg_match('/^\s*-\s*(\d+)/u', $rest, $m) ? '-' . $m[1] : '';
 }
 
 /**
