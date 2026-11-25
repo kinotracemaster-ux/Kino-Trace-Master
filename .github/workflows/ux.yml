@@ -22,7 +22,7 @@ jobs:
           extensions: pdo_sqlite, curl, zip, zlib
           coverage: none
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
