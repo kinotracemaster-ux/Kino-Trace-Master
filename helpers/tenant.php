@@ -10,6 +10,7 @@
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/busquedas_sin_resultado.php';
+require_once __DIR__ . '/uso_ia.php';
 
 /**
  * Sanitiza un código de cliente para asegurar que solo contenga letras
@@ -669,7 +670,15 @@ function client_schema_migrations(): array
             $db->exec('CREATE INDEX IF NOT EXISTS idx_bsr_ultima ON busquedas_sin_resultado(ultima)');
         },
 
-        // 4 — (siguiente cambio de esquema aquí)
+        // 4 — Tope diario de consultas a la IA por cliente (helpers/uso_ia.php).
+        4 => function (PDO $db): void {
+            $db->exec('CREATE TABLE IF NOT EXISTS uso_ia (
+                dia TEXT PRIMARY KEY,
+                consultas INTEGER NOT NULL DEFAULT 0
+            )');
+        },
+
+        // 5 — (siguiente cambio de esquema aquí)
     ];
 }
 
