@@ -41,5 +41,17 @@ ok(count($m) === 1 && !isset($m[0]['otro']), 'si hay una base limpia, se prefier
 ok(count(buscar('ITEM 2000 CAJAS', ['1980-1'])) === 0, 'sin la base en el documento sigue sin encontrarse (queda en Faltan)');
 ok(count(buscar('ITEM 156 CAJAS', ['156-1', '156-2'])) === 2, '156-1 y 156-2 cuentan como encontrados con 156');
 
+echo "Sin la letra final\n";
+ok(ocr_hl_base_digitos('1523H-1') === '1523', '1523H-1 → 1523');
+ok(ocr_hl_base_digitos('2195-B-1') === '2195', '2195-B-1 → 2195');
+ok(ocr_hl_base_digitos('1955BG-1') === '1955', '1955BG-1 → 1955');
+ok(ocr_hl_base_digitos('1523-1') === null, '1523-1 no tiene letra');
+ok(ocr_hl_base_digitos('M:8291-1') === null, 'M:8291-1 no se toca');
+$m = buscar('Ref: 1523.////(100 PCS)', ['1523H-1']);
+ok(count($m) === 1 && ($m[0]['via'] ?? '') === '1523', '1523H-1 encuentra "Ref: 1523.////"');
+ok(count(buscar('Ref: 1523L .////', ['1523H-1'])) === 0, '1523H-1 no cae sobre 1523L');
+ok(count(buscar('Ref: 1523H.////', ['1523H-1'])) === 1 && buscar('Ref: 1523H.////', ['1523H-1'])[0]['via'] === '1523H', 'si está 1523H se prefiere sobre 1523');
+ok(count(buscar('TOTAL 11523 CAJAS', ['1523H-1'])) === 0, '1523H-1 no cae dentro de 11523');
+
 echo $fallos ? "\n$fallos FALLA(S)\n" : "\nTodo bien\n";
 exit($fallos ? 1 : 0);

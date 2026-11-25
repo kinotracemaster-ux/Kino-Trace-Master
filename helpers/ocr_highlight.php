@@ -248,8 +248,13 @@ function ocr_hl_match_terms(array $words, array $terms): array
         }
         // No está tal cual: probar sin el "-N" final ("1980-1" → "1980")
         $base = ocr_hl_base_sin_sufijo($term);
-        if ($base !== null) {
-            $scan(ocr_hl_key($base), $term, $base);
+        if ($base !== null && $scan(ocr_hl_key($base), $term, $base) > 0) {
+            continue;
+        }
+        // Tampoco con la letra ("1523H-1" → "1523")
+        $dig = ocr_hl_base_digitos($term);
+        if ($dig !== null) {
+            $scan(ocr_hl_key($dig), $term, $dig);
         }
     }
 
@@ -268,6 +273,20 @@ function ocr_hl_base_sin_sufijo(string $term): ?string
         return null;
     }
     return mb_strlen(ocr_hl_key($m[1]), 'UTF-8') >= 3 ? trim($m[1]) : null;
+}
+
+/**
+ * "1523H-1" → "1523": en las declaraciones muchas referencias se imprimen solo con
+ * los números ("Ref: 1523.////") y la letra final (H, G, B...) es del inventario.
+ * Solo para cuando no se halló ni el código ni su base con la letra. null si no aplica.
+ */
+function ocr_hl_base_digitos(string $term): ?string
+{
+    $base = ocr_hl_base_sin_sufijo($term);
+    if ($base !== null && preg_match('/^(\d{3,})\s*-?\s*[A-Za-z]{1,3}$/', $base, $m)) {
+        return $m[1];
+    }
+    return null;
 }
 
 /**
