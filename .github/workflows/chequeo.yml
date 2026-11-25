@@ -24,6 +24,9 @@ jobs:
           extensions: pdo, pdo_sqlite, zip, mbstring
           coverage: none
 
+      - name: Instalar PHPUnit (solo en el chequeo, vendor/ de producción no cambia)
+        run: composer install --no-interaction --no-progress
+
       - name: Sintaxis + migración de todos los clientes + cliente nuevo
         run: php tools/chequeo.php
 
