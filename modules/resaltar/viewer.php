@@ -163,7 +163,7 @@ $docIdForOcr = $documentId; // For OCR fallback
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Visor Resaltado - <?= htmlspecialchars($document['numero']) ?></title>
     <link rel="stylesheet" href="../../assets/css/styles.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="/assets/vendor/pdfjs/pdf.min.js"></script>
     <!-- M5: Mark.js removido — el visor usa OCR overlays, no text-layer marking -->
     <style>
         /* --- LAYOUT --- */
@@ -685,7 +685,7 @@ $docIdForOcr = $documentId; // For OCR fallback
 
     <script>
         // Configuración PDF.js
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.min.js';
 
         // --- VARS GLOBALES ---
         const viewerMode = '<?= $mode ?>';

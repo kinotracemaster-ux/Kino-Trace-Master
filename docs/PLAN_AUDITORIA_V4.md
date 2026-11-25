@@ -22,8 +22,8 @@ Triaje 0.11 y sección 4: respaldos automáticos con restauración probada (#21)
 
 | # | Mejora | Evidencia en el repo | Skill | Agente |
 |---|---|---|---|---|
-| 1 | **Cabeceras de seguridad** (CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS) en `.htaccess`/`config.php`. CSP en modo "solo reportar" primero: hay JS embebido y PDF.js desde cdnjs | `grep` no encuentra ninguna fuera de `local/arranque.php` | SEG | lector → escritor |
-| 2 | **PDF.js con SRI** (`integrity`) o copia local en `assets/vendor/` como zip.js; si cdnjs cae o se compromete, caen todos los visores | 0 `integrity` en `modules/` | SEG, FE | escritor |
+| 1 | ✅ HECHO (PR #36) **Cabeceras de seguridad** (CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS) en `.htaccess`/`config.php`. CSP en modo "solo reportar" primero: hay JS embebido y PDF.js desde cdnjs | `grep` no encuentra ninguna fuera de `local/arranque.php` | SEG | lector → escritor |
+| 2 | ✅ HECHO (PR #36) **PDF.js con SRI** (`integrity`) o copia local en `assets/vendor/` como zip.js; si cdnjs cae o se compromete, caen todos los visores | 0 `integrity` en `modules/` | SEG, FE | escritor |
 | 3 | **Límite de gasto de IA (Gemini)**: tope diario por cliente y por IP en `ai_*`/`smart_chat`, hoy solo hay un límite global por IP en archivo JSON | `helpers/rate_limiter.php`, `api.php:155-164` | SEG, OPS | lector → escritor |
 | 4 | **Escáner de secretos en CI** (gitleaks sobre todo el historial) + Dependabot (composer y Actions) + fijar Actions por commit. Hubo claves y datos en el historial en #20 | no hay workflow ni `dependabot.yml` | SEG, OPS | escritor |
 | 5 | **Tabla rol × recurso × acción** (admin / cliente / público) y un test por celda que hoy no esté en `chequeo_aislamiento.php` | solo cubre aislamiento entre clientes | SEG, QA | lector arma la tabla; Opus decide; escritor tests |

@@ -20,7 +20,7 @@ RUN echo "upload_max_filesize = 1024M" >> /usr/local/etc/php/conf.d/uploads.ini 
     && echo "memory_limit = 1024M" >> /usr/local/etc/php/conf.d/uploads.ini
 
 # Habilitar mod_rewrite de Apache y FIX para MPM conflict
-RUN a2dismod mpm_event && a2enmod mpm_prefork && a2enmod rewrite
+RUN a2dismod mpm_event && a2enmod mpm_prefork && a2enmod rewrite && a2enmod headers
 
 # Limitar workers de Apache para no saturar Railway
 RUN echo "<IfModule mpm_prefork_module>\n\
