@@ -1089,6 +1089,24 @@ $docIdForOcr = $documentId; // For OCR fallback
             scanState.viaTerms.set(m.term, v);
         }
 
+        // Regla del usuario: "1514-1", "1514-2", "1514-3"... comparten la base "1514".
+        // Si alguno de ellos (o la base sola) se encontró y quedó marcado en el PDF, los
+        // demás NO van en "Faltan": quedan como "cubiertos" por esa base.
+        // Devuelve { faltan: [términos], cubiertos: Map término → término hermano hallado }.
+        function clasificarTerminos() {
+            const { foundTermsSet } = scanState;
+            const claveGrupo = t => ktKeyOf(ktBaseSinSufijo(t) || t);
+            const hallado = new Map(); // clave de la base → un término hallado
+            foundTermsSet.forEach(t => { const k = claveGrupo(t); if (!hallado.has(k)) hallado.set(k, t); });
+            const faltan = [], cubiertos = new Map();
+            allTerms.forEach(t => {
+                if (foundTermsSet.has(t)) return;
+                const hermano = hallado.get(claveGrupo(t));
+                if (hermano) cubiertos.set(t, hermano); else faltan.push(t);
+            });
+            return { faltan, cubiertos };
+        }
+
         function updateScanStatus(isComplete, pagesScanned) {
             const statusDiv = document.getElementById('simpleStatus');
             if (!statusDiv || !scanState) return;
@@ -1109,7 +1127,13 @@ $docIdForOcr = $documentId; // For OCR fallback
                 </details>`
                 : '';
             const nExactos = foundTermsSet.size - soloVia.length;
-            const missingTerms = allTerms.filter(t => !foundTermsSet.has(t));
+            const { faltan: missingTerms, cubiertos } = clasificarTerminos();
+            const cubiertosHtml = cubiertos.size > 0
+                ? `<details class="nota-sin-sufijo"${notaAbierta ? ' open' : ''}>
+                    <summary>ℹ️ ${cubiertos.size} código${cubiertos.size > 1 ? 's' : ''} sin resaltado propio, pero su base sí está marcada</summary>
+                    <ul>${[...cubiertos].map(([t, h]) => `<li><b>${escHtml(t)}</b> · base marcada vía <b>${escHtml(h)}</b></li>`).join('')}</ul>
+                </details>`
+                : '';
             const pct = Math.round((pagesScanned / totalPages) * 100);
             let html = '';
 
@@ -1132,11 +1156,13 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             } else if (missingTerms.length === 0) {
                 html = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; font-size:0.9em;">
-                    ✅ <strong>Completo:</strong> ${soloVia.length === 0
+                    ✅ <strong>Completo:</strong> ${soloVia.length === 0 && cubiertos.size === 0
                         ? `Todo encontrado (${foundTermsSet.size} término${foundTermsSet.size > 1 ? 's' : ''}).`
-                        : nExactos === 0
-                            ? `Ninguno exacto; ${soloVia.length} resaltado${soloVia.length > 1 ? 's' : ''} sin el número final.`
-                            : `${nExactos} exacto${nExactos !== 1 ? 's' : ''} y ${soloVia.length} sin el número final.`}
+                        : [
+                            `${nExactos} exacto${nExactos !== 1 ? 's' : ''}`,
+                            soloVia.length ? `${soloVia.length} sin el número final` : '',
+                            cubiertos.size ? `${cubiertos.size} cubierto${cubiertos.size > 1 ? 's' : ''} por su base` : ''
+                          ].filter(Boolean).join(', ') + '.'}
                 </div>
                 <div style="margin-top:8px; background:#eff6ff; color:#1e40af; padding:8px; border-radius:6px; font-size:0.9em;">
                     📄 Resaltado en hojas: ${pages.join(', ')}
@@ -1158,14 +1184,14 @@ $docIdForOcr = $documentId; // For OCR fallback
                 }
             }
 
-            statusDiv.innerHTML = html + viaHtml;
+            statusDiv.innerHTML = html + viaHtml + cubiertosHtml;
         }
 
         // OCR profundo: solo términos faltantes, solo en hojas que se resolvieron por texto
         async function deepOcrMissing() {
             if (!scanState) return;
             const { pagesWithMatches, foundTermsSet } = scanState;
-            const missing = allTerms.filter(t => !foundTermsSet.has(t));
+            const missing = clasificarTerminos().faltan;
             const pages = [...textPages].sort((a, b) => a - b);
             if (missing.length === 0 || pages.length === 0) return;
 
