@@ -38,3 +38,6 @@ jobs:
 
       - name: Resaltado sin el "-N" final (1980-1 encuentra 1980)
         run: php tests/resaltado/chequeo_sin_sufijo.php
+
+      - name: PDF unificado voraz conserva todas las hojas
+        run: php tests/resaltado/chequeo_unir_pdfs.php
