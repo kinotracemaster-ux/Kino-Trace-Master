@@ -35,3 +35,19 @@ Options -Indexes
 <IfModule mod_alias.c>
     RedirectMatch 404 ^/(database_initial|backups|tests|docs|tools|vendor|\.git|\.agent)(/|$)
 </IfModule>
+
+# Cabeceras de seguridad (todas las respuestas; requiere mod_headers, activado en el Dockerfile)
+# - nosniff: el navegador no adivina el tipo de archivo
+# - X-Frame-Options/frame-ancestors: nadie puede incrustar la app en otra página (clickjacking)
+# - HSTS: solo HTTPS (el navegador lo ignora si entra por http, como en local)
+# - CSP en modo "solo reportar": NO bloquea nada; los avisos salen en la consola del navegador.
+#   Hay JS y estilos dentro de las páginas, por eso se permite 'unsafe-inline'. Cuando la consola
+#   salga limpia en todas las pantallas se cambia a Content-Security-Policy (que sí bloquea).
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Header always set Strict-Transport-Security "max-age=31536000"
+    Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'"
+</IfModule>

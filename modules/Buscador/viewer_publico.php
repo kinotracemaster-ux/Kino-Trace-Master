@@ -102,7 +102,7 @@ if (!empty($searchTerm)) {
     $cP = $clientConfig['color_primario'] ?? '#c41e3a';
     $cS = $clientConfig['color_secundario'] ?? '#333';
     ?>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="/assets/vendor/pdfjs/pdf.min.js"></script>
     <style>
         :root {
             --primary-color:
@@ -516,7 +516,7 @@ if (!empty($searchTerm)) {
     </footer>
 
     <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/vendor/pdfjs/pdf.worker.min.js';
 
         const pdfUrl = '<?= addslashes($pdfUrl) ?>';
         const termsToHighlight = <?= json_encode(array_values($termsToHighlight)) ?>.map(String).map(s => s.trim()).filter(Boolean);
