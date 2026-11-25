@@ -22,6 +22,8 @@ Subagentes en `.claude/agents/`. La sesión principal (Opus) es el **orquestador
 3. **`escritor`** (Sonnet): implementa ese plan concreto, corre `php -l` / `php tools/chequeo.php` / chequeos específicos y reporta el diff. No hace commit ni PR.
 4. El orquestador revisa el diff, pide correcciones al escritor si hace falta, y hace rama → commit → PR.
 
+**Interfaz (pantallas, CSS, JS, visores, Buscador, panel):** seguir la skill `.claude/skills/impeccable/SKILL.md` (variables de `styles.css`, componentes de `includes/components.php`, celular, accesibilidad, estados vacío/error/cargando, checklist de entrega). El orquestador se la indica al escritor y revisa el diff con ella.
+
 Preguntas simples o cambios de una línea no necesitan agentes. Para varias búsquedas independientes se pueden lanzar varios `lector` en paralelo.
 
 ## Commands

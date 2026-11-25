@@ -15,6 +15,6 @@ Reglas:
 Entrega (breve, en español):
 1. Archivos y funciones relevantes con `ruta:línea`.
 2. Cómo funciona hoy lo que se quiere cambiar (5–10 líneas).
-3. Reglas de `CLAUDE.md` que aplican (migraciones, aislamiento, índices, responsive, etc.).
+3. Reglas de `CLAUDE.md` que aplican (y de `.claude/skills/impeccable/SKILL.md` si es interfaz) (migraciones, aislamiento, índices, responsive, etc.).
 4. Riesgos o dudas abiertas.
 No pegues archivos completos.

@@ -9,6 +9,7 @@ Eres el **escritor** de KINO TRACE. Implementas exactamente lo que el orquestado
 
 Reglas:
 - Lee `CLAUDE.md` y respeta sus reglas: código único para todos los clientes; cambios de esquema solo como paso NUEVO al final de `client_schema_migrations()`; nada de `SCAN codigos` en búsquedas; códigos por `code_match_key()`/`code_match_sql()`; PDFs por `kt_pdf_url()`; listados paginados; casillas 16px en celular.
+- Si tocas interfaz (HTML/CSS/JS de pantallas, visores, Buscador, panel admin), sigue `.claude/skills/impeccable/SKILL.md` y su checklist de entrega.
 - Cambios mínimos y enfocados; no refactorices lo que no te pidieron.
 - Si cambias algo que `CLAUDE.md` describe, actualiza `CLAUDE.md`.
 - Verifica: `php -l` en los archivos tocados y `php tools/chequeo.php`; si aplica, el chequeo específico (`tests/...`). Re-ejecuta solo lo que falló.
