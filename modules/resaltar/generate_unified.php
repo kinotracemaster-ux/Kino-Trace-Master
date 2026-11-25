@@ -69,7 +69,14 @@ try {
 
     // pdfunite lee todos los PDFs (FPDI descartaba en silencio los de compresión moderna)
     require_once __DIR__ . '/../../helpers/unir_pdfs.php';
-    $union = kt_unir_pdfs($rutas, $outputPath);
+    // Solo las hojas necesarias: cada código sale en UNA hoja (la que cubre más códigos pendientes)
+    $listaCodigos = [];
+    foreach ((array) $codes as $c) {
+        foreach (preg_split('/[,;\t\n\r]+/', (string) $c, -1, PREG_SPLIT_NO_EMPTY) as $x) {
+            $listaCodigos[] = $x;
+        }
+    }
+    $union = kt_unir_pdfs_minimo($rutas, $listaCodigos, $outputPath);
     $pageCount = $union['paginas'];
     $omitidos = count($union['omitidos']) + (count($documents) - count($rutas));
 
@@ -96,7 +103,9 @@ try {
         'download_url' => $downloadUrl,
         'page_count' => $pageCount,
         'document_count' => count($documents),
-        'omitted_count' => $omitidos
+        'omitted_count' => $omitidos,
+        'original_pages' => $union['originales'],
+        'uncovered_codes' => $union['sin_cubrir']
     ]);
 
 } catch (Exception $e) {
