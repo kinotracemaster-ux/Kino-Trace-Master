@@ -11,6 +11,9 @@ class AiController extends BaseController
         if (!is_gemini_configured()) {
             $this->jsonExit(['error' => 'Gemini AI no configurado. Configure GEMINI_API_KEY.']);
         }
+        if (!kt_ia_consumir($this->db)) {
+            $this->jsonExit(['error' => 'Se llegó al límite diario de consultas de IA. Vuelve a intentarlo mañana o pide ampliarlo al administrador.', 'limite_ia' => true]);
+        }
 
         $documentId = (int) ($post['document_id'] ?? 0);
         $documentType = $post['document_type'] ?? 'documento';
@@ -37,6 +40,9 @@ class AiController extends BaseController
     {
         if (!is_gemini_configured()) {
             $this->jsonExit(['error' => 'Gemini AI no configurado']);
+        }
+        if (!kt_ia_consumir($this->db)) {
+            $this->jsonExit(['error' => 'Se llegó al límite diario de consultas de IA. Vuelve a intentarlo mañana o pide ampliarlo al administrador.', 'limite_ia' => true]);
         }
 
         $question = trim($post['question'] ?? '');
@@ -65,6 +71,9 @@ class AiController extends BaseController
     {
         if (!is_gemini_configured()) {
             $this->jsonExit(['error' => 'Gemini AI no configurado. Configure GEMINI_API_KEY.']);
+        }
+        if (!kt_ia_consumir($this->db)) {
+            $this->jsonExit(['error' => 'Se llegó al límite diario de consultas de IA. Vuelve a intentarlo mañana o pide ampliarlo al administrador.', 'limite_ia' => true]);
         }
 
         $question = trim($post['question'] ?? '');
