@@ -2,11 +2,15 @@
 # Dependabot solo abre PRs; nada se fusiona solo (siempre revisa el usuario).
 version: 2
 updates:
+  # composer: el vendor/ de producción va SUBIDO al repo, así que un PR de versión solo cambia
+  # composer.lock y deja vendor/ viejo (o rompe el chequeo, p. ej. PHPUnit 13 exige PHP 8.4).
+  # Con límite 0 Dependabot ya no propone subidas de versión; los avisos de SEGURIDAD de
+  # GitHub siguen llegando como PR. Para subir una librería: actualizar vendor/ a mano.
   - package-ecosystem: composer
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: /
     schedule:
