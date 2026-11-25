@@ -894,7 +894,13 @@ foreach ($clients as $cli) {
         .alert-error {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.2);
-            color: var(--accent-danger);
+            color: #b91c1c;
+        }
+
+        .alert-error a {
+            color: inherit;
+            text-decoration: underline;
+            font-weight: 600;
         }
 
         .clients-grid {
@@ -1144,6 +1150,12 @@ foreach ($clients as $cli) {
         </header>
 
         <div class="admin-container">
+            <?php
+            require_once __DIR__ . '/../helpers/respaldo.php';
+            foreach (kt_resp_alertas(CLIENTS_DIR) as $al): ?>
+                <div class="alert alert-error" role="alert">🛟 <?= htmlspecialchars($al['texto']) ?>
+                    <a href="respaldos.php">Ver respaldos</a></div>
+            <?php endforeach; ?>
             <?php if ($message): ?>
                 <div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
                 <?php if (!empty($orphanDocs)): ?>

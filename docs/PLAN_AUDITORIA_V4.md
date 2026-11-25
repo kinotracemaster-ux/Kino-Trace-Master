@@ -52,8 +52,8 @@ Triaje 0.11 y sección 4: respaldos automáticos con restauración probada (#21)
 |---|---|---|---|
 | 14 | **PHPUnit de verdad en CI**: `composer.json` no declara `require-dev`; los tests de `tests/Api` no corren. Agregar `phpunit/phpunit` y un paso en `chequeo.yml` | QA, OPS | escritor |
 | 15 | **Copia fuera del volumen** (Cloudflare R2): código listo (`KT_S3_*`), falta decisión y credenciales del usuario. Cumple "copia fuera de la cuenta principal" | OPS | usuario decide; escritor solo verifica |
-| 16 | **Alertas**: aviso si el respaldo automático no corre en 48 h o si el chequeo de integridad falla (hoy solo queda en log/panel) | OPS | escritor |
-| 17 | **Health check real** (`/salud.php`: base central y volumen escribibles) en vez de `/login.php` | OPS | escritor |
+| 16 | ✅ HECHO **Alertas**: aviso si el respaldo automático no corre en 48 h o si el chequeo de integridad falla (hoy solo queda en log/panel) | OPS | escritor |
+| 17 | ✅ HECHO **Health check real** (`/salud.php`: base central y volumen escribibles) en vez de `/login.php` | OPS | escritor |
 | 18 | Entorno reproducible: `docs/` con "clonar → corriendo en 10 min" y datos de semilla (ya existe plantilla `kino`) | OPS | lector + escritor |
 
 ### P5 · Datos personales (Colombia, Ley 1581) — requiere criterio legal
