@@ -235,7 +235,7 @@ while ($row = $allDocsStmt->fetch(PDO::FETCH_ASSOC)) {
                             </svg>
                             Vincular Docs
                         </a>
-                        <a href="../sincronizar/" class="btn btn-primary" style="background: #10b981;">
+                        <a href="../sincronizar/" class="btn btn-primary" style="background: #047857;">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none"
                                 viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
