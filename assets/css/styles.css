@@ -15,8 +15,8 @@
     --bg-hover: #e2e8f0;
 
     /* Accent */
-    --accent-primary: #3b82f6;
-    --accent-primary-hover: #2563eb;
+    --accent-primary: #2563eb;
+    --accent-primary-hover: #1d4ed8;
     --accent-secondary: #64748b;
     --accent-success: #10b981;
     --accent-warning: #f59e0b;
@@ -24,8 +24,8 @@
 
     /* Text */
     --text-primary: #1e293b;
-    --text-secondary: #64748b;
-    --text-muted: #94a3b8;
+    --text-secondary: #475569;
+    --text-muted: #566579;
     --text-inverse: #ffffff;
 
     /* Borders */
@@ -525,12 +525,12 @@ button {
 }
 
 .btn-danger {
-    background: var(--accent-danger);
+    background: #dc2626;
     color: var(--text-inverse);
 }
 
 .btn-danger:hover {
-    background: #dc2626;
+    background: #b91c1c;
 }
 
 .btn-icon {
@@ -1026,6 +1026,7 @@ button {
 
 .app-footer a {
     color: var(--accent-primary);
+    text-decoration: underline;
 }
 
 /* Import Google Fonts */

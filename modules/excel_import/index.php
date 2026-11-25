@@ -240,7 +240,7 @@ $pageTitle = 'Importación Masiva (CSV)';
                     <div class="import-grid">
                         <!-- CSV/Excel Upload -->
                         <div class="upload-card" id="fileZone">
-                            <input type="file" name="excel_file" accept=".csv,.xlsx" class="file-input" required
+                            <input type="file" name="excel_file" accept=".csv,.xlsx" class="file-input" aria-label="Archivo CSV o Excel" required
                                 onchange="handleFileSelect(this)">
                             <div id="fileArea">
                                 <div class="upload-icon">📊</div>

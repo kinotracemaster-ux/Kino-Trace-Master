@@ -115,6 +115,15 @@ async function contexto(browser, opts, quien) {
                     return { desborde: document.documentElement.scrollWidth - W, zoom };
                 });
                 const etiqueta = `${vista.padEnd(10)} ${nombre}`;
+                if (process.env.KT_AXE && vista === 'computador') {
+                    // Accesibilidad (WCAG 2.x A/AA) con axe-core; solo informa, no falla.
+                    await p.addScriptTag({ path: process.env.KT_AXE });
+                    const r = await p.evaluate(() => axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] })
+                        .then(x => x.violations.map(v => ({ id: v.id, impact: v.impact, n: v.nodes.length, ej: v.nodes[0].target.join(' ').slice(0, 70) }))));
+                    for (const v of r) console.log(`AXE   ${nombre}: ${v.id} (${v.impact}) x${v.n}  ej: ${v.ej}`);
+                    const criticos = r.filter(v => v.impact === 'critical').map(v => v.id);
+                    ok(criticos.length === 0, `computador ${nombre}: sin fallas críticas de accesibilidad${criticos.length ? ' (' + criticos.join(', ') + ')' : ''}`);
+                }
                 ok(resp && resp.status() === 200, `${etiqueta}: abre (${resp ? resp.status() : 'sin respuesta'}, ${ms} ms)`);
                 ok(m.desborde <= 1, `${etiqueta}: no se sale de lado${m.desborde > 1 ? ` (sobran ${m.desborde}px)` : ''}`);
                 if (vista === 'celular') ok(m.zoom.length === 0, `${etiqueta}: casillas sin zoom en iPhone${m.zoom.length ? ' (' + m.zoom.slice(0, 4).join(', ') + ')' : ''}`);

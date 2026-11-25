@@ -1509,7 +1509,7 @@ foreach ($clients as $cli) {
                     <form id="batchZipForm" enctype="multipart/form-data">
                         <div class="form-group">
                             <label class="form-label">Cliente destino *</label>
-                            <select class="form-select" name="client_code" id="batchClient" required>
+                            <select class="form-select" aria-label="Cliente" name="client_code" id="batchClient" required>
                                 <option value="">Seleccione cliente...</option>
                                 <?php foreach ($clientCodes as $c): ?>
                                     <option value="<?= htmlspecialchars($c) ?>" <?= (!empty($createdClientCode) && $c === $createdClientCode) ? 'selected' : '' ?>>
@@ -2560,6 +2560,7 @@ foreach ($clients as $cli) {
         }
     </script>
 
+<script src="/assets/js/a11y-labels.js"></script>
 </body>
 
 </html>

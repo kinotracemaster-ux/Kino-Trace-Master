@@ -42,8 +42,8 @@ Triaje 0.11 y sección 4: respaldos automáticos con restauración probada (#21)
 
 | # | Mejora | Skill | Agente |
 |---|---|---|---|
-| 11 | **Panel admin sigue desbordando en celular** (777 px, pendiente de #24/#25): tablas en contenedor con scroll, tarjetas apiladas | FE | escritor; chequeo_ux ya lo valida |
-| 12 | **Accesibilidad WCAG 2.2 AA básica**: `aria-label`/`alt`, foco visible, contraste, objetivos táctiles ≥ 24 px; agregar axe a `chequeo_ux.js`. Solo 3 archivos de módulos usan `aria-`/`alt` | FE, QA | lector mide; escritor corrige |
+| 11 | ✅ YA ESTABA (el chequeo UX pasa el panel admin en celular) **Panel admin sigue desbordando en celular** (777 px, pendiente de #24/#25): tablas en contenedor con scroll, tarjetas apiladas | FE | escritor; chequeo_ux ya lo valida |
+| 12 | 🟡 AVANZADO (críticos en 0, contraste base arreglado; faltan ~5 pantallas con contrastes sueltos) **Accesibilidad WCAG 2.2 AA básica**: `aria-label`/`alt`, foco visible, contraste, objetivos táctiles ≥ 24 px; agregar axe a `chequeo_ux.js`. Solo 3 archivos de módulos usan `aria-`/`alt` | FE, QA | lector mide; escritor corrige |
 | 13 | Estados claros: pendiente / completado / fallido en subida, enlazar PDFs e indexar (ya hay `partial/done`; revisar el resto) | FE | escritor |
 
 ### P4 · Continuidad y calidad de ingeniería

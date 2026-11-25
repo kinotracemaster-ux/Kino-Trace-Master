@@ -338,7 +338,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['zip_file'])) {
                         <div class="upload-options">
                             <div class="option-card">
                                 <label class="form-label">Tipo de documento</label>
-                                <select name="doc_type" class="form-select">
+                                <select name="doc_type" aria-label="Tipo de documento" class="form-select">
                                     <option value="documento">Documento General</option>
                                     <option value="manifiesto">Manifiesto</option>
                                     <option value="declaracion">Declaración</option>

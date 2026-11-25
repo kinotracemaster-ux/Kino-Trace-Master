@@ -28,8 +28,10 @@ jobs:
 
       - name: Instalar navegador de pruebas
         run: |
-          npm install --no-save --no-package-lock playwright@1.63.0
+          npm install --no-save --no-package-lock playwright@1.63.0 axe-core@4.10.2
           npx playwright install --with-deps chromium
 
       - name: UX en celular y computador
+        env:
+          KT_AXE: node_modules/axe-core/axe.min.js
         run: node tests/ux/chequeo_ux.js
