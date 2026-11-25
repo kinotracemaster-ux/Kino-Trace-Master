@@ -330,10 +330,22 @@ if (!empty($searchTerm)) {
             animation: hlFadeIn 0.2s ease-out both;
         }
 
+        .ocr-hl-overlay div.hl-sin-sufijo {
+            outline: 2px dashed #b45309;
+        }
+
         .ocr-hl-overlay div.hl-active {
             background: rgba(255, 120, 0, 0.75);
             outline: 2px solid rgba(200, 80, 0, 0.95);
         }
+
+        /* Aviso discreto de códigos resaltados sin su "-N" final */
+        #navBar { flex-wrap: wrap; }
+        #notaSinSufijo {
+            flex-basis: 100%; text-align: center;
+            color: #cbd5e1; font-size: 12.5px; line-height: 1.4;
+        }
+        #notaSinSufijo b { color: #fde68a; font-weight: 600; }
 
         /* Footer */
         .public-footer {
@@ -477,6 +489,8 @@ if (!empty($searchTerm)) {
         <span id="navCounter">–</span>
         <button class="nav-btn" id="btnNext" onclick="navNext()">Siguiente →</button>
         <span id="navTotal"></span>
+        <!-- Aviso discreto: códigos resaltados sin su "-N" final (1980-1 → 1980) -->
+        <div id="notaSinSufijo" hidden></div>
     </div>
 
     <!-- Visor PDF -->
@@ -860,6 +874,7 @@ if (!empty($searchTerm)) {
                 const rect = document.createElement('div');
                 rect.dataset.match = hl.match ?? i;
                 rect.title = hl.via ? `${hl.term} (en el PDF: ${hl.via})` : (hl.term || '');
+                if (hl.via) rect.classList.add('hl-sin-sufijo');
                 rect.style.left = ((hl.x - padX) * sx) + 'px';
                 rect.style.top = ((hl.y - padY) * sy) + 'px';
                 rect.style.width = ((hl.w + padX * 2) * sx) + 'px';
@@ -999,7 +1014,31 @@ if (!empty($searchTerm)) {
             return scanPromise;
         }
 
+        // Lista discreta de los códigos que NO están exactos en el documento y se
+        // resaltaron sin su "-N" final, para que quede claro qué se resaltó
+        function mostrarNotaSinSufijo() {
+            const nota = document.getElementById('notaSinSufijo');
+            if (!nota) return;
+            const exactos = new Set();
+            const via = new Map(); // término → { via, pages }
+            [...pageResults.keys()].sort((a, b) => a - b).forEach(page => {
+                (pageResults.get(page).matches || []).forEach(m => {
+                    if (!m.via) { exactos.add(m.term); return; }
+                    const v = via.get(m.term) || { via: m.via, pages: new Set() };
+                    v.pages.add(page);
+                    via.set(m.term, v);
+                });
+            });
+            const solo = [...via].filter(([t]) => !exactos.has(t));
+            if (!solo.length) { nota.hidden = true; return; }
+            const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            nota.innerHTML = `ℹ️ No está exacto en el documento, se resaltó sin el número final (borde punteado): `
+                + solo.map(([t, v]) => `<b>${esc(t)}</b> → <b>${esc(v.via)}</b> (hoja${v.pages.size > 1 ? 's' : ''} ${[...v.pages].join(', ')})`).join(' · ');
+            nota.hidden = false;
+        }
+
         function showResult() {
+            mostrarNotaSinSufijo();
             const btn = document.getElementById('btnResaltar');
             if (!btn) return;
             const n = navItems.length;
